@@ -5,8 +5,9 @@ Desktopowa aplikacja dla **Grok (xAI)** w stylu **Claude Code / Codex** — czat
 > **Status:** Fazy 0–8 wykonane (2026-06-03); plan i status faz: [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md).
 > Nadbudowa (Image/Video/Voice/załączniki) — żywa specyfikacja: [`docs/MODYFIKACJE.md`](docs/MODYFIKACJE.md);
 > hardening do jakości produkcyjnej (P0–P3): [`docs/PLAN_NAPRAWY.md`](docs/PLAN_NAPRAWY.md).
-> Aplikacja customtkinter zdemotowana do [`archive/`](archive/) (fallback). Pozostaje finalne usunięcie archiwum
-> po weryfikacji nowej aplikacji z ważnymi poświadczeniami xAI.
+> Aplikacja customtkinter (legacy) została **usunięta z repo** (zachowana jako kopia zewnętrzna) —
+> domknięcie Fazy 8. Realne ścieżki xAI (czat/media/głos/OAuth/agent) weryfikuje użytkownik z ważnymi
+> poświadczeniami — sandbox blokuje TLS do `api.x.ai`.
 
 To monorepo to przebudowa wcześniejszej aplikacji w customtkinter (Python) na architekturę **Electron (frontend) + Python sidecar (backend)**. Dojrzała logika xAI (OAuth, streaming, media) jest **reużyta**, nie przepisywana od zera.
 
@@ -37,22 +38,37 @@ To monorepo to przebudowa wcześniejszej aplikacji w customtkinter (Python) na a
 
 ```
 grok_desktop_app/
-├── docs/REBUILD_PLAN.md     # plan przebudowy + status faz (źródło prawdy)
-├── grok_core/               # backend-sidecar (FastAPI)
-│   ├── server.py            # montaż tras, app.state (token/backend), lifespan
-│   ├── state.py             # Backend: managery, klucze, workspace, zależności
-│   ├── routes/              # auth, models, settings, chat, media, voice, system, fs, git, permissions, agent, terminal
-│   ├── agent/               # workspace(sandbox), permissions, tools, llm, session
-│   ├── tools/               # self-checki (handshake_check, api_smoke, agent_selfcheck)
-│   └── requirements.txt
-├── desktop/                 # frontend Electron + React + TS  (zob. desktop/README.md)
+│
+├── desktop/                 # FRONTEND — Electron + React 19 + TS  (zob. desktop/README.md)
 │   └── src/{main,preload,renderer}
-├── config.py · api_manager.py · oauth_manager.py · chats_manager.py · history_manager.py
-│                            # WSPÓŁDZIELONY RDZEŃ xAI — reużywany przez grok_core; zostaje w korzeniu
-├── make_icon.py             # generator ikony (współdzielony: desktop/ i archive/)
-├── grok_core_sidecar.py · grok_core.spec · build_sidecar.ps1   # pakowanie sidecara (PyInstaller)
-├── archive/                 # stara aplikacja customtkinter (ARCHIWUM/FALLBACK): app.py, ui_utils.py, build.ps1, run.bat…
-└── README.md
+│
+├── grok_core/               # BACKEND — sidecar FastAPI  (zob. grok_core/README.md)
+│   ├── server.py            #   montaż tras, app.state (token/backend), lifespan
+│   ├── state.py             #   Backend: managery, klucze, workspace, zależności
+│   ├── routes/              #   auth, models, settings, chat, media, voice, system, fs, git, permissions, agent, terminal
+│   ├── agent/               #   workspace(sandbox), permissions, tools, llm, session
+│   ├── tools/               #   self-checki (handshake_check, api_smoke, agent_selfcheck, sidecar_smoke)
+│   ├── errors.py · validation.py    #   wspólne helpery tras (sanityzacja błędów, limity wejścia)
+│   └── requirements.txt · requirements.lock   #   zależności (luźne) + przypięte (powtarzalny build)
+│
+├── docs/                    # DOKUMENTACJA  (indeks: docs/README.md)
+│   ├── REBUILD_PLAN.md      #   plan przebudowy (Fazy 0–8) + §13 „Faza 9" (stan obecny)
+│   ├── MODYFIKACJE.md       #   nadbudowa: Image/Video/Voice/załączniki (żywa specyfikacja)
+│   └── PLAN_NAPRAWY.md      #   plan napraw/hardeningu (P0–P3) — zrealizowany
+│
+├── .github/workflows/ci.yml # CI: self-checki backendu + typecheck frontu
+├── .gitignore · CLAUDE.md · README.md          # meta repo
+│
+└── ─── WSPÓŁDZIELONY RDZEŃ xAI + pakowanie — ZOSTAJE W KORZENIU ───
+    (NIE przenosić/zmieniać nazw — patrz CLAUDE.md „single most important structural fact":
+     łamie importy grok_core, build PyInstaller i — przez położenie config.py — ścieżki danych)
+      config.py               # ścieżki/DATA_DIR, modele, OAuth, design tokens (jego LOKALIZACJA ustala ścieżki danych)
+      api_manager.py          # klient xAI: chat/stream, images, video, tts/stt, list_models
+      oauth_manager.py        # OAuth PKCE (auth.x.ai) + lokalny callback (z fallbackiem portu)
+      chats_manager.py        # magazyn rozmów (grok_chats.json)
+      history_manager.py      # historia mediów (wyłączny właściciel grok_config.json)
+      make_icon.py            # generator appicon.ico (referencja w config.ICON_FILE)
+      grok_core_sidecar.py · grok_core.spec · build_sidecar.ps1   # pakowanie sidecara (PyInstaller onedir)
 ```
 
 ---
@@ -120,16 +136,17 @@ grok_core\.venv\Scripts\python grok_core\tools\agent_selfcheck.py   # narzędzia
 - Pakowanie do instalatora `.exe` — gotowe (Faza 7): sidecar PyInstaller zbudowany i przetestowany; instalator NSIS przez `cd desktop && npm run dist` (pobiera NSIS/electron z sieci — uruchamiane u użytkownika).
 
 ## Dokumentacja
+- [`docs/README.md`](docs/README.md) — **indeks dokumentacji** (od czego zacząć, co gdzie szukać).
 - [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md) — plan przebudowy, decyzje, status faz 0–8, ryzyka (§13 = stan obecny).
 - [`docs/MODYFIKACJE.md`](docs/MODYFIKACJE.md) — nadbudowa (Image/Video/Voice/załączniki) — żywa specyfikacja.
 - [`docs/PLAN_NAPRAWY.md`](docs/PLAN_NAPRAWY.md) — plan napraw/hardeningu (P0–P3) i postęp.
 - [`desktop/README.md`](desktop/README.md) — frontend (skrypty, struktura, interpreter Pythona).
 - [`grok_core/README.md`](grok_core/README.md) — backend (instalacja, endpointy, self-checki).
 
-## Aplikacja legacy (archiwum/fallback)
-Stara aplikacja customtkinter została przeniesiona do [`archive/`](archive/) i pełni rolę
-fallbacku. Uruchomienie: `cd archive && python app.py` (lub dwuklik `archive\run.bat`).
-**Współdzieli pliki danych** z nową aplikacją, bo rdzeń (`config`, `api_manager`,
-`oauth_manager`, `chats_manager`, `history_manager`) pozostaje w korzeniu repo i jest
-reużywany przez `grok_core` — dlatego ścieżki danych się nie zmieniły. Zostanie usunięta
-po pełnej weryfikacji nowej aplikacji. Szczegóły: [`archive/README.md`](archive/README.md).
+## Aplikacja legacy (customtkinter)
+Stara aplikacja customtkinter **została usunięta z tego repo** (zachowana jako kopia zewnętrzna) —
+domknięcie Fazy 8. Współdzielony rdzeń xAI (`config.py`, `api_manager.py`, `oauth_manager.py`,
+`chats_manager.py`, `history_manager.py`) **pozostaje w korzeniu** — nie ze względu na legacy, lecz
+bo reużywa go sidecar `grok_core` (importy top-level) i build PyInstaller, a `config.py` swoim
+położeniem wyznacza ścieżki danych. Aby ponownie uruchomić legacy z kopii, trzeba obok niej umieścić
+te moduły rdzenia (wtedy użyje własnego `config.py` → własnego katalogu danych).

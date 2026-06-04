@@ -1,7 +1,7 @@
 # Plan przebudowy: „AI Studio Pro" → desktopowa aplikacja Grok w stylu Claude Code / Codex
 
-> **Status:** Fazy 0–8 WYKONANE (2026-06-03). Legacy customtkinter zdemotowane do `legacy/` (fallback);
-> finalne USUNIĘCIE legacy odłożone do czasu weryfikacji nowej apki z poświadczeniami xAI.
+> **Status:** Fazy 0–8 WYKONANE (2026-06-03). Legacy customtkinter **USUNIĘTY z repo (2026-06-04)** —
+> Faza 8 domknięta; stara apka zachowana jako kopia zewnętrzna (poza repo).
 > **Data:** 2026-06-02 (utworzenie), 2026-06-03 (Fazy 0–8)
 > **Dokument źródłowy decyzji:** ten plik jest źródłem prawdy dla **Faz 0–8** (poniżej — zapis historyczny).
 >
@@ -220,7 +220,7 @@ Definicje w formacie function-calling xAI (jak obecne `CHAT_TOOLS`).
 | ✅ **5. Moduł Code (UI)** | Drzewo plików, edytor (CodeMirror) + diff, xterm.js, czat agenta, karty zatwierdzeń, picker modelu. | **UKOŃCZONA (2026-06-03)** — szczegóły w sekcji „Status Fazy 5" poniżej. |
 | ✅ **6. Uprawnienia/git/polish** | Karty approval (Accept/Reject/Always), allowlista sesji, panel git, recent workspaces, skróty. | **UKOŃCZONA (2026-06-03)** — szczegóły w sekcji „Status Fazy 6" poniżej. |
 | ✅ **7. Pakowanie** | PyInstaller onedir sidecar + electron-builder NSIS, health-check/restart, smoke-testy. | **UKOŃCZONA (2026-06-03)** — szczegóły w sekcji „Status Fazy 7" poniżej. |
-| ◑ **8. Wygaszenie starej apki** | customtkinter jako legacy/fallback, potem usunięcie po weryfikacji. | **DEMOTACJA WYKONANA (2026-06-03)** — legacy w `legacy/`; usunięcie po weryfikacji. Sekcja „Status Fazy 8" poniżej. |
+| ✅ **8. Wygaszenie starej apki** | customtkinter jako legacy/fallback, potem usunięcie. | **UKOŃCZONA** — demotacja do `archive/` (2026-06-03), **usunięcie z repo (2026-06-04)**; kopia zewnętrzna. Sekcja „Status Fazy 8" poniżej. |
 
 ---
 
@@ -500,7 +500,7 @@ Definicje w formacie function-calling xAI (jak obecne `CHAT_TOOLS`).
 - **Legacy importuje się po przenosinach**: `Python310 -c "import app"` z `legacy/` → „LEGACY IMPORT OK" (`app` + `config` + `ui_utils` rozwiązane przez shim; Python310 ma customtkinter/Pillow/dotenv). Pełnego GUI nie odpalamy headless — testuje użytkownik.
 - Artefakty buildu legacy (`legacy/dist`, `legacy/build`, `legacy/Output`, `appicon.ico`) są już objęte `.gitignore` (wzorce katalogowe bez wiodącego `/`).
 
-**Pozostało (Krok 2 — po stronie/decyzji użytkownika):** po potwierdzeniu, że nowa aplikacja działa end-to-end z xAI (czat, media, OAuth, przebieg agenta), **usunąć `legacy/`** i ewentualnie root `requirements.txt`/`DISTRIBUTION.md` z historii. Do tego czasu legacy jest sprawnym fallbackiem.
+**Krok 2 — WYKONANY (2026-06-04):** użytkownik zrobił pełną kopię zapasową na osobnym dysku i **usunął `archive/` z repo** (`git rm -r archive`). Stara apka nie jest już śledzona — pozostaje jako kopia zewnętrzna. Współdzielony rdzeń (`config.py` itd.) **zostaje w korzeniu** — wymaga go sidecar `grok_core` i build PyInstaller, niezależnie od legacy (patrz „single most important structural fact" w `CLAUDE.md`).
 
 ---
 

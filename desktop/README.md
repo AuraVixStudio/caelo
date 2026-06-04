@@ -48,7 +48,7 @@ npm run dist:full
   W trybie spakowanym (`app.isPackaged`) proces główny uruchamia `grok-core.exe` z `resources`
   (`windowsHide` ukrywa jego konsolę), zamiast `python -m grok_core`.
 - **Dane**: w wersji spakowanej sidecar ma `sys.frozen=True`, więc `config.DATA_DIR` =
-  `%LOCALAPPDATA%\AI Studio Pro` (współdzielone z legacy app do Fazy 8).
+  `%LOCALAPPDATA%\AI Studio Pro` (dawniej współdzielone z legacy app — usuniętą w Fazie 8).
 - **Ikona**: `desktop\build\icon.ico` (dołączona; wygenerowana z `..\make_icon.py`, komplet 16–256 px) —
   electron-builder wykrywa ją automatycznie. Aby zmienić logo, podmień ten plik.
 - **Nadzór**: proces główny robi health-check `/health` co 10 s i restartuje sidecar po padzie

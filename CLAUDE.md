@@ -9,7 +9,8 @@ generation & editing, and an **agentic coding module** with local file access. I
 **monorepo rebuild** of an older customtkinter (Python) app into **Electron (frontend) +
 Python FastAPI sidecar (backend)**. The mature xAI logic (OAuth, SSE streaming, media) is
 **reused, not rewritten**. Full plan & phase status live in [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md)
-(source of truth). The old app is demoted to [`archive/`](archive/) as a fallback.
+(source of truth). The old customtkinter app has been **removed from the repo** (kept as an external
+backup) — Phase 8 closed.
 
 ## The single most important structural fact
 
@@ -17,8 +18,9 @@ The shared xAI core lives at the **repo root**, NOT inside `grok_core/`:
 `config.py`, `api_manager.py`, `oauth_manager.py`, `chats_manager.py`, `history_manager.py`,
 and `make_icon.py`. The `grok_core` sidecar imports these as top-level modules (`import config`,
 `from api_manager import APIManager`, …) — `grok_core/__init__.py` prepends the repo root to
-`sys.path` at import time so this works. `archive/app.py` reuses them via its own `sys.path` shim,
-and `grok_core.spec` declares them as `hiddenimports` with `pathex='.'`.
+`sys.path` at import time so this works, and `grok_core.spec` declares them as `hiddenimports`
+with `pathex='.'`. (The now-removed `archive/app.py` also reused them via a `sys.path` shim — hence
+they predate the sidecar — but the binding constraint is the sidecar + PyInstaller + data paths.)
 
 **Do not move, rename, or restructure these root modules.** Doing so breaks `grok_core` imports,
 the PyInstaller build, and (via `config.py`) every data-file path. New backend code belongs in
@@ -120,15 +122,14 @@ npm run dist:full      # all of the above in one shot
 machine. Packaged sidecar runs with `sys.frozen=True`, which moves `config.DATA_DIR` to
 `%LOCALAPPDATA%\AI Studio Pro`.
 
-**Legacy fallback app** (customtkinter, now archived in `archive/`; shares data files with the new app):
-```powershell
-cd archive; python app.py        # or double-click archive\run.bat
-```
+The legacy customtkinter app has been removed from the repo (kept as an external backup); there is no
+longer a `cd archive; python app.py` fallback here.
 
 ## Data files (ownership rules — easy to corrupt)
 
 All resolved in [`config.py`](config.py). Dev: alongside the repo. Packaged (`IS_FROZEN`):
-`%LOCALAPPDATA%\AI Studio Pro`. The new app and legacy app share these files.
+`%LOCALAPPDATA%\AI Studio Pro`. (Historically these were shared with the legacy app; a separately
+run external copy would use its own `config.py`, hence its own data dir.)
 
 - `grok_config.json` — **owned exclusively by `HistoryManager`**, rewritten wholesale (history /
   chat_history / save_path only). Never write anything else here — it wipes the data.
@@ -143,8 +144,8 @@ The API key is **stored but never returned** by `/settings` (only `has_api_key`)
 
 - **All user-facing UI text MUST be in English** — every `text=`, title, dialog, button, media
   caption, tool/OAuth string. Code comments and docstrings may stay in Polish (much of the existing
-  code is). The regex in legacy `_looks_like_media_request` intentionally contains Polish patterns
-  because it matches *user input*, not displayed text.
+  code is). Note: regexes that match *user input* (not displayed text) may legitimately contain Polish
+  patterns — that's not a UI-language violation.
 - **SSE/streaming must be decoded as explicit UTF-8.** `requests` guesses ISO-8859-1 for
   `text/event-stream`, which mangles non-ASCII (e.g. Polish) characters. The reused
   `api_manager.chat_completion_stream` uses `iter_lines(decode_unicode=False)` + `.decode("utf-8")`
@@ -182,5 +183,3 @@ The API key is **stored but never returned** by `/settings` (only `has_api_key`)
   blocks `api.x.ai`. The self-checks above mock xAI.
 - The **Terminal** module needs `pip install pywinpty` in the backend venv (the agent's
   `run_command` tool works without it).
-- The legacy GUI cannot run headless; importing `archive/app.py` catches import/MRO errors but the
-  window only builds under `__main__`.
