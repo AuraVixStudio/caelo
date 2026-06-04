@@ -9,6 +9,17 @@
 
 ---
 
+## Status (2026-06-04)
+
+**Backend M9 — UKOŃCZONY (B1–B5).** B6 pominięty (zrealizowany przez B2 — patrz niżej).
+Commity: `38863c9` B1 (magazyn SQLite/FTS5 + `history_check`), `3991357` B2 (rejestracja
+zdarzeń ze wszystkich trybów), `ed75f2e` B3 (REST `/history`,`/artifacts` + fix kolizji),
+`166ac57` B4 (send-to bus → blok wejściowy), `c4cc512` B5 (projekt jako scope).
+Selfchecki: `history_check` 59 PASS, `api_smoke` rozszerzony, `agent_selfcheck` + typecheck bez regresji.
+**Następne: frontend F1–F6.**
+
+---
+
 ## 0. Koncept spinający: Artefakt
 
 Sercem M9 jest jeden typ: **Artifact** — znormalizowany rekord dowolnej treści, która
@@ -97,6 +108,12 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **Selfcheck:** `history_check` — filtr `project_id` izoluje zdarzenia poprawnie.
 
 ### M9-B6 [P1] Most czatu do historii (addytywny)  — S
+> **STATUS (2026-06-04): POMINIĘTY — zrealizowany przez B2.** Decyzja: B2 już zapisuje czat
+> serwerowo (event `mode=chat` po każdej turze WS, z promptem usera w `meta`/FTS), więc DoD B6
+> („wiadomość czatu znajdowana przez `GET /history?q=...`") jest spełniony bez osobnej trasy
+> renderer→event. Dodatkowy `POST /history/event` byłby źródłem duplikatów. `localStorage`
+> (`useConversations`) zostaje fast-path/cache'em. Gdyby pojawiła się potrzeba pushu zdarzeń
+> nie-streamowanych z UI, można dodać tę trasę później (z dedup względem B2).
 - **Cel:** czat (dziś w `localStorage`) jest widoczny w jednej historii, bez wyrywania `useConversations`.
 - **Zakres:** trasa `POST /history/event` (lub piggyback na B2) wywoływana przez renderer po wysłaniu/
   odebraniu wiadomości; `localStorage` zostaje cache'em/fast-path.
