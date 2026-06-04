@@ -39,6 +39,10 @@ MAX_MEDIA_BYTES = 256 * 1024 * 1024  # 256 MB (wideo bywa duże, ale nie nieogra
 class Backend:
     """Reużyte managery legacy + logika kluczy, ustawień i zapisu mediów."""
 
+    # M9-B5: aktywny projekt (scope historii/artefaktów). Atrybut KLASOWY, by
+    # instancje budowane przez __new__ (testy) też miały bezpieczny default None.
+    current_project_id: Optional[str] = None
+
     def __init__(self) -> None:
         from grok_core.agent.permissions import PermissionGate
 
@@ -53,13 +57,23 @@ class Backend:
         self._workspace = None  # agent/IDE workspace (Workspace | None)
         # Trwała allowlista agenta ("Always allow") współdzielona przez WS i REST.
         self.permissions = PermissionGate(config.PERMISSIONS_FILE)
+        # M9-B5: ostatnio wybrany projekt (przeżywa restart przez grok_settings.json).
+        self.current_project_id = self.read_settings().get("current_project_id")
 
     # --- workspace agenta kodowania (Faza 4) ---
     def set_workspace(self, path: str):
         from grok_core.agent.workspace import Workspace
 
         self._workspace = Workspace(path)
-        self._record_recent(self._workspace.root.as_posix())
+        root = self._workspace.root.as_posix()
+        self._record_recent(root)
+        # M9-B5: workspace kodu staje się aktywnym projektem (most, nie duplikat) —
+        # dzięki temu czat/media/voice w tej sesji też trafiają do tego projektu.
+        try:
+            proj = self.history_store.ensure_project_for_root(root, name=self._workspace.root.name)
+            self.select_project(proj.id)
+        except Exception:
+            log.warning("Could not bind workspace to a project", exc_info=True)
         return self._workspace
 
     def get_workspace(self):
@@ -136,24 +150,57 @@ class Backend:
     def record_event(self, *, mode: str, text: str = "", artifact_id=None,
                      project_id=None, meta=None):
         """Dorzuć zdarzenie do wspólnej, przeszukiwalnej historii huba (M9-B2).
-        NIGDY nie wywraca ścieżki użytkownika — błąd magazynu jest logowany i
-        połykany (historia jest poboczna wobec właściwej operacji)."""
+        Bez jawnego `project_id` stempluje AKTYWNYM projektem (M9-B5). NIGDY nie
+        wywraca ścieżki użytkownika — błąd magazynu jest logowany i połykany."""
+        pid = project_id if project_id is not None else self.current_project_id
         try:
             return self.history_store.record_event(
                 mode=mode, text=text or "", artifact_id=artifact_id,
-                project_id=project_id, meta=meta,
+                project_id=pid, meta=meta,
             )
         except Exception:
             log.warning("Could not record history event (mode=%s)", mode, exc_info=True)
             return None
 
     def add_artifact(self, **kwargs):
-        """Zarejestruj artefakt (obraz/wideo/audio/...) w magazynie huba. Połyka błędy."""
+        """Zarejestruj artefakt (obraz/wideo/audio/...) w magazynie huba. Bez jawnego
+        `project_id` stempluje aktywnym projektem (M9-B5). Połyka błędy."""
+        if kwargs.get("project_id") is None:
+            kwargs["project_id"] = self.current_project_id
         try:
             return self.history_store.add_artifact(**kwargs)
         except Exception:
             log.warning("Could not record artifact (mode=%s)", kwargs.get("mode"), exc_info=True)
             return None
+
+    # --- projekty (M9-B5): wspólny scope trybów ---
+    def list_projects(self):
+        return self.history_store.list_projects()
+
+    def current_project(self):
+        pid = self.current_project_id
+        return self.history_store.get_project(pid) if pid else None
+
+    def create_project(self, name: str, root: str = ""):
+        """Utwórz (lub dla `root` reużyj) projekt i ustaw go jako aktywny."""
+        if root:
+            proj = self.history_store.ensure_project_for_root(root, name=name)
+        else:
+            proj = self.history_store.add_project(name=name, root="")
+        self.select_project(proj.id)
+        return proj
+
+    def select_project(self, project_id):
+        """Ustaw aktywny projekt (None = wyczyść). Nieznane id → ValueError."""
+        if project_id is not None and self.history_store.get_project(project_id) is None:
+            raise ValueError("Unknown project")
+        self.current_project_id = project_id
+        try:
+            s = self.read_settings()
+            s["current_project_id"] = project_id
+            self.write_settings(s)  # przeżywa restart; niekrytyczne (połykane)
+        except Exception:
+            log.warning("Could not persist current project", exc_info=True)
 
     @staticmethod
     def _media_kind(legacy_mode: str, ext: str):

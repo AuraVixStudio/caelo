@@ -885,6 +885,70 @@ def _unit_history_routes(checks: list) -> None:
             store.close()
 
 
+def _unit_projects_routes(checks: list) -> None:
+    """M9-B5: trasy /projects (list/create/select) + stemplowanie aktywnym projektem.
+    In-process: magazyn → temp (HS._default_store), SETTINGS_FILE → temp (current_project
+    i recent_workspaces nie dotykają realnego grok_settings.json), Backend bez I/O."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+    from fastapi import HTTPException  # noqa: E402
+    import grok_core.history_store as HS  # noqa: E402
+    from grok_core.history_store import HistoryStore  # noqa: E402
+    from grok_core.routes import projects as proj_route  # noqa: E402
+    from grok_core.state import Backend  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        prev_store = HS._default_store
+        prev_settings = config.SETTINGS_FILE
+        HS._default_store = store
+        config.SETTINGS_FILE = Path(d) / "grok_settings.json"
+        try:
+            b = Backend.__new__(Backend)  # bez __init__; current_project_id = class default None
+
+            r = proj_route.list_projects(b=b)
+            checks.append(("/projects empty list + shape",
+                           r["projects"] == [] and "current_project_id" in r
+                           and "recent_workspaces" in r))
+
+            r = proj_route.create_project(proj_route.CreateProjectReq(name="Alpha"), b=b)
+            pid = r["project"]["id"]
+            checks.append(("/projects create selects it as current", r["current_project_id"] == pid))
+
+            # aktywny projekt stempluje zapisywane zdarzenia
+            b.record_event(mode="chat", text="scoped alpha note")
+            checks.append(("/projects active stamps recorded events",
+                           len(store.list_events(project_id=pid)) == 1))
+
+            r = proj_route.list_projects(b=b)
+            checks.append(("/projects lists created project",
+                           [p["id"] for p in r["projects"]] == [pid] and r["current_project_id"] == pid))
+
+            r = proj_route.select_project(proj_route.SelectProjectReq(project_id=None), b=b)
+            checks.append(("/projects/current null clears active",
+                           b.current_project_id is None and r["project"] is None))
+
+            unknown404 = False
+            try:
+                proj_route.select_project(proj_route.SelectProjectReq(project_id="does-not-exist"), b=b)
+            except HTTPException as e:
+                unknown404 = e.status_code == 404
+            checks.append(("/projects/current unknown id -> 404", unknown404))
+
+            # select istniejący ponownie ustawia aktywny
+            proj_route.select_project(proj_route.SelectProjectReq(project_id=pid), b=b)
+            checks.append(("/projects/current re-selects existing", b.current_project_id == pid))
+        except Exception as exc:  # noqa: BLE001
+            checks.append((f"projects routes: scenario ran ({exc})", False))
+        finally:
+            HS._default_store = prev_store
+            config.SETTINGS_FILE = prev_settings
+            store.close()
+
+
 def main() -> int:
     token = secrets.token_urlsafe(16)
     env = dict(os.environ, GROK_CORE_TOKEN=token)
@@ -957,6 +1021,16 @@ def main() -> int:
         s, _ = _get(base, "/artifacts/nope/input-block", token)
         checks.append(("/artifacts/{id}/input-block (unknown id) == 404", s == 404))
 
+        # M9-B5: projekty huba — 200 + kształt; bramka tokenu.
+        s, body = _get(base, "/projects", token)
+        checks.append(("/projects == 200 + shape",
+                       s == 200 and body is not None and isinstance(body.get("projects"), list)
+                       and "current_project_id" in body))
+        s, _ = _get(base, "/projects")
+        checks.append(("/projects (no token) == 401", s == 401))
+        s, _ = _post(base, "/projects/current", {"project_id": None})
+        checks.append(("/projects/current (no token) == 401", s == 401))
+
         s, _ = _get(base, "/models")
         checks.append(("/models (no token) == 401", s == 401))
         s, _ = _get(base, "/models", "wrong")
@@ -1025,6 +1099,9 @@ def main() -> int:
 
         # M9-B3: trasy historii/artefaktów (lista + filtry FTS + content + anty-traversal).
         _unit_history_routes(checks)
+
+        # M9-B5: trasy projektów (list/create/select) + stemplowanie aktywnym projektem.
+        _unit_projects_routes(checks)
 
         ok = True
         for name, passed in checks:

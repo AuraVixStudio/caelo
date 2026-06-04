@@ -350,6 +350,57 @@ def test_input_blocks() -> None:
             store.close()
 
 
+def test_project_scoping() -> None:
+    """B5: mechanizm projektów (add/ensure idempotent/list/by-root) + stemplowanie
+    aktywnym projektem przez Backend + izolacja filtra project_id (zdarzenia i artefakty)."""
+    from grok_core.state import Backend
+
+    with _tmp() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        prev = HS._default_store
+        HS._default_store = store  # Backend.history_store -> temp
+        try:
+            # --- store: rekord projektu + idempotencja po root ---
+            p1 = store.add_project(name="Alpha", root="/ws/alpha")
+            again = store.ensure_project_for_root("/ws/alpha")
+            check("project: ensure_for_root idempotent (same root)", again.id == p1.id)
+            p2 = store.ensure_project_for_root("/ws/beta", name="Beta")
+            check("project: new root creates project", p2.id != p1.id and p2.name == "Beta")
+            check("project: list returns all", {p.id for p in store.list_projects()} == {p1.id, p2.id})
+            check("project: get_by_root resolves", store.get_project_by_root("/ws/alpha").id == p1.id)
+            check("project: get_by_root empty -> None", store.get_project_by_root("") is None)
+
+            # --- Backend stempluje AKTYWNYM projektem (bez zapisu ustawień: __new__) ---
+            b = Backend.__new__(Backend)
+            b.history = None  # nieużywane w tej ścieżce
+            b.current_project_id = p1.id
+            b.record_event(mode="chat", text="alpha note about gravity")
+            b.current_project_id = p2.id
+            b.record_event(mode="chat", text="beta note about gravity")
+
+            a_ev = store.list_events(project_id=p1.id)
+            check("project: event stamped with active project",
+                  len(a_ev) == 1 and "alpha" in a_ev[0].text)
+            check("project: filter isolates events by project",
+                  len(store.list_events(project_id=p2.id)) == 1)
+
+            b.current_project_id = p1.id
+            art = b.add_artifact(type="text", mode="chat")
+            check("project: artifact stamped with active project",
+                  store.get_artifact(art.id).project_id == p1.id)
+            check("project: filter isolates artifacts by project",
+                  [x.id for x in store.list_artifacts(project_id=p1.id)] == [art.id]
+                  and store.list_artifacts(project_id=p2.id) == [])
+
+            # explicit project_id wins over active
+            b.record_event(mode="chat", text="explicit override", project_id=p2.id)
+            check("project: explicit project_id overrides active",
+                  any(e.text == "explicit override" for e in store.list_events(project_id=p2.id)))
+        finally:
+            HS._default_store = prev
+            store.close()
+
+
 def _raises_status(fn, status: int) -> bool:
     from fastapi import HTTPException
     try:
@@ -373,6 +424,7 @@ def main() -> int:
     test_all_modes_land_and_fts()
     test_backend_wiring()
     test_input_blocks()
+    test_project_scoping()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

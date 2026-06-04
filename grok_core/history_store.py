@@ -83,6 +83,21 @@ class HistoryEvent:
         }
 
 
+@dataclass
+class Project:
+    """Projekt — wspólny scope historii/artefaktów dla wszystkich trybów (M9-B5).
+    `root` wiąże projekt z workspace'em kodu (most z `recent_workspaces`); puste
+    `root` = projekt bez folderu (np. czysto czatowy)."""
+    id: str
+    name: str
+    root: str = ""
+    created_at: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name, "root": self.root,
+                "created_at": self.created_at}
+
+
 def _fts_query(q: str) -> str:
     """Zamień dowolny tekst użytkownika na BEZPIECZNE wyrażenie FTS5 MATCH.
 
@@ -183,6 +198,13 @@ class HistoryStore:
                 CREATE INDEX IF NOT EXISTS idx_artifacts_created ON artifacts(created_at);
                 CREATE INDEX IF NOT EXISTS idx_artifacts_mode    ON artifacts(mode);
                 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
+                CREATE TABLE IF NOT EXISTS projects (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT NOT NULL,
+                    root        TEXT NOT NULL DEFAULT '',
+                    created_at  REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_projects_root ON projects(root);
                 CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
                     text,
                     meta,
@@ -293,6 +315,52 @@ class HistoryStore:
             rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_event(r) for r in rows]
 
+    # --- projekty (M9-B5) -----------------------------------------------------
+
+    def add_project(self, *, name: str, root: str = "", id: Optional[str] = None,
+                    created_at: Optional[float] = None) -> Project:
+        proj = Project(
+            id=id or uuid.uuid4().hex, name=name, root=root or "",
+            created_at=time.time() if created_at is None else float(created_at),
+        )
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO projects (id, name, root, created_at) VALUES (?, ?, ?, ?)",
+                (proj.id, proj.name, proj.root, proj.created_at),
+            )
+        return proj
+
+    def get_project(self, project_id: str) -> Optional[Project]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        return self._row_to_project(row) if row else None
+
+    def get_project_by_root(self, root: str) -> Optional[Project]:
+        if not root:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM projects WHERE root = ? ORDER BY created_at LIMIT 1", (root,)
+            ).fetchone()
+        return self._row_to_project(row) if row else None
+
+    def ensure_project_for_root(self, root: str, name: Optional[str] = None) -> Project:
+        """Idempotentnie: zwróć projekt dla `root` albo go utwórz (most z workspace)."""
+        existing = self.get_project_by_root(root)
+        if existing is not None:
+            return existing
+        nm = name or (Path(root).name if root else "") or root or "Project"
+        return self.add_project(name=nm, root=root)
+
+    def list_projects(self) -> list[Project]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM projects ORDER BY created_at DESC"
+            ).fetchall()
+        return [self._row_to_project(r) for r in rows]
+
     # --- helpery --------------------------------------------------------------
 
     @staticmethod
@@ -332,6 +400,11 @@ class HistoryStore:
             artifact_id=row["artifact_id"], project_id=row["project_id"],
             created_at=row["created_at"],
         )
+
+    @staticmethod
+    def _row_to_project(row: sqlite3.Row) -> Project:
+        return Project(id=row["id"], name=row["name"], root=row["root"],
+                       created_at=row["created_at"])
 
     def close(self) -> None:
         with self._lock:
