@@ -857,6 +857,18 @@ def _unit_history_routes(checks: list) -> None:
                            and Path(resp.path).name == "pic.png"
                            and resp.media_type == "image/png"))
 
+            # M9-B4: send-to bus — obraz → blok vision (image_url, base64 z dysku)
+            ib = hist_route.artifact_input_block(art.id, b=b)
+            checks.append(("/artifacts/{id}/input-block (image) -> vision block",
+                           ib["block"]["type"] == "image_url"
+                           and ib["block"]["image_url"]["url"].startswith("data:image/png;base64,")))
+            ib_missing404 = False
+            try:
+                hist_route.artifact_input_block("does-not-exist", b=b)
+            except HTTPException as e:
+                ib_missing404 = e.status_code == 404
+            checks.append(("/artifacts/{id}/input-block missing -> 404", ib_missing404))
+
             # anty-traversal: artefakt wskazujący POZA dozwolone katalogi → 403
             outside = Path(d).resolve().parent / "grok_b3_outside_marker.bin"
             evil = store.add_artifact(type="file", mode="file", path=str(outside))
@@ -939,6 +951,11 @@ def main() -> int:
         checks.append(("/history (no token) == 401", s == 401))
         s, _ = _get(base, "/history", "wrong")
         checks.append(("/history (bad token) == 403", s == 403))
+        # M9-B4: send-to bus route guarded + 404 for unknown id (with token).
+        s, _ = _get(base, "/artifacts/nope/input-block")
+        checks.append(("/artifacts/{id}/input-block (no token) == 401", s == 401))
+        s, _ = _get(base, "/artifacts/nope/input-block", token)
+        checks.append(("/artifacts/{id}/input-block (unknown id) == 404", s == 404))
 
         s, _ = _get(base, "/models")
         checks.append(("/models (no token) == 401", s == 401))

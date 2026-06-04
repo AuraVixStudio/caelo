@@ -250,7 +250,7 @@ def test_backend_wiring() -> None:
     with _tmp() as d:
         store = HistoryStore(Path(d) / "h.db")
         prev = HS._default_store
-        HS._default_store = store  # get_store() (i Backend.history_store) → temp
+        HS._default_store = store  # get_store() (i Backend.history_store) -> temp
         try:
             b = Backend()
             b.history = _FakeHistory(d)  # neutralizuj legacy zapis
@@ -260,7 +260,7 @@ def test_backend_wiring() -> None:
             check("backend: chat event FTS-found",
                   len(store.list_events(q="dragons", mode="chat")) == 1)
 
-            # media obraz: save_media_urls(download=False) → artefakt image + event
+            # media obraz: save_media_urls(download=False) -> artefakt image + event
             b.save_media_urls(["https://x.test/a.png"], "neon cyberpunk skyline",
                               "generate", ".png", download=False)
             img = store.list_events(q="cyberpunk", mode="image")
@@ -274,7 +274,7 @@ def test_backend_wiring() -> None:
                   art is not None and art.meta.get("prompt") == "neon cyberpunk skyline"
                   and bool(art.meta.get("url")))
 
-            # voice TTS bajty: save_media_bytes → artefakt audio (mode=voice) + event
+            # voice TTS bajty: save_media_bytes -> artefakt audio (mode=voice) + event
             b.save_media_bytes(b"\x00\x01fake-audio-bytes", "spoken note about whales",
                               "tts", ".mp3")
             voice = store.list_events(q="whales", mode="voice")
@@ -285,6 +285,80 @@ def test_backend_wiring() -> None:
         finally:
             HS._default_store = prev
             store.close()
+
+
+def test_input_blocks() -> None:
+    """B4: artefakt -> blok wejściowy zgodny z typem (image->vision, pdf->document,
+    text/code->text) + przypadki negatywne (poza sandboxem / brak pliku / nieobsługiwany)."""
+    from grok_core.routes import history as hist_route
+
+    with _tmp() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        bases = [Path(d).resolve()]
+        try:
+            # image -> blok vision (image_url, data:image/...)
+            (Path(d) / "pic.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+            img = store.add_artifact(type="image", mode="image", mime="image/png",
+                                     path=str(Path(d) / "pic.png"))
+            p = hist_route.build_input_payload(img, bases)
+            check("input: image -> image_url block",
+                  p["block"]["type"] == "image_url"
+                  and p["block"]["image_url"]["url"].startswith("data:image/png;base64,"))
+            check("input: image payload carries data_uri", bool(p.get("data_uri")))
+
+            # pdf (type=file) -> blok document
+            (Path(d) / "doc.pdf").write_bytes(b"%PDF-1.4 fake")
+            pdf = store.add_artifact(type="file", mode="chat", mime="application/pdf",
+                                     path=str(Path(d) / "doc.pdf"))
+            p = hist_route.build_input_payload(pdf, bases)
+            check("input: pdf -> document block",
+                  p["block"]["type"] == "document"
+                  and p["block"]["document"]["data"].startswith("data:application/pdf;base64,"))
+
+            # text / code -> blok text (treść inline)
+            (Path(d) / "note.txt").write_text("hello world text", encoding="utf-8")
+            txt = store.add_artifact(type="text", mode="chat", mime="text/plain",
+                                     path=str(Path(d) / "note.txt"))
+            p = hist_route.build_input_payload(txt, bases)
+            check("input: text -> text block",
+                  p["block"]["type"] == "text" and p["block"]["text"] == "hello world text")
+
+            (Path(d) / "main.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+            code = store.add_artifact(type="code", mode="code", mime="",
+                                      path=str(Path(d) / "main.py"))
+            p = hist_route.build_input_payload(code, bases)
+            check("input: code -> text block", p["block"]["type"] == "text" and "def f()" in p["block"]["text"])
+
+            # video -> brak bloku wejściowego (415)
+            vid = store.add_artifact(type="video", mode="video", mime="video/mp4",
+                                     path=str(Path(d) / "pic.png"))
+            check("input: video -> 415 (no input block)",
+                  _raises_status(lambda: hist_route.build_input_payload(vid, bases), 415))
+
+            # ścieżka poza sandboxem -> 403
+            outside = store.add_artifact(type="image", mode="image", mime="image/png",
+                                         path=str(Path(d).resolve().parent / "evil.png"))
+            check("input: path outside allowed -> 403",
+                  _raises_status(lambda: hist_route.build_input_payload(outside, bases), 403))
+
+            # plik nieistniejący (w sandboxie) -> 404
+            gone = store.add_artifact(type="image", mode="image", mime="image/png",
+                                      path=str(Path(d) / "nope.png"))
+            check("input: missing file -> 404",
+                  _raises_status(lambda: hist_route.build_input_payload(gone, bases), 404))
+        finally:
+            store.close()
+
+
+def _raises_status(fn, status: int) -> bool:
+    from fastapi import HTTPException
+    try:
+        fn()
+        return False
+    except HTTPException as e:
+        return e.status_code == status
+    except Exception:
+        return False
 
 
 def main() -> int:
@@ -298,6 +372,7 @@ def main() -> int:
     test_fts_query_sanitizer()
     test_all_modes_land_and_fts()
     test_backend_wiring()
+    test_input_blocks()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

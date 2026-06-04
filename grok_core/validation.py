@@ -25,6 +25,10 @@ MAX_HISTORY_QUERY = 256    # długość frazy szukania (q, FTS)
 MAX_HISTORY_LIMIT = 200    # górny limit paginacji (rekordów na stronę)
 MAX_ID_LEN = 64            # długość identyfikatorów (artifact_id / project_id / mode)
 
+# Send-to bus (M9-B4) — cap pliku artefaktu serwowanego jako blok wejściowy LLM.
+# Obrazy dodatkowo przez validate_image_uri (MAX_IMAGE_URI, ~9 MB) — stricter.
+MAX_INPUT_FILE_BYTES = 32 * 1024 * 1024
+
 _IMAGE_DATA_URI = re.compile(r"^data:image/[a-zA-Z0-9.+-]+;base64,", re.IGNORECASE)
 
 
