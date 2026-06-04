@@ -1,80 +1,142 @@
-import { useEffect, useState } from 'react'
-import { RotateCw } from 'lucide-react'
-import { getHistory, type Conn, type HistoryEntry } from '../lib/api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUpRight, RotateCw, Search } from 'lucide-react'
+import { listHistory, type Conn, type HubEvent } from '../lib/api'
+import { useHub } from '../lib/hub'
+import { buildHistoryQuery, eventTitle, modeToModule, modeTone } from '../lib/hubQuery'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { Input } from './ui/Input'
 import { Page } from './ui/Page'
+import { Select } from './ui/Select'
 
-const MODE_TONE: Record<string, 'success' | 'info' | 'accent' | 'neutral'> = {
-  generate: 'success',
-  edit: 'info',
-  video: 'accent'
+const MODES = ['all', 'chat', 'image', 'video', 'voice', 'code'] as const
+
+function fmtTime(epoch: number): string {
+  try {
+    return new Date(epoch * 1000).toLocaleString()
+  } catch {
+    return String(epoch)
+  }
 }
 
 export function History({ conn }: { conn: Conn }) {
-  const [entries, setEntries] = useState<HistoryEntry[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const { navigate } = useHub()
+  const [q, setQ] = useState('')
+  const [mode, setMode] = useState('all')
+  const [events, setEvents] = useState<HubEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const reqId = useRef(0)
 
-  function load(): void {
-    setLoading(true)
-    setError(null)
-    getHistory(conn)
-      .then((r) => setEntries(r.entries))
-      .catch((e) => setError(String((e as Error).message || e)))
-      .finally(() => setLoading(false))
-  }
+  const run = useCallback(
+    (search: string, m: string) => {
+      const id = ++reqId.current
+      setLoading(true)
+      setError(null)
+      listHistory(conn, buildHistoryQuery({ q: search, mode: m }))
+        .then((r) => {
+          if (id === reqId.current) setEvents(r.events)
+        })
+        .catch((e) => {
+          if (id === reqId.current) setError(String((e as Error).message || e))
+        })
+        .finally(() => {
+          if (id === reqId.current) setLoading(false)
+        })
+    },
+    [conn]
+  )
 
+  // Debounce typing (and mode changes) so we don't fire a request per keystroke.
   useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const t = setTimeout(() => run(q, mode), 200)
+    return () => clearTimeout(t)
+  }, [q, mode, run])
 
-  const open = (target: string): void => {
-    if (/^https?:/i.test(target)) window.open(target, '_blank')
-    else void window.grok.openPath(target)
-  }
-
-  const fmt = (iso: string): string => {
-    try {
-      return new Date(iso).toLocaleString()
-    } catch {
-      return iso
-    }
+  const openInMode = (e: HubEvent): void => {
+    const target = modeToModule(e.mode)
+    if (target) navigate(target)
   }
 
   return (
     <Page
       title="History"
-      subtitle="Past generations (newest first)."
+      subtitle="Everything across modes — search by content or prompt."
       actions={
-        <Button variant="outline" size="sm" icon={<RotateCw size={14} />} onClick={load}>
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<RotateCw size={14} />}
+          onClick={() => run(q, mode)}
+        >
           Refresh
         </Button>
       }
     >
+      <div className="mb-4 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+          />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search history…"
+            className="pl-9"
+            aria-label="Search history"
+          />
+        </div>
+        <Select
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+          aria-label="Filter by mode"
+          className="w-36"
+        >
+          {MODES.map((m) => (
+            <option key={m} value={m}>
+              {m === 'all' ? 'All modes' : m[0].toUpperCase() + m.slice(1)}
+            </option>
+          ))}
+        </Select>
+      </div>
+
       {error ? <p className="mb-4 text-sm text-error">{error}</p> : null}
       {loading ? (
         <p className="text-sm text-muted">Loading…</p>
-      ) : entries.length === 0 ? (
-        <p className="text-sm text-muted">No generations yet.</p>
+      ) : events.length === 0 ? (
+        <p className="text-sm text-muted">
+          {q.trim() ? 'No matches.' : 'No history yet — chat, generate, or run the agent.'}
+        </p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {entries.map((e, i) => (
-            <div
-              key={i}
-              className="grid grid-cols-[84px_1fr_auto_auto] items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5"
-            >
-              <Badge tone={MODE_TONE[e.mode] || 'neutral'}>{e.mode}</Badge>
-              <span className="truncate text-sm" title={e.prompt}>
-                {e.prompt}
-              </span>
-              <span className="text-xs text-muted">{fmt(e.timestamp)}</span>
-              <Button variant="ghost" size="sm" onClick={() => open(e.url)}>
-                Open
-              </Button>
-            </div>
-          ))}
+          {events.map((e) => {
+            const target = modeToModule(e.mode)
+            return (
+              <div
+                key={e.id}
+                className="grid grid-cols-[84px_1fr_auto_auto] items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5"
+              >
+                <Badge tone={modeTone(e.mode)}>{e.mode}</Badge>
+                <span className="truncate text-sm" title={e.text}>
+                  {eventTitle(e)}
+                </span>
+                <span className="text-xs text-muted">{fmtTime(e.created_at)}</span>
+                {target ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={<ArrowUpRight size={14} />}
+                    onClick={() => openInMode(e)}
+                  >
+                    Open in {target}
+                  </Button>
+                ) : (
+                  <span />
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </Page>

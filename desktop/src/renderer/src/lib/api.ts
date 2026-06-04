@@ -283,6 +283,118 @@ export const getOutputDir = (c: Conn): Promise<{ path: string }> =>
 export const setOutputDir = (c: Conn, path: string): Promise<{ ok: boolean; path: string }> =>
   api(c, '/config/output-dir', { method: 'PUT', body: JSON.stringify({ path }) })
 
+// --- Hub backbone (M9): one searchable history, artifacts, projects ---
+export interface HubEvent {
+  id: string
+  mode: string
+  text: string
+  artifact_id: string | null
+  project_id: string | null
+  created_at: number // epoch seconds
+}
+
+export interface HubArtifact {
+  id: string
+  type: string // image | video | audio | file | text | code
+  mode: string
+  mime: string
+  path: string
+  thumb_path: string
+  meta: Record<string, unknown>
+  project_id: string | null
+  created_at: number
+}
+
+export interface HubProject {
+  id: string
+  name: string
+  root: string
+  created_at: number
+}
+
+/** Ready-to-use LLM input block produced by the send-to bus (M9-B4). */
+export interface InputBlock {
+  artifact_id: string
+  type: string
+  mode: string
+  mime: string
+  name: string
+  block:
+    | { type: 'image_url'; image_url: { url: string } }
+    | { type: 'document'; document: { data: string; mime: string; name: string } }
+    | { type: 'text'; text: string }
+  data_uri?: string
+  text?: string
+}
+
+export interface HistoryQuery {
+  q?: string
+  mode?: string
+  project_id?: string
+  from?: number
+  to?: number
+  limit?: number
+  offset?: number
+}
+
+function queryString(params: Record<string, string | number | undefined>): string {
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+  return parts.length ? '?' + parts.join('&') : ''
+}
+
+export const listHistory = (
+  c: Conn,
+  query: HistoryQuery = {}
+): Promise<{ events: HubEvent[]; count: number; limit: number; offset: number }> =>
+  api(c, '/history' + queryString(query as Record<string, string | number | undefined>))
+
+export const listArtifacts = (
+  c: Conn,
+  query: HistoryQuery = {}
+): Promise<{ artifacts: HubArtifact[]; count: number; limit: number; offset: number }> =>
+  api(c, '/artifacts' + queryString(query as Record<string, string | number | undefined>))
+
+export const getArtifact = (c: Conn, id: string): Promise<HubArtifact> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}`)
+
+export const getArtifactInputBlock = (c: Conn, id: string): Promise<InputBlock> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}/input-block`)
+
+/** Fetch artifact bytes as an object URL. The /content endpoint needs a Bearer
+ *  header, which an <img src> can't send — so we fetch the blob and wrap it.
+ *  Caller must URL.revokeObjectURL(url) when the element unmounts. */
+export async function getArtifactContentUrl(c: Conn, id: string): Promise<string> {
+  const res = await fetch(c.baseUrl + `/artifacts/${encodeURIComponent(id)}/content`, {
+    headers: { Authorization: `Bearer ${c.token}` },
+    signal: AbortSignal.timeout(60_000)
+  })
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  return URL.createObjectURL(await res.blob())
+}
+
+export interface ProjectsResp {
+  projects: HubProject[]
+  recent_workspaces: string[]
+  current_project_id: string | null
+}
+
+export const listProjects = (c: Conn): Promise<ProjectsResp> => api<ProjectsResp>(c, '/projects')
+
+export const createProject = (
+  c: Conn,
+  name: string,
+  root?: string
+): Promise<{ project: HubProject; current_project_id: string | null }> =>
+  api(c, '/projects', { method: 'POST', body: JSON.stringify({ name, root }) })
+
+export const selectProject = (
+  c: Conn,
+  projectId: string | null
+): Promise<{ current_project_id: string | null; project: HubProject | null }> =>
+  api(c, '/projects/current', { method: 'POST', body: JSON.stringify({ project_id: projectId }) })
+
 // --- Workspace / files / git (mini-IDE) ---
 export interface TreeEntry {
   name: string

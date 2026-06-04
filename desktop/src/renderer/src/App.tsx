@@ -12,6 +12,7 @@ import {
   Video as VideoIcon
 } from 'lucide-react'
 import { useConnection } from './lib/useConnection'
+import { HubProvider } from './lib/hub'
 import { cn } from './lib/cn'
 import { Placeholder } from './components/Placeholder'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -138,6 +139,7 @@ export default function App() {
   const status = STATUS[conn.status]
 
   return (
+    <HubProvider navigate={(m) => setActive(m as Module)}>
     <div className="flex h-screen overflow-hidden bg-bg text-fg">
       <aside
         className={cn(
@@ -211,5 +213,6 @@ export default function App() {
 
       {renderModule()}
     </div>
+    </HubProvider>
   )
 }
