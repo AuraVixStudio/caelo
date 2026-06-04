@@ -5,6 +5,7 @@ import {
   basename,
   buildHistoryQuery,
   eventTitle,
+  isImageEvent,
   modeToModule,
   modeTone
 } from '../src/renderer/src/lib/hubQuery'
@@ -75,5 +76,14 @@ describe('basename', () => {
     expect(basename('/home/user/proj/')).toBe('proj')
     expect(basename('C:\\Users\\me\\repo\\')).toBe('repo')
     expect(basename('solo')).toBe('solo')
+  })
+})
+
+describe('isImageEvent', () => {
+  it('is true only for image-mode events with an artifact', () => {
+    expect(isImageEvent({ mode: 'image', artifact_id: 'a1' })).toBe(true)
+    expect(isImageEvent({ mode: 'image', artifact_id: null })).toBe(false)
+    expect(isImageEvent({ mode: 'chat', artifact_id: 'a1' })).toBe(false)
+    expect(isImageEvent({ mode: 'video', artifact_id: 'a1' })).toBe(false)
   })
 })

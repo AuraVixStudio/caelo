@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpRight, RotateCw, Search } from 'lucide-react'
 import { listHistory, type Conn, type HubEvent } from '../lib/api'
 import { useHub } from '../lib/hub'
-import { buildHistoryQuery, eventTitle, modeToModule, modeTone } from '../lib/hubQuery'
+import { buildHistoryQuery, eventTitle, isImageEvent, modeToModule, modeTone } from '../lib/hubQuery'
+import { ArtifactThumb } from './ArtifactThumb'
 import { ProjectSwitcher } from './ProjectSwitcher'
 import { SendToMenu } from './SendToMenu'
 import { Badge } from './ui/Badge'
@@ -121,9 +122,19 @@ export function History({ conn }: { conn: Conn }) {
                 className="grid grid-cols-[84px_1fr_auto_auto] items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5"
               >
                 <Badge tone={modeTone(e.mode)}>{e.mode}</Badge>
-                <span className="truncate text-sm" title={e.text}>
-                  {eventTitle(e)}
-                </span>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  {isImageEvent(e) ? (
+                    <ArtifactThumb
+                      conn={conn}
+                      artifactId={e.artifact_id!}
+                      alt={e.text}
+                      className="h-7 w-7 shrink-0 rounded"
+                    />
+                  ) : null}
+                  <span className="truncate text-sm" title={e.text}>
+                    {eventTitle(e)}
+                  </span>
+                </div>
                 <span className="text-xs text-muted">{fmtTime(e.created_at)}</span>
                 <div className="flex items-center gap-1">
                   {e.artifact_id ? <SendToMenu conn={conn} artifactId={e.artifact_id} /> : null}

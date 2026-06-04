@@ -63,3 +63,8 @@ export function basename(path: string): string {
   const parts = trimmed.split(/[\\/]/)
   return parts[parts.length - 1] || trimmed || path
 }
+
+/** Czy zdarzenie ma podglądalny artefakt-obraz (miniatura w History, M9-F4). */
+export function isImageEvent(e: { mode: string; artifact_id: string | null }): boolean {
+  return e.mode === 'image' && !!e.artifact_id
+}

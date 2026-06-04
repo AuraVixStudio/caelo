@@ -16,6 +16,8 @@ import { HubProvider } from './lib/hub'
 import { cn } from './lib/cn'
 import { Placeholder } from './components/Placeholder'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { CommandPalette } from './components/CommandPalette'
+import type { Command } from './lib/commands'
 import { IconButton } from './components/ui/IconButton'
 import { Tooltip } from './components/ui/Tooltip'
 import { ThemeToggle } from './components/ui/ThemeToggle'
@@ -109,6 +111,31 @@ export default function App() {
       /* ignore */
     }
   }, [collapsed])
+
+  // M9-F5: paleta komend (Ctrl/Cmd-K) — szybki skok do dowolnego trybu.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const commands = useMemo<Command[]>(
+    () =>
+      MODULES.map((m) => ({
+        id: `goto-${m.id}`,
+        title: m.label,
+        hint: 'Go to',
+        keywords: m.id,
+        run: () => setActive(m.id)
+      })),
+    []
+  )
 
   function renderModule() {
     if (!ready || !c) {
@@ -217,6 +244,11 @@ export default function App() {
       </aside>
 
       {renderModule()}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={commands}
+      />
     </div>
     </HubProvider>
   )

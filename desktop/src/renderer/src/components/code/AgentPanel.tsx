@@ -49,6 +49,7 @@ export function AgentPanel({
   const hub = useHub()
   const [busy, setBusy] = useState(false)
   const [connected, setConnected] = useState(false)
+  const [dragging, setDragging] = useState(false) // M9-F4: drop plików do composera
 
   const agentRef = useRef<AgentConnection | null>(null)
   const curAssistant = useRef<string | null>(null)
@@ -249,7 +250,23 @@ export function AgentPanel({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border p-2.5">
+      <div
+        onDragOver={(e) => {
+          if (!connected) return
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          if (connected) void att.addFiles(e.dataTransfer.files)
+        }}
+        className={cn(
+          'shrink-0 border-t p-2.5 transition-colors',
+          dragging ? 'border-accent' : 'border-border'
+        )}
+      >
         <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />
         <div className="flex items-end gap-2">
           <AttachButton

@@ -140,6 +140,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
 export function ChatView({ conn }: { conn: Conn }) {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false) // M9-F4: drop plików do composera
 
   const [models, setModels] = useState<string[]>([])
   const [model, setModel] = useState<string>('')
@@ -522,7 +523,22 @@ export function ChatView({ conn }: { conn: Conn }) {
         <div className="shrink-0 px-4 pb-5 pt-2">
           <div className="mx-auto max-w-3xl">
             <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />
-            <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface px-3 py-2 shadow-[var(--shadow)] transition-colors focus-within:border-border-strong">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragging(true)
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragging(false)
+                void att.addFiles(e.dataTransfer.files)
+              }}
+              className={cn(
+                'flex items-end gap-2 rounded-2xl border bg-surface px-3 py-2 shadow-[var(--shadow)] transition-colors',
+                dragging ? 'border-accent' : 'border-border focus-within:border-border-strong'
+              )}
+            >
               <AttachButton onPick={att.addFiles} />
               <textarea
               ref={taRef}
