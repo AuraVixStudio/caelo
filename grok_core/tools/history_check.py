@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import config  # noqa: E402
+import grok_core.history_store as HS  # noqa: E402
 from grok_core.history_store import HistoryStore, _fts_query  # noqa: E402
 
 checks: list[tuple[str, bool]] = []
@@ -204,6 +205,88 @@ def test_fts_query_sanitizer() -> None:
             store.close()
 
 
+def test_all_modes_land_and_fts() -> None:
+    """B2: zdarzenie z KAŻDEGO trybu ląduje i jest znajdowane przez FTS."""
+    with _tmp() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        try:
+            samples = {
+                "chat":  "chat about quantum entanglement",
+                "image": "image of a violet nebula",
+                "video": "video of cascading waterfalls",
+                "voice": "voice memo about migration patterns",
+                "code":  "code refactor of the parser module",
+            }
+            uniq = {"chat": "entanglement", "image": "nebula", "video": "waterfalls",
+                    "voice": "migration", "code": "refactor"}
+            for mode, text in samples.items():
+                store.record_event(mode=mode, text=text)
+            for mode, word in uniq.items():
+                hits = store.list_events(q=word)
+                check(f"all-modes: {mode} event lands + FTS-found",
+                      len(hits) == 1 and hits[0].mode == mode)
+        finally:
+            store.close()
+
+
+class _FakeHistory:
+    """Atrapa legacy HistoryManager — neutralizuje zapis do grok_config.json w teście."""
+    def __init__(self, save_dir: str) -> None:
+        self._dir = save_dir
+
+    def get_save_path(self) -> str:
+        return self._dir
+
+    def save_to_history(self, mode, path, prompt) -> None:
+        pass
+
+
+def test_backend_wiring() -> None:
+    """B2: Backend.record_event + ścieżka media (save_media_urls/bytes) trafiają do
+    wspólnej historii huba. Magazyn podmieniony na temp; legacy history zatrapowany,
+    by NIE dotknąć realnego grok_config.json. Sieć wyłączona (download=False)."""
+    from grok_core.state import Backend  # import tu — pociąga state.py (legacy managery)
+
+    with _tmp() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        prev = HS._default_store
+        HS._default_store = store  # get_store() (i Backend.history_store) → temp
+        try:
+            b = Backend()
+            b.history = _FakeHistory(d)  # neutralizuj legacy zapis
+
+            ev = b.record_event(mode="chat", text="hello about dragons and castles")
+            check("backend: record_event lands", ev is not None)
+            check("backend: chat event FTS-found",
+                  len(store.list_events(q="dragons", mode="chat")) == 1)
+
+            # media obraz: save_media_urls(download=False) → artefakt image + event
+            b.save_media_urls(["https://x.test/a.png"], "neon cyberpunk skyline",
+                              "generate", ".png", download=False)
+            img = store.list_events(q="cyberpunk", mode="image")
+            check("backend: media image event recorded", len(img) == 1)
+            check("backend: media event linked to artifact",
+                  bool(img) and img[0].artifact_id is not None)
+            art = store.get_artifact(img[0].artifact_id) if img else None
+            check("backend: image artifact type/mime",
+                  art is not None and art.type == "image" and art.mime == "image/png")
+            check("backend: image artifact meta has prompt + url",
+                  art is not None and art.meta.get("prompt") == "neon cyberpunk skyline"
+                  and bool(art.meta.get("url")))
+
+            # voice TTS bajty: save_media_bytes → artefakt audio (mode=voice) + event
+            b.save_media_bytes(b"\x00\x01fake-audio-bytes", "spoken note about whales",
+                              "tts", ".mp3")
+            voice = store.list_events(q="whales", mode="voice")
+            check("backend: voice tts event recorded", len(voice) == 1)
+            vart = store.get_artifact(voice[0].artifact_id) if voice else None
+            check("backend: audio artifact type/mode",
+                  vart is not None and vart.type == "audio" and vart.mode == "voice")
+        finally:
+            HS._default_store = prev
+            store.close()
+
+
 def main() -> int:
     test_artifact_roundtrip()
     test_event_fts()
@@ -213,6 +296,8 @@ def main() -> int:
     test_corrupt_backup_not_wipe()
     test_empty_file_is_valid_db()
     test_fts_query_sanitizer()
+    test_all_modes_land_and_fts()
+    test_backend_wiring()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

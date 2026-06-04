@@ -72,6 +72,8 @@ async def agent_stream(ws: WebSocket) -> None:
         def emit(ev: dict) -> None:
             # Z wątku-workera (tura agenta). Gdy konsument zniknął → ustaw Stop,
             # żeby pętla agenta przerwała się przy najbliższym sprawdzeniu (P0-9).
+            if ev.get("type") == "assistant_done":  # M9-B2: złap finalną odpowiedź tury
+                state["last_assistant"] = ev.get("content") or ""
             if not stream.emit(ev):
                 stop_event.set()
 
@@ -87,6 +89,7 @@ async def agent_stream(ws: WebSocket) -> None:
 
         def run_turn(text: str, model: str, images: list) -> None:
             state["busy"] = True
+            state["last_assistant"] = ""  # M9-B2: reset przed turą
             try:
                 ws_obj = backend.get_workspace()
                 if ws_obj is None:
@@ -110,6 +113,15 @@ async def agent_stream(ws: WebSocket) -> None:
                 emit({"type": "error", "error": "Agent error (see server log for details)"})
             finally:
                 state["busy"] = False
+                # M9-B2: podsumowanie tury agenta do wspólnej historii huba (mode=code).
+                # Tekst = finalna odpowiedź agenta; instrukcja usera + workspace w meta.
+                if text or state.get("last_assistant"):
+                    wsp = backend.get_workspace()
+                    backend.record_event(
+                        mode="code", text=state.get("last_assistant") or "",
+                        meta={"prompt": text, "model": model,
+                              "workspace": wsp.root.as_posix() if wsp else None},
+                    )
                 emit({"type": "done"})
 
         try:

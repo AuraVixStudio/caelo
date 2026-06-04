@@ -69,9 +69,14 @@ def voice_stt(req: STTReq, b: Backend = Depends(get_backend)) -> dict:
     if not data:
         raise HTTPException(status_code=400, detail="Empty audio")
     try:
-        return b.api.speech_to_text(data, filename=req.filename or "speech.webm", language=req.language)
+        result = b.api.speech_to_text(data, filename=req.filename or "speech.webm", language=req.language)
     except Exception as exc:
         raise upstream_error(exc, "Speech-to-text request to xAI failed")
+    # M9-B2: transkrypt trafia do wspólnej historii huba (przeszukiwalny). Błędy połykane.
+    transcript = result.get("text") if isinstance(result, dict) else None
+    if transcript:
+        b.record_event(mode="voice", text=transcript, meta={"op": "stt"})
+    return result
 
 
 @ws_router.websocket("/voice/realtime")

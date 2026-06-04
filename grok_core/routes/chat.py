@@ -34,6 +34,24 @@ from grok_core.state import ws_authorized
 router = APIRouter()
 
 
+def _last_user_text(messages) -> str:
+    """Ostatnia wiadomość użytkownika jako czysty tekst (string albo części
+    multimodalne content[]). Do zindeksowania promptu w historii huba (M9-B2)."""
+    for m in reversed(messages or []):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") == "text" and p.get("text")
+            )
+        return ""
+    return ""
+
+
 @router.websocket("/chat/stream")
 async def chat_stream(ws: WebSocket) -> None:
     if not ws_authorized(ws):  # P0-8: fail-closed token + Origin
@@ -78,6 +96,13 @@ async def chat_stream(ws: WebSocket) -> None:
                         )
                         stream.emit({"type": "delta", "delta": full})
                     stream.emit({"type": "done", "full": full})
+                    # M9-B2: zapisz turę do wspólnej historii huba (po zakończeniu
+                    # strumienia, poza gorącą pętlą; błędy połykane w record_event).
+                    # Tekst = odpowiedź; prompt usera w meta (kolumna meta jest w FTS).
+                    prompt = _last_user_text(messages)
+                    if full or prompt:
+                        backend.record_event(mode="chat", text=full or "",
+                                             meta={"prompt": prompt, "model": model})
                 except Exception as exc:  # noqa: BLE001
                     stream.emit({"type": "error", "error": str(exc)})
 

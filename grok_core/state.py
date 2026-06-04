@@ -125,6 +125,64 @@ class Backend:
                 merged.append(m)
         return merged
 
+    # --- M9-B2: wspólna historia huba (artefakty + zdarzenia, SQLite/FTS5) ---
+    @property
+    def history_store(self):
+        """Leniwy magazyn `grok_history.db` (tworzony przy 1. użyciu). Osobny od
+        legacy `self.history`/`grok_config.json` — kręgosłup huba (PLAN_M9)."""
+        from grok_core.history_store import get_store
+        return get_store()
+
+    def record_event(self, *, mode: str, text: str = "", artifact_id=None,
+                     project_id=None, meta=None):
+        """Dorzuć zdarzenie do wspólnej, przeszukiwalnej historii huba (M9-B2).
+        NIGDY nie wywraca ścieżki użytkownika — błąd magazynu jest logowany i
+        połykany (historia jest poboczna wobec właściwej operacji)."""
+        try:
+            return self.history_store.record_event(
+                mode=mode, text=text or "", artifact_id=artifact_id,
+                project_id=project_id, meta=meta,
+            )
+        except Exception:
+            log.warning("Could not record history event (mode=%s)", mode, exc_info=True)
+            return None
+
+    def add_artifact(self, **kwargs):
+        """Zarejestruj artefakt (obraz/wideo/audio/...) w magazynie huba. Połyka błędy."""
+        try:
+            return self.history_store.add_artifact(**kwargs)
+        except Exception:
+            log.warning("Could not record artifact (mode=%s)", kwargs.get("mode"), exc_info=True)
+            return None
+
+    @staticmethod
+    def _media_kind(legacy_mode: str, ext: str):
+        """Zmapuj legacy tryb zapisu ('generate'/'edit'/'video'/'tts') + rozszerzenie
+        na M9 (type, mode, mime). M9 mode ∈ {image, video, voice}."""
+        e = (ext or "").lower().lstrip(".")
+        audio_mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg",
+                      "m4a": "audio/mp4"}
+        image_mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                      "webp": "image/webp", "gif": "image/gif"}
+        if legacy_mode == "tts" or e in audio_mime:
+            return "audio", "voice", audio_mime.get(e, "audio/mpeg")
+        if legacy_mode == "video" or e in ("mp4", "mov", "webm"):
+            return "video", "video", "video/mp4"
+        return "image", "image", image_mime.get(e, "image/png")
+
+    def _record_media_artifact(self, *, legacy_mode: str, ext: str, prompt: str,
+                               path, url) -> None:
+        """M9-B2: zapisz wygenerowane medium jako artefakt + zdarzenie historii.
+        Wołane z `save_media_urls`/`save_media_bytes` (poza gorącą pętlą; błędy połykane)."""
+        a_type, a_mode, mime = self._media_kind(legacy_mode, ext)
+        meta = {"prompt": prompt or "", "op": legacy_mode}
+        if url:
+            meta["url"] = url
+        art = self.add_artifact(type=a_type, mode=a_mode, mime=mime,
+                                path=path or "", meta=meta)
+        self.record_event(mode=a_mode, text=prompt or "",
+                          artifact_id=(art.id if art else None))
+
     # --- zapis mediów (auto-save jak ResultCard/_auto_save_video) ---
     def save_media_urls(self, urls, prompt: str, mode: str, ext: str,
                         download: bool = True) -> list:
@@ -146,6 +204,9 @@ class Backend:
                 self.history.save_to_history(mode, path or url, prompt)
             except Exception:
                 log.warning("Failed to record media in history", exc_info=True)
+            # M9-B2: artefakt + zdarzenie we wspólnej, przeszukiwalnej historii huba.
+            self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
+                                        path=path, url=url)
             out.append({"url": url, "path": path})
         return out
 
@@ -197,6 +258,9 @@ class Backend:
             self.history.save_to_history(mode, path or "", prompt)
         except Exception:
             pass
+        # M9-B2: artefakt (np. audio TTS) + zdarzenie w historii huba.
+        self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
+                                    path=path, url=None)
         return {"path": path}
 
 
