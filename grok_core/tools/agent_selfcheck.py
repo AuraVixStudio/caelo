@@ -1,0 +1,426 @@
+"""Self-check silnika agenta (Faza 4) — bez sieci xAI.
+
+1) Narzędzia plikowe na tymczasowym workspace (read/write/edit/list/glob/grep/run_command).
+2) Sandbox: odrzucenie ucieczki poza workspace.
+3) Pętla AgentSession z MOCKIEM modelu: scenariusz write_file -> done,
+   z bramką zatwierdzania (auto-accept) i zbieraniem zdarzeń.
+4) Bezpieczeństwo run_command (P0-1): łańcuchowanie nie obchodzi allowlisty,
+   metaznaki powłoki odrzucane przed uruchomieniem.
+5) Sandbox glob (P0-2): wzorce `..`/absolutne nie enumerują plików poza workspace.
+6) Limity grep (P0-3): timeout ReDoS, pomijanie plików dużych i binarnych.
+7) Stop run_command (P0-4): Stop przerywa komendę i jej drzewo procesów.
+8) Spójność historii (P0-5): każdy tool_call ma odpowiedź tool (też przy Stop).
+9) Scrub środowiska (P0-6): run_command nie ujawnia sekretów (token/API key).
+10) Atomowość i symlinki (P0-7): zapisy atomowe, enumeratory nie wychodzą poza root.
+Kod wyjścia 0 = wszystkie asercje OK.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from grok_core.agent import tools as T  # noqa: E402
+from grok_core.agent.permissions import PermissionGate, command_metachars  # noqa: E402
+from grok_core.agent.session import AgentSession  # noqa: E402
+from grok_core.agent.workspace import Workspace, WorkspaceError  # noqa: E402
+
+checks: list[tuple[str, bool]] = []
+
+
+def check(name: str, passed: bool) -> None:
+    checks.append((name, bool(passed)))
+
+
+def test_tools() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+
+        check("write_file creates file", "Wrote" in T.write_file(ws, "src/a.py", "print('hi')\nx = 1\n"))
+        check("read_file returns numbered", T.read_file(ws, "src/a.py").startswith("1\t"))
+        check("list_dir shows dir", "src/" in T.list_dir(ws, "."))
+        check("glob finds py", "src/a.py" in T.glob(ws, "**/*.py"))
+        check("grep finds match", "src/a.py:1:" in T.grep(ws, r"print"))
+
+        edit_ok = T.edit_file(ws, "src/a.py", "x = 1", "x = 2")
+        check("edit_file unique replace", "Edited" in edit_ok)
+        check("edit applied", "x = 2" in (ws.root / "src/a.py").read_text(encoding="utf-8"))
+
+        nf = T.edit_file(ws, "src/a.py", "NOPE", "z")
+        check("edit_file missing -> error", nf.startswith("Error"))
+
+        cmd = "echo hello-agent" if os.name == "nt" else "echo hello-agent"
+        out = T.run_command(ws, cmd)
+        check("run_command runs", "hello-agent" in out and "exit 0" in out)
+
+        prev = T.preview_change(ws, "edit_file", {"path": "src/a.py", "old_string": "x = 2", "new_string": "x = 3"})
+        check("preview diff produced", bool(prev) and prev.get("kind") == "diff" and "x = 3" in prev.get("diff", ""))
+
+
+def test_sandbox() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        escaped = False
+        try:
+            ws.resolve("../../etc/passwd")
+        except WorkspaceError:
+            escaped = True
+        check("sandbox rejects escape", escaped)
+
+
+def test_agent_loop() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        events: list[dict] = []
+
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # poproś o utworzenie pliku
+                return {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_1", "type": "function",
+                        "function": {"name": "write_file",
+                                     "arguments": '{"path": "hello.txt", "content": "hi from agent"}'},
+                    }],
+                }
+            # druga tura: brak tool_calls -> koniec
+            return {"role": "assistant", "content": "Created hello.txt."}
+
+        def request_approval(call_id, name, detail):
+            events.append({"type": "approval_request", "id": call_id, "name": name, "detail": detail})
+            return "accept"
+
+        session = AgentSession(
+            ws, gate, mock_llm, lambda: "test-key", "http://unused",
+            emit=events.append, request_approval=request_approval,
+        )
+        session.run_turn("create hello.txt", model="mock")
+
+        types = [e.get("type") for e in events]
+        check("loop emits tool_call", "tool_call" in types)
+        check("loop requests approval (write)", "approval_request" in types)
+        check("loop emits tool_result", "tool_result" in types)
+        check("loop finishes (assistant_done)", "assistant_done" in types)
+        check("agent wrote file", (ws.root / "hello.txt").read_text(encoding="utf-8") == "hi from agent")
+        check("mock called twice", calls["n"] == 2)
+
+
+def test_interrupted_tool_calls() -> None:
+    """P0-5: Stop w środku batcha nie zostawia tool_call bez odpowiedzi `tool`."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        events: list[dict] = []
+        handled = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            # jedna tura: assistant z DWOMA tool_calls
+            return {
+                "role": "assistant", "content": None,
+                "tool_calls": [
+                    {"id": "c1", "type": "function",
+                     "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}},
+                    {"id": "c2", "type": "function",
+                     "function": {"name": "read_file", "arguments": '{"path": "b.txt"}'}},
+                ],
+            }
+
+        def emit(ev):
+            events.append(ev)
+            if ev.get("type") == "tool_result":
+                handled["n"] += 1
+
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=emit, request_approval=lambda *a: "accept")
+        # Stop aktywuje się po obsłużeniu PIERWSZEGO tool_calla (c2 zostaje przerwany)
+        session.run_turn("read files", model="mock", stop_flag=lambda: handled["n"] >= 1)
+
+        asst = [m for m in session.history if m.get("role") == "assistant" and m.get("tool_calls")]
+        want_ids = {tc["id"] for m in asst for tc in m["tool_calls"]}
+        got_ids = {m.get("tool_call_id") for m in session.history if m.get("role") == "tool"}
+        check("interrupted: assistant batch recorded", len(asst) == 1 and want_ids == {"c1", "c2"})
+        check("interrupted: every tool_call answered", want_ids <= got_ids)
+        check("interrupted: stopped emitted", any(e.get("type") == "stopped" for e in events))
+        synth = [m for m in session.history
+                 if m.get("role") == "tool" and m.get("tool_call_id") == "c2"]
+        check("interrupted: synthetic result present",
+              bool(synth) and "interrupt" in synth[0]["content"].lower())
+
+
+def test_history_balanced_after_tools() -> None:
+    """P0-5: po zwykłej turze z narzędziami self.history ma odpowiedzi `tool`
+    (kontrakt xAI: każdy tool_call ↔ tool), więc kolejna tura nie da 400."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "w1", "type": "function",
+                     "function": {"name": "write_file",
+                                  "arguments": '{"path": "x.txt", "content": "hi"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda ev: None, request_approval=lambda *a: "accept")
+        session.run_turn("make x", model="mock")
+
+        # każdy tool_call w historii musi mieć odpowiadającą wiadomość tool
+        want = {tc["id"] for m in session.history
+                if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])}
+        got = {m.get("tool_call_id") for m in session.history if m.get("role") == "tool"}
+        check("history: tool_call answered in history", want and want <= got)
+
+
+def test_permission_path_norm() -> None:
+    """P0-7: klucz allowlisty normalizuje ścieżkę (src/a.py == ./src/a.py)."""
+    gate = PermissionGate()
+    gate.allow("write_file", {"path": "src/a.py"})
+    check("path key: exact", not gate.needs_approval("write_file", {"path": "src/a.py"}))
+    check("path key: ./ prefix", not gate.needs_approval("write_file", {"path": "./src/a.py"}))
+    check("path key: ./ middle", not gate.needs_approval("write_file", {"path": "src/./a.py"}))
+
+
+def test_permissions_persistence() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        store = Path(d) / "grok_permissions.json"
+
+        gate = PermissionGate(store)
+        check("fresh gate needs approval", gate.needs_approval("write_file", {"path": "a.py"}))
+        gate.allow("write_file", {"path": "a.py"})
+        check("allowed rule skips approval", not gate.needs_approval("write_file", {"path": "a.py"}))
+        check("rule listed", "tool:write_file:a.py" in gate.rules())
+        check("store file written", store.exists())
+
+        reloaded = PermissionGate(store)
+        check("rule survives reload", not reloaded.needs_approval("write_file", {"path": "a.py"}))
+
+        reloaded.clear()
+        check("clear empties rules", reloaded.rules() == [])
+        check("clear persists", PermissionGate(store).rules() == [])
+
+
+def test_glob_sandbox() -> None:
+    """P0-2: glob nie może enumerować plików poza workspace."""
+    with tempfile.TemporaryDirectory() as parent:
+        secret = Path(parent) / "secret.txt"
+        secret.write_text("TOPSECRET", encoding="utf-8")
+        wsdir = Path(parent) / "ws"
+        (wsdir / "pkg").mkdir(parents=True)
+        (wsdir / "pkg" / "inside.py").write_text("x = 1\n", encoding="utf-8")
+        ws = Workspace(str(wsdir))
+
+        check("glob finds inside file", "pkg/inside.py" in T.glob(ws, "**/*.py"))
+
+        esc = T.glob(ws, "../**/*")
+        check("glob '..' does not leak outside", "secret.txt" not in esc and "TOPSECRET" not in esc)
+        check("glob '..' rejected", esc.startswith("Error"))
+
+        absp = T.glob(ws, str(Path(parent) / "*"))
+        check("glob absolute does not leak outside", "secret.txt" not in absp)
+        check("glob absolute rejected", absp.startswith("Error"))
+
+
+def test_grep_limits() -> None:
+    """P0-3: grep ma timeout ReDoS oraz pomija pliki duże i binarne."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+
+        # ReDoS: katastrofalny wzorzec ma być przerwany timeoutem, nie wisieć.
+        # Tail 'b' uniemożliwia dopasowanie → wymusza wykładniczy backtracking.
+        (ws.root / "redos.txt").write_text("a" * 4000 + "b\n", encoding="utf-8")
+        res = T.grep(ws, r"(a|a)*$")
+        check("grep ReDoS times out", res.startswith("Error") and "timed out" in res)
+
+        # plik binarny (bajt NUL) pomijany
+        (ws.root / "blob.bin").write_bytes(b"needle\x00needle")
+        check("grep skips binary file", "blob.bin" not in T.grep(ws, "needle"))
+
+        # plik > limitu pomijany mimo trafienia w treści
+        big = ws.root / "big.txt"
+        big.write_text("needle\n" * (T.GREP_MAX_FILE_BYTES // 7 + 1000), encoding="utf-8")
+        big_res = T.grep(ws, "needle")
+        check("grep skips oversized file", "big.txt" not in big_res and "skipped" in big_res)
+
+        # zwykłe trafienie nadal działa
+        (ws.root / "ok.txt").write_text("find me here\n", encoding="utf-8")
+        check("grep still matches normal file", "ok.txt:1:" in T.grep(ws, "find me"))
+
+
+def test_run_command_stop() -> None:
+    """P0-4: Stop przerywa działającą komendę (i jej drzewo) bez czekania na koniec."""
+    import time as _t
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        cmd = "ping -n 10 127.0.0.1" if os.name == "nt" else "sleep 10"
+        start = _t.monotonic()
+        stop_at = start + 0.5
+        out = T.run_command(ws, cmd, timeout=30, stop_flag=lambda: _t.monotonic() > stop_at)
+        elapsed = _t.monotonic() - start
+        check("run_command honors stop", "[stopped]" in out)
+        check("run_command stops promptly (tree-kill)", elapsed < 5)
+
+
+def test_atomic_write() -> None:
+    """P0-7: write_file/edit_file zapisują atomowo, bez plików tymczasowych."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        T.write_file(ws, "sub/f.txt", "hello")
+        check("atomic write content", (ws.root / "sub/f.txt").read_text(encoding="utf-8") == "hello")
+        T.edit_file(ws, "sub/f.txt", "hello", "world")
+        check("atomic edit content", (ws.root / "sub/f.txt").read_text(encoding="utf-8") == "world")
+        leftovers = list((ws.root / "sub").glob(".grok-*.tmp"))
+        check("no temp file left behind", leftovers == [])
+
+
+def test_symlink_sandbox() -> None:
+    """P0-7: enumeratory nie podążają za symlinkiem/junctionem poza workspace."""
+    import subprocess as _sp
+    with tempfile.TemporaryDirectory() as parent:
+        secret_dir = Path(parent) / "secret"
+        secret_dir.mkdir()
+        (secret_dir / "leak.txt").write_text("TOPSECRET_GREP\n", encoding="utf-8")
+        wsdir = Path(parent) / "ws"
+        wsdir.mkdir()
+        (wsdir / "ok.txt").write_text("TOPSECRET_GREP visible here\n", encoding="utf-8")
+
+        link = wsdir / "escape"
+        made = False
+        try:
+            if os.name == "nt":
+                r = _sp.run(["cmd", "/c", "mklink", "/J", str(link), str(secret_dir)],
+                            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                made = r.returncode == 0
+            else:
+                os.symlink(str(secret_dir), str(link))
+                made = True
+        except Exception:
+            made = False
+
+        ws = Workspace(str(wsdir))
+        if made:
+            res = T.grep(ws, "TOPSECRET_GREP")
+            check("grep does not follow link outside", "leak.txt" not in res)
+            check("grep still finds in-workspace match", "ok.txt:1:" in res)
+            check("list_dir skips escaping link", "escape" not in T.list_dir(ws, "."))
+        else:
+            check("symlink/junction test skipped (no privilege)", True)
+
+
+def test_run_command_env_scrub() -> None:
+    """P0-6: run_command nie ujawnia sekretów (GROK_CORE_TOKEN, XAI_API_KEY) modelowi."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        keys = ("GROK_CORE_TOKEN", "XAI_API_KEY", "GROK_VISIBLE")
+        saved = {k: os.environ.get(k) for k in keys}
+        try:
+            os.environ["GROK_CORE_TOKEN"] = "LEAKTOKEN_should_not_appear"
+            os.environ["XAI_API_KEY"] = "sk-LEAKKEY_should_not_appear"
+            os.environ["GROK_VISIBLE"] = "VISIBLE_marker_ok"
+
+            env = T._scrubbed_env()
+            check("env scrub removes token", "GROK_CORE_TOKEN" not in env)
+            check("env scrub removes api key", "XAI_API_KEY" not in env)
+            check("env scrub keeps normal var", env.get("GROK_VISIBLE") == "VISIBLE_marker_ok")
+
+            dump = "set" if os.name == "nt" else "env"
+            out = T.run_command(ws, dump)
+            check("run_command hides token", "LEAKTOKEN_should_not_appear" not in out)
+            check("run_command hides api key", "sk-LEAKKEY_should_not_appear" not in out)
+            check("run_command keeps normal var", "VISIBLE_marker_ok" in out)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
+def test_command_security() -> None:
+    """P0-1: łańcuchowanie komend nie obchodzi allowlisty „Always allow"."""
+    # detektor metaznaków — świadomy cudzysłowów
+    check("metachars: plain command safe", command_metachars("git status") == set())
+    check("metachars: && flagged", "&" in command_metachars("git status && rm -rf x"))
+    check("metachars: pipe flagged", "|" in command_metachars("cat a | sh"))
+    check("metachars: semicolon flagged", ";" in command_metachars("git; curl evil"))
+    check("metachars: $() flagged", "$" in command_metachars("echo $(whoami)"))
+    check("metachars: backtick flagged", "`" in command_metachars("echo `id`"))
+    check("metachars: quoted parens safe", command_metachars('python -c "print(1)"') == set())
+    check("metachars: quoted path safe", command_metachars('cd "C:\\Program Files"') == set())
+    check("metachars: unbalanced quote rejected", '"' in command_metachars('echo "oops'))
+
+    # bramka uprawnień: klucz po pełnej komendzie, nie po nazwie exe
+    with tempfile.TemporaryDirectory() as d:
+        store = Path(d) / "grok_permissions.json"
+        gate = PermissionGate(store)
+
+        check("run_command needs approval (fresh)",
+              gate.needs_approval("run_command", {"command": "git status"}))
+        gate.allow("run_command", {"command": "git status"})
+        check("allowed exact command skips approval",
+              not gate.needs_approval("run_command", {"command": "git status"}))
+        check("whitespace variant matches allowlist",
+              not gate.needs_approval("run_command", {"command": "git   status"}))
+        # KLUCZOWE: inna podkomenda tego samego exe NIE jest auto-dopuszczona
+        check("different git subcommand still asks",
+              gate.needs_approval("run_command", {"command": "git push --force"}))
+        # KLUCZOWE: doklejony payload NIE jest auto-dopuszczony mimo `git status`
+        check("chained payload still asks",
+              gate.needs_approval("run_command", {"command": "git status && rm -rf x"}))
+
+        # komendy z metaznakami nie da się dopuścić („Always allow")
+        gate.allow("run_command", {"command": "git status && rm -rf x"})
+        check("dangerous command not allowlisted",
+              gate.needs_approval("run_command", {"command": "git status && rm -rf x"}))
+        check("no dangerous rule persisted",
+              all("&" not in r and "rm -rf" not in r for r in gate.rules()))
+
+    # egzekutor odrzuca metaznaki PRZED uruchomieniem (nic za && się nie wykona)
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        chained = T.run_command(ws, "echo first && echo second")
+        check("run_command rejects chaining",
+              chained.startswith("Error") and "second" not in chained)
+        check("run_command rejects pipe", T.run_command(ws, "echo a | sh").startswith("Error"))
+        safe = T.run_command(ws, "echo hello-agent")
+        check("run_command still runs safe command", "hello-agent" in safe and "exit 0" in safe)
+
+
+def main() -> int:
+    test_tools()
+    test_sandbox()
+    test_agent_loop()
+    test_interrupted_tool_calls()
+    test_history_balanced_after_tools()
+    test_permission_path_norm()
+    test_permissions_persistence()
+    test_glob_sandbox()
+    test_grep_limits()
+    test_run_command_stop()
+    test_run_command_env_scrub()
+    test_atomic_write()
+    test_symlink_sandbox()
+    test_command_security()
+    ok = True
+    for name, passed in checks:
+        print(f"  [{'PASS' if passed else 'FAIL'}] {name}")
+        ok = ok and passed
+    print("RESULT:", "OK" if ok else "FAILED")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

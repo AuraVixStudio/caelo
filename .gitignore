@@ -1,0 +1,45 @@
+# ── Python (legacy app + grok_core sidecar) ──
+__pycache__/
+*.pyc
+.venv/
+grok_core/.venv/
+
+# ── Build / dystrybucja — ZAKOTWICZONE do korzenia repo (P3-2) ──
+# Bez wiodącego "/" wzorzec "build/" łapał też desktop/build/ i ignorował IKONĘ
+# INSTALATORA (desktop/build/icon.ico = electron-builder buildResources) → fresh
+# clone budował instalator bez ikony. Kotwiczymy do korzenia: PyInstaller pisze do
+# ./build (working) i ./dist/grok-core (sidecar), legacy do ./Output. Wyjście
+# desktopu jest osobno (desktop/dist/, desktop/out/ niżej).
+/build/
+/dist/
+/Output/
+# appicon.ico jest generowany przez make_icon.py (artefakt) — nie commitujemy.
+appicon.ico
+# …ale ikona instalatora to ŹRÓDŁO buildu — wymuszamy ją do repo (P3-2).
+!desktop/build/icon.ico
+
+# ── Node / Electron (desktop) ──
+node_modules/
+desktop/node_modules/
+desktop/out/
+desktop/dist/
+desktop/.vite/
+
+# ── Dane użytkownika i sekrety (NIE commitować) ──
+# Jawne nazwy (dokumentują, które pliki istnieją) + SIATKA wzorców (P3-3): wcześniej
+# ignorowane były tylko nazwy 1:1, więc przyszłe/poboczne warianty PRZECIEKAŁYBY do
+# repo — np. grok_cache.json, kopie grok_auth.json.bak, temp *.json.tmp z atomic_write,
+# pliki środowisk *.env / .env.local, czy *.token.
+.env
+*.env
+.env.*
+*.token
+grok_auth.json
+grok_settings.json
+grok_config.json
+grok_chats.json
+grok_permissions.json
+# Siatka: dowolny grok_*.json (też przyszłe) oraz ich kopie/temp (.bak/.tmp/.old).
+grok_*.json
+grok_*.json.*
+generated_history/

@@ -1,0 +1,156 @@
+// Wspólny cache stanu serwera (P2-2). `/models` i `/settings` były pobierane
+// niezależnie w 6 modułach (ChatView/CodeView/Image/Video/Voice/Settings) — przy
+// przełączaniu modułów (każdy remount = nowy GET) to się mnożyło. Tu trzymamy je
+// RAZ per połączenie (baseUrl+token): deduplikacja zapytań w locie, współdzielony
+// wynik między modułami i write-through przy zapisie ustawień, by kolejny montaż
+// widział świeże dane bez ponownego GET-a. Bez nowej zależności (react-query/zustand
+// świadomie nieużywane) — mały store + subskrypcja przez useState/useEffect.
+
+import { useEffect, useState } from 'react'
+import {
+  getModels,
+  getSettings,
+  putSettings,
+  type Conn,
+  type ModelsResp,
+  type SettingsPatch,
+  type SettingsResp
+} from './api'
+
+function connKey(conn: Conn): string {
+  return `${conn.baseUrl}|${conn.token}`
+}
+
+export interface Snapshot<T> {
+  data: T | null
+  error: string | null
+  loading: boolean
+}
+
+interface Entry<T> {
+  snapshot: Snapshot<T>
+  promise: Promise<T> | null
+  subscribers: Set<() => void>
+}
+
+function createResource<T>(fetcher: (conn: Conn) => Promise<T>) {
+  const entries = new Map<string, Entry<T>>()
+  const idle: Snapshot<T> = { data: null, error: null, loading: false }
+
+  function entryFor(key: string): Entry<T> {
+    let e = entries.get(key)
+    if (!e) {
+      e = { snapshot: idle, promise: null, subscribers: new Set() }
+      entries.set(key, e)
+    }
+    return e
+  }
+
+  function emit(e: Entry<T>, snapshot: Snapshot<T>): void {
+    e.snapshot = snapshot
+    e.subscribers.forEach((fn) => fn())
+  }
+
+  function load(conn: Conn, force = false): Promise<T> {
+    const e = entryFor(connKey(conn))
+    if (!force && e.snapshot.data !== null) return Promise.resolve(e.snapshot.data)
+    if (e.promise) return e.promise // dedup: jedno zapytanie w locie
+    emit(e, { data: e.snapshot.data, error: null, loading: true })
+    const p = fetcher(conn)
+      .then((data) => {
+        e.promise = null
+        emit(e, { data, error: null, loading: false })
+        return data
+      })
+      .catch((err) => {
+        e.promise = null
+        emit(e, {
+          data: e.snapshot.data,
+          error: String((err as Error)?.message || err),
+          loading: false
+        })
+        throw err
+      })
+    e.promise = p
+    return p
+  }
+
+  /** Nadpisuje wartość w cache (write-through po zapisie) i budzi subskrybentów. */
+  function write(conn: Conn, data: T): void {
+    emit(entryFor(connKey(conn)), { data, error: null, loading: false })
+  }
+
+  function peek(conn: Conn): T | null {
+    return entries.get(connKey(conn))?.snapshot.data ?? null
+  }
+
+  function useResource(conn: Conn): Snapshot<T> {
+    const key = connKey(conn)
+    // Lazy init: jeśli inny moduł już pobrał dane, pokaż je bez migotania.
+    const [snap, setSnap] = useState<Snapshot<T>>(() => entryFor(key).snapshot)
+    useEffect(() => {
+      const e = entryFor(key)
+      const update = (): void => setSnap(e.snapshot)
+      e.subscribers.add(update)
+      update() // domknij wyścig render→effect (snapshot mógł się zmienić)
+      // Pobierz, gdy brak danych i nic nie leci. Błąd NIE jest cache'owany na
+      // stałe — kolejny montaż modułu ponowi próbę (jak wcześniej per-komponent),
+      // ale udany wynik jest współdzielony (dedup na ścieżce sukcesu).
+      if (e.snapshot.data === null && e.promise === null) {
+        void load(conn).catch(() => undefined)
+      }
+      return () => {
+        e.subscribers.delete(update)
+      }
+      // conn zakodowany w `key` (baseUrl+token) — wystarczy reagować na key.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [key])
+    return snap
+  }
+
+  return { load, write, peek, useResource }
+}
+
+const modelsResource = createResource(getModels)
+const settingsResource = createResource(getSettings)
+
+/** Współdzielony, cache'owany odczyt `/models` (jeden GET na połączenie). */
+export function useModels(conn: Conn): {
+  models: ModelsResp | null
+  error: string | null
+  loading: boolean
+} {
+  const s = modelsResource.useResource(conn)
+  return { models: s.data, error: s.error, loading: s.loading }
+}
+
+/** Współdzielony, cache'owany odczyt `/settings`. */
+export function useSettings(conn: Conn): {
+  settings: SettingsResp | null
+  error: string | null
+  loading: boolean
+} {
+  const s = settingsResource.useResource(conn)
+  return { settings: s.data, error: s.error, loading: s.loading }
+}
+
+/**
+ * Zapisuje ustawienia (PUT /settings) i aktualizuje cache (write-through), żeby
+ * kolejne montowania modułów widziały świeże wartości bez ponownego GET-a. API key
+ * nigdy nie wraca z serwera — odzwierciedlamy tylko `has_api_key`. Zwraca/propaguje
+ * błąd jak `putSettings` (wołający pokazuje realny wynik — por. P1-6).
+ */
+export async function saveSettings(conn: Conn, patch: SettingsPatch): Promise<{ ok: boolean }> {
+  const res = await putSettings(conn, patch)
+  const current = settingsResource.peek(conn)
+  if (current) {
+    const next: SettingsResp = { ...current }
+    if (patch.chat_model !== undefined) next.chat_model = patch.chat_model
+    if (patch.code_model !== undefined) next.code_model = patch.code_model
+    if (patch.system_prompt !== undefined) next.system_prompt = patch.system_prompt
+    if (patch.chat_temperature !== undefined) next.chat_temperature = patch.chat_temperature
+    if (patch.api_key) next.has_api_key = true
+    settingsResource.write(conn, next)
+  }
+  return res
+}

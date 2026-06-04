@@ -1,0 +1,6 @@
+customtkinter
+Pillow
+requests
+python-dotenv
+tkinterdnd2
+pyinstaller

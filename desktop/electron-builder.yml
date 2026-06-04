@@ -1,0 +1,35 @@
+appId: com.grok.desktop
+productName: Grok Desktop
+copyright: Copyright © 2026 grooverpty
+
+directories:
+  buildResources: build      # opcjonalna ikona: desktop/build/icon.ico (inaczej domyślna Electron)
+  output: dist               # instalator ląduje w desktop/dist (gitignored)
+
+# Co trafia do paczki aplikacji (asar). Sidecar idzie osobno przez extraResources.
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+# Spakowany sidecar PyInstaller (zbuduj wcześniej: build_sidecar.ps1 -> ../dist/grok-core).
+# Trafia do resources/grok-core, skąd uruchamia go proces główny (app.isPackaged).
+extraResources:
+  - from: ../dist/grok-core
+    to: grok-core
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Grok-Desktop-Setup-${version}.${ext}
+  shortcutName: Grok Desktop
+  uninstallDisplayName: Grok Desktop

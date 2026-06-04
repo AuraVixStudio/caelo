@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "renderer-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["desktop/node_modules/vite/bin/vite.js", "--config", "desktop/vite.preview.config.ts"],
+      "port": 4599
+    }
+  ]
+}
