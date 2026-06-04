@@ -533,6 +533,248 @@ def _live_media_voice_routes(base: str, token: str, checks: list) -> None:
     checks.append(("/voice/tts (empty text) == 422", s == 422))
 
 
+def _unit_rest_token_auth(checks: list) -> None:
+    """P1-10: require_token jest FAIL-CLOSED bez skonfigurowanego tokenu (jak WS)."""
+    import types
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core.state import require_token  # noqa: E402
+
+    def fake(state_token: str):
+        return types.SimpleNamespace(
+            app=types.SimpleNamespace(state=types.SimpleNamespace(session_token=state_token)))
+
+    def raises(state_token, authorization, status) -> bool:
+        try:
+            require_token(fake(state_token), authorization)
+            return False
+        except HTTPException as e:
+            return e.status_code == status
+
+    checks.append(("rest_auth: valid bearer accepted",
+                   require_token(fake("secret"), "Bearer secret") is None))
+    checks.append(("rest_auth: missing bearer rejected (401)", raises("secret", None, 401)))
+    checks.append(("rest_auth: bad bearer rejected (403)", raises("secret", "Bearer nope", 403)))
+
+    os.environ.pop("GROK_CORE_ALLOW_NO_TOKEN", None)
+    checks.append(("rest_auth: no-token config -> DENIED (fail-closed)",
+                   raises("", "Bearer anything", 401)))
+    os.environ["GROK_CORE_ALLOW_NO_TOKEN"] = "1"
+    checks.append(("rest_auth: explicit opt-in allows no-token",
+                   require_token(fake(""), None) is None))
+    os.environ.pop("GROK_CORE_ALLOW_NO_TOKEN", None)
+
+
+def _unit_json_corrupt_backup(checks: list) -> None:
+    """P1-11: load_json_or_backup — brak pliku → default; korupcja → kopia .corrupt."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        missing = Path(d) / "nope.json"
+        checks.append(("json loader: missing file -> default",
+                       config.load_json_or_backup(missing, {"x": 1}) == {"x": 1}))
+
+        good = Path(d) / "good.json"
+        good.write_text('{"a": 2}', encoding="utf-8")
+        checks.append(("json loader: valid json returned",
+                       config.load_json_or_backup(good, None) == {"a": 2}))
+
+        bad = Path(d) / "bad.json"
+        bad.write_text("{not valid json", encoding="utf-8")
+        res = config.load_json_or_backup(bad, {"fallback": True})
+        backup = Path(str(bad) + ".corrupt")
+        checks.append(("json loader: corrupt -> default", res == {"fallback": True}))
+        checks.append(("json loader: corrupt moved to .corrupt (original gone)",
+                       backup.exists() and not bad.exists()))
+
+
+def _unit_error_sanitization(checks: list) -> None:
+    """P1-13: git nie zwraca surowego stderr (ścieżek FS) — generyczny detail."""
+    import types
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core.routes import git as git_route  # noqa: E402
+
+    abs_path = "C:\\Users\\victim\\secret\\repo\\.git"
+    fakews = types.SimpleNamespace(root=Path("."))
+
+    orig = git_route._run_git
+    git_route._run_git = lambda ws, args, timeout=20: (1, "", f"fatal: {abs_path}")
+    try:
+        st = git_route.status(ws=fakews)
+        checks.append(("error sanit: git status detail generic (no abs path)",
+                       abs_path not in (st.get("detail") or "")))
+        try:
+            git_route.commit(types.SimpleNamespace(message="x", stage_all=False), ws=fakews)
+            commit_detail = ""
+        except HTTPException as e:
+            commit_detail = str(e.detail)
+        checks.append(("error sanit: git commit detail generic (no abs path)",
+                       abs_path not in commit_detail and commit_detail == "git commit failed"))
+    finally:
+        git_route._run_git = orig
+
+
+def _unit_media_download_guard(checks: list) -> None:
+    """P1-14: pobieranie mediów — tylko https, twardy limit rozmiaru (Content-Length)."""
+    import tempfile
+    import types
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import grok_core.state as state_mod  # noqa: E402
+
+    class _Resp:
+        def __init__(self, chunks, headers=None):
+            self._chunks = chunks
+            self.headers = headers or {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, n):
+            for c in self._chunks:
+                yield c
+
+    calls = {"n": 0}
+
+    def fake_get(url, **kw):
+        calls["n"] += 1
+        if "BIG" in url:
+            return _Resp([b"x"], headers={"Content-Length": str(state_mod.MAX_MEDIA_BYTES + 1)})
+        return _Resp([b"abc", b"def"])
+
+    orig = state_mod.requests
+    state_mod.requests = types.SimpleNamespace(get=fake_get)
+    try:
+        b = state_mod.Backend.__new__(state_mod.Backend)  # bez __init__ (bez I/O)
+        with tempfile.TemporaryDirectory() as d:
+            save_dir = Path(d)
+
+            p = b._download_media("https://x/v.mp4", save_dir, "video", ".mp4")
+            checks.append(("media guard: https streamed to disk",
+                           Path(p).exists() and Path(p).read_bytes() == b"abcdef" and calls["n"] == 1))
+
+            calls["n"] = 0
+            refused = False
+            try:
+                b._download_media("http://internal/x", save_dir, "video", ".mp4")
+            except ValueError:
+                refused = True
+            checks.append(("media guard: non-https refused before fetch",
+                           refused and calls["n"] == 0))
+
+            capped = False
+            try:
+                b._download_media("https://x/BIG.mp4", save_dir, "video", ".mp4")
+            except ValueError:
+                capped = True
+            checks.append(("media guard: oversize (Content-Length) refused", capped))
+    finally:
+        state_mod.requests = orig
+
+
+def _unit_fs_routes(checks: list) -> None:
+    """P3-8: zachowanie tras /fs (write/read/tree) + sandbox — in-process, bez xAI
+    i bez zaśmiecania realnych plików danych (route'y wołane wprost na temp workspace)."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core.agent.workspace import Workspace  # noqa: E402
+    from grok_core.routes import fs as fs_route  # noqa: E402
+
+    def rejects400(fn) -> bool:
+        try:
+            fn()
+            return False
+        except HTTPException as e:
+            return e.status_code == 400
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        r = fs_route.write(fs_route.WriteReq(path="sub/hello.txt", content="hi from test"), ws=ws)
+        checks.append(("/fs/write ok + on disk",
+                       r.get("ok") is True
+                       and (Path(d) / "sub/hello.txt").read_text(encoding="utf-8") == "hi from test"))
+
+        r = fs_route.read("sub/hello.txt", ws=ws)
+        checks.append(("/fs/read round-trips content", r.get("content") == "hi from test"))
+
+        r = fs_route.tree(".", ws=ws)
+        names = [e["name"] for e in r["entries"]]
+        checks.append(("/fs/tree lists workspace entry", "sub" in names))
+
+        # sandbox: ucieczki poza workspace → 400 (nie wyciekają plików spoza root)
+        checks.append(("/fs/read rejects '..' escape (400)",
+                       rejects400(lambda: fs_route.read("../../etc/passwd", ws=ws))))
+        checks.append(("/fs/write rejects '..' escape (400)",
+                       rejects400(lambda: fs_route.write(fs_route.WriteReq(path="../escape.txt", content="x"), ws=ws))))
+        checks.append(("/fs/tree rejects '..' escape (400)",
+                       rejects400(lambda: fs_route.tree("../..", ws=ws))))
+
+
+def _unit_git_routes(checks: list) -> None:
+    """P3-8: zachowanie tras /git (status/commit + walidacja) — in-process."""
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core.agent.workspace import Workspace  # noqa: E402
+    from grok_core.routes import git as git_route  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        r = git_route.status(ws=ws)
+        checks.append(("/git/status non-repo -> is_repo false", r.get("is_repo") is False))
+
+        ready = True
+        try:
+            for args in (["init"], ["config", "user.email", "t@t.test"], ["config", "user.name", "Tester"]):
+                subprocess.run(["git", *args], cwd=d, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=15, check=True)
+        except Exception:
+            ready = False
+
+        if not ready:
+            checks.append(("git unavailable — repo tests skipped", True))
+            return
+
+        (Path(d) / "a.txt").write_text("hello\n", encoding="utf-8")
+        r = git_route.status(ws=ws)
+        checks.append(("/git/status repo -> is_repo true", r.get("is_repo") is True))
+
+        r = git_route.commit(git_route.CommitReq(message="test commit", stage_all=True), ws=ws)
+        checks.append(("/git/commit (stage_all) -> ok", r.get("ok") is True))
+
+        def rejects400(fn) -> bool:
+            try:
+                fn()
+                return False
+            except HTTPException as e:
+                return e.status_code == 400
+
+        checks.append(("/git/commit empty message -> 400",
+                       rejects400(lambda: git_route.commit(
+                           git_route.CommitReq(message="   ", stage_all=False), ws=ws))))
+
+
 def main() -> int:
     token = secrets.token_urlsafe(16)
     env = dict(os.environ, GROK_CORE_TOKEN=token)
@@ -643,6 +885,16 @@ def main() -> int:
 
         # P3-1: zapis ustawień nie rusza grok_config.json (własność plików JSON).
         _unit_settings_ownership(checks)
+
+        # M6 — stabilność/dane:
+        _unit_rest_token_auth(checks)        # P1-10: REST fail-closed bez tokenu
+        _unit_json_corrupt_backup(checks)    # P1-11: loader z backupem .corrupt
+        _unit_error_sanitization(checks)     # P1-13: git nie wycieka stderr/ścieżek
+        _unit_media_download_guard(checks)   # P1-14: https-only + limit rozmiaru
+
+        # M8 — testy tras (P3-8): fs/git in-process (sandbox, round-trip, commit).
+        _unit_fs_routes(checks)
+        _unit_git_routes(checks)
 
         ok = True
         for name, passed in checks:

@@ -149,6 +149,8 @@ export function ChatView({ conn }: { conn: Conn }) {
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
+  // P2-11: historia ostatniej tury (do „Retry" po błędzie streamingu).
+  const lastTurnRef = useRef<ChatMessage[] | null>(null)
 
   // P2-2: współdzielony cache zamiast osobnych GET-ów /models i /settings.
   const { models: modelsResp } = useModels(conn)
@@ -200,10 +202,44 @@ export function ChatView({ conn }: { conn: Conn }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [convo.active?.messages])
 
+  /** Uruchamia turę dla danej historii (wspólne dla send i retry). Dba o pusty
+   *  bąbel asystenta do streamowania i NIE utrwala błędu jako treści (P2-11). */
+  function runTurn(history: ChatMessage[]): void {
+    lastTurnRef.current = history
+    setError(null)
+    convo.patchActive((c) => {
+      const last = c.messages[c.messages.length - 1]
+      // Dodaj pusty bąbel asystenta tylko jeśli go jeszcze nie ma (retry po błędzie).
+      return last && last.role === 'assistant'
+        ? c
+        : { ...c, messages: [...c.messages, { role: 'assistant', content: '' }] }
+    })
+
+    stream.start(
+      { messages: toApiMessages(history), model, temperature, system_prompt: systemPrompt },
+      {
+        onDelta: (full) =>
+          convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) })),
+        onDone: (full) =>
+          convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) })),
+        onError: (err) => {
+          // P2-11: pokaż błąd w pasku (z „Retry") zamiast zapisywać „⚠️ …" jako
+          // odpowiedź asystenta; usuń pusty bąbel, by historia została czysta.
+          setError(err)
+          convo.patchActive((c) => {
+            const msgs = c.messages.slice()
+            const last = msgs[msgs.length - 1]
+            if (last && last.role === 'assistant' && !last.content) msgs.pop()
+            return { ...c, messages: msgs }
+          })
+        }
+      }
+    )
+  }
+
   function send(): void {
     const text = input.trim()
     if ((!text && att.attachments.length === 0) || stream.streaming) return
-    setError(null)
 
     const userMsg: ChatMessage = {
       role: 'user',
@@ -218,28 +254,18 @@ export function ChatView({ conn }: { conn: Conn }) {
         c.title === 'New chat'
           ? titleFromText(text || att.attachments[0]?.name || 'Attachment')
           : c.title,
-      messages: [...c.messages, userMsg, { role: 'assistant', content: '' }]
+      messages: [...c.messages, userMsg]
     }))
     setInput('')
     att.clear()
     if (taRef.current) taRef.current.style.height = 'auto'
 
-    stream.start(
-      { messages: toApiMessages(history), model, temperature, system_prompt: systemPrompt },
-      {
-        onDelta: (full) =>
-          convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) })),
-        onDone: (full) =>
-          convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) })),
-        onError: (err) => {
-          setError(err)
-          convo.patchActive((c) => ({
-            ...c,
-            messages: updateLastAssistant(c.messages, `⚠️ ${err}`)
-          }))
-        }
-      }
-    )
+    runTurn(history)
+  }
+
+  function retry(): void {
+    if (stream.streaming || !lastTurnRef.current) return
+    runTurn(lastTurnRef.current)
   }
 
   function onModelChange(value: string): void {
@@ -300,7 +326,9 @@ export function ChatView({ conn }: { conn: Conn }) {
         maxSize="36%"
         collapsible
         collapsedSize="0%"
-        onResize={(size) => setConvosCollapsed(size.asPercentage <= 0.5)}
+        // P2-14: użyj własnej detekcji biblioteki (niezależnej od jednostek size),
+        // zamiast progu na `asPercentage` (mylił „wąski" z „zwinięty").
+        onResize={() => setConvosCollapsed(convosPanelRef.current?.isCollapsed() ?? false)}
         style={{ overflow: 'hidden' }}
         className="flex min-h-0 flex-col bg-surface"
       >
@@ -391,15 +419,21 @@ export function ChatView({ conn }: { conn: Conn }) {
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     placeholder="Optional instructions that steer the assistant…"
                   />
-                  <label className="mb-1.5 mt-3 block text-xs font-medium text-muted">
+                  <label
+                    htmlFor="chat-temperature"
+                    className="mb-1.5 mt-3 block text-xs font-medium text-muted"
+                  >
                     Temperature: {temperature.toFixed(2)}
                   </label>
                   <input
+                    id="chat-temperature"
                     type="range"
                     min={0}
                     max={1}
                     step={0.05}
                     value={temperature}
+                    aria-label="Temperature"
+                    aria-valuetext={temperature.toFixed(2)}
                     onChange={(e) => setTemperature(parseFloat(e.target.value))}
                     className="w-full accent-accent"
                   />
@@ -431,7 +465,13 @@ export function ChatView({ conn }: { conn: Conn }) {
             </p>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto" ref={scrollRef}>
+          <div
+            className="flex-1 overflow-y-auto"
+            ref={scrollRef}
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation"
+          >
             <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
               {messages.map((m, i) => (
                 <ChatMessageRow
@@ -447,7 +487,19 @@ export function ChatView({ conn }: { conn: Conn }) {
           </div>
         )}
 
-        {displayError ? <div className="px-4 pb-1 text-xs text-error">{displayError}</div> : null}
+        {displayError ? (
+          <div className="flex items-center justify-center gap-2 px-4 pb-1 text-xs text-error">
+            <span>{displayError}</span>
+            {error && !stream.streaming && lastTurnRef.current ? (
+              <button
+                onClick={retry}
+                className="rounded px-1.5 py-0.5 font-medium text-error underline outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="shrink-0 px-4 pb-5 pt-2">
           <div className="mx-auto max-w-3xl">

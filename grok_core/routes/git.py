@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from grok_core.state import Backend, get_backend
+from grok_core.state import require_workspace
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/git", tags=["git"])
 
@@ -20,13 +23,6 @@ class StageReq(BaseModel):
 class CommitReq(BaseModel):
     message: str
     stage_all: bool = False  # `git add -A` przed commitem (objęcie nowych plików)
-
-
-def _require_ws(b: Backend):
-    ws = b.get_workspace()
-    if ws is None:
-        raise HTTPException(status_code=400, detail="No workspace selected")
-    return ws
 
 
 def _run_git(ws, args, timeout=20):
@@ -43,11 +39,12 @@ def _run_git(ws, args, timeout=20):
 
 
 @router.get("/status")
-def status(b: Backend = Depends(get_backend)) -> dict:
-    ws = _require_ws(b)
+def status(ws=Depends(require_workspace)) -> dict:
     code, out, err = _run_git(ws, ["status", "--porcelain=v1", "--branch"])
     if code != 0:
-        return {"is_repo": False, "detail": err.strip()}
+        # P1-13: nie zwracaj surowego stderr (może zawierać ścieżki bezwzględne).
+        log.warning("git status failed: %s", err.strip())
+        return {"is_repo": False, "detail": "Not a git repository or git unavailable."}
     branch = ""
     files = []
     for ln in out.splitlines():
@@ -59,40 +56,41 @@ def status(b: Backend = Depends(get_backend)) -> dict:
 
 
 @router.get("/diff")
-def diff(path: str = "", b: Backend = Depends(get_backend)) -> dict:
-    ws = _require_ws(b)
+def diff(path: str = "", ws=Depends(require_workspace)) -> dict:
     args = ["diff"]
     if path:
         args += ["--", path]
     code, out, err = _run_git(ws, args)
     if code != 0 and err.strip():
-        return {"is_repo": False, "detail": err.strip()}
+        log.warning("git diff failed: %s", err.strip())  # P1-13
+        return {"is_repo": False, "detail": "git diff failed."}
     return {"diff": out}
 
 
 @router.post("/add")
-def stage(req: StageReq, b: Backend = Depends(get_backend)) -> dict:
+def stage(req: StageReq, ws=Depends(require_workspace)) -> dict:
     """Stage'uje wskazane ścieżki, lub wszystko (`git add -A`) gdy lista pusta."""
-    ws = _require_ws(b)
     args = ["add"] + (["--", *req.paths] if req.paths else ["-A"])
     code, out, err = _run_git(ws, args)
     if code != 0:
-        raise HTTPException(status_code=400, detail=err.strip() or "git add failed")
+        log.warning("git add failed: %s", err.strip())  # P1-13
+        raise HTTPException(status_code=400, detail="git add failed")
     return {"ok": True}
 
 
 @router.post("/commit")
-def commit(req: CommitReq, b: Backend = Depends(get_backend)) -> dict:
-    ws = _require_ws(b)
+def commit(req: CommitReq, ws=Depends(require_workspace)) -> dict:
     message = (req.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Commit message is required")
     if req.stage_all:
         code, out, err = _run_git(ws, ["add", "-A"])
         if code != 0:
-            raise HTTPException(status_code=400, detail=err.strip() or "git add failed")
+            log.warning("git add (stage_all) failed: %s", err.strip())  # P1-13
+            raise HTTPException(status_code=400, detail="git add failed")
     code, out, err = _run_git(ws, ["commit", "-m", message])
     if code != 0:
-        detail = (out + err).strip() or "git commit failed"
-        raise HTTPException(status_code=400, detail=detail)
+        # P1-13: stdout+stderr gita (ścieżki, nazwy plików) tylko do logu.
+        log.warning("git commit failed: %s", (out + err).strip())
+        raise HTTPException(status_code=400, detail="git commit failed")
     return {"ok": True, "output": out.strip()}

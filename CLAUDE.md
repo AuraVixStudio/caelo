@@ -70,11 +70,22 @@ propagates from the session. `glob`/`grep`/`list_dir` are sandboxed (reject esca
 symlinks/**junctions** via `resolve()`); `grep` has a ReDoS wall-clock timeout (`regex` module) +
 size/binary skips. Interrupted `tool_calls` get synthetic `tool` results so history stays balanced
 (xAI contract). Writes are atomic (`tools.atomic_write_text`). Don't regress these — `agent_selfcheck.py`
-asserts them (74 checks).
+asserts them (81 checks).
 
-**Streaming bridge:** blocking xAI calls run in a worker thread; deltas/events are pushed to an
-asyncio queue via `loop.call_soon_threadsafe` and sent over the WebSocket. A `{"type":"stop"}`
-frame sets a `threading.Event`. See the WS protocol docstrings at the top of
+**Round-2 hardening (M5–M6, see [`docs/PLAN_NAPRAWY_2.md`](docs/PLAN_NAPRAWY_2.md) — done):** the
+agent WS now uses the shared **`WsStream`** (bounded queue + worker join on disconnect, so the agent
+can't write files / run commands after the socket is gone — P0-9); `command_metachars` is
+**POSIX-aware** and `run_command` runs `shell=False`+`shlex` off-Windows (P0-10); the **terminal pty
+env is scrubbed** like `run_command` (P0-11); REST `require_token` is **fail-closed** like WS (P1-10);
+all five JSON readers go through `config.load_json_or_backup` (corrupt → `.corrupt` backup) and
+`grok_permissions.json`/`grok_auth.json` writes are atomic (P1-11); agent approval has a timeout (P1-12);
+`auth.py`/`git.py` no longer leak raw errors (P1-13); media downloads are https-only + size-capped (P1-14).
+
+**Streaming bridge:** blocking xAI calls run in a worker thread; deltas/events go through the shared
+**`WsStream`** ([`routes/_ws.py`](grok_core/routes/_ws.py)) — a bounded asyncio queue + sender task +
+threadsafe `emit()` (backpressure) + `send()` (event-loop) + worker `track()`/join — used by
+`/chat/stream`, `/agent/stream` and `/terminal` (one skeleton, so fixes can't drift between routes).
+A `{"type":"stop"}` frame sets a `threading.Event`. See the WS protocol docstrings at the top of
 [`routes/chat.py`](grok_core/routes/chat.py) and [`routes/agent.py`](grok_core/routes/agent.py).
 
 ## Commands
@@ -92,10 +103,19 @@ npm run dev                     # Electron + Vite HMR; main process spawns the s
 Electron finds Python in this order: `GROK_CORE_PYTHON` env → `grok_core/.venv/Scripts/python.exe`
 → system `python`. Override: `$env:GROK_CORE_PYTHON = "C:\path\python.exe"; npm run dev`.
 
-**Type-check the frontend (there is no ESLint; typecheck is the check):**
+**Type-check the frontend (primary check) + ESLint + Vitest:**
 ```powershell
 cd desktop; npm run typecheck   # tsc for both node (main/preload) and web (renderer)
+# One-time activation of lint/test (M8 was authored offline, so the devDeps are NOT in package.json —
+# adding them there without updating package-lock.json would break CI's `npm ci`). Install them:
+npm install -D eslint typescript-eslint eslint-plugin-react-hooks globals vitest
+npm run lint                    # P3-7: ESLint flat config (eslint.config.mjs), react-hooks rules only
+npm test                        # P3-9: Vitest unit tests for pure renderer utils (desktop/test/)
 ```
+ESLint is **deliberately narrow** — only `react-hooks` rules (the real gap), not the full recommended
+sets. Vitest tests live in `desktop/test/` (outside the tsconfig include, so they don't affect
+`typecheck`). The configs + tests are committed and ready; only the `npm install -D` above is pending
+(it updates `package.json` + `package-lock.json` together, keeping `npm ci` happy).
 
 **Backend self-checks (this repo's "tests" — no pytest; each script is a self-contained suite):**
 ```powershell
@@ -135,10 +155,14 @@ run external copy would use its own `config.py`, hence its own data dir.)
   chat_history / save_path only). Never write anything else here — it wipes the data.
 - `grok_settings.json` — API key (fallback), chat/code model, system prompt, temperature, `recent_workspaces`.
 - `grok_auth.json` — OAuth tokens (gitignored; never commit).
-- `grok_chats.json` — conversations.
-- `grok_permissions.json` — agent "Always allow" allowlist.
+- `grok_chats.json` — legacy conversation store. **No longer written by the sidecar** (P2-8: `ChatStore`
+  removed from `Backend`); chat conversations now live in the renderer's `localStorage` (`useConversations`).
+  `chats_manager.py` stays in the root (reusable) but is not instantiated.
+- `grok_permissions.json` — agent "Always allow" allowlist (atomic writes, P1-11).
 
-The API key is **stored but never returned** by `/settings` (only `has_api_key`).
+All five JSON readers go through **`config.load_json_or_backup`** (P1-11): a corrupt file is moved to
+`<name>.corrupt` and logged, not silently wiped. The API key is **stored but never returned** by
+`/settings` (only `has_api_key`).
 
 ## Project conventions (override defaults)
 
@@ -165,14 +189,21 @@ The API key is **stored but never returned** by `/settings` (only `has_api_key`)
   (stripped from production), so you can eyeball the redesign without spawning the sidecar.
 - The backend binds **127.0.0.1 only**; never expose it on a routable interface. REST uses
   `Authorization: Bearer <token>` (constant-time compare); WebSockets take the token in the query
-  (`?token=`) because browser WS cannot set headers. **WS auth is fail-closed** (P0-8): the shared
-  `state.ws_authorized` requires the token + an allowed `Origin` (loopback / `file://` / `null`); with
-  NO configured token it **denies** unless `GROK_CORE_ALLOW_NO_TOKEN=1` is set (explicit dev opt-in).
-  CORS is narrowed to dev loopback + packaged `file://` (P1-9), not `*`.
-- **Shared backend helpers added in M1/M2** (reuse them, don't reinvent): `grok_core/errors.py`
-  `upstream_error()` (log raw exc → return generic detail; use for xAI 5xx so raw errors don't leak),
-  `grok_core/validation.py` (route input limits + data-URI validators, used in `media.py`/`voice.py`
-  Pydantic models), `config.atomic_write_text()` (temp + `os.replace` for all JSON state writes).
+  (`?token=`) because browser WS cannot set headers. **Both REST and WS are fail-closed** (WS: P0-8;
+  REST `require_token`: P1-10): `state.ws_authorized` requires the token + an allowed `Origin`
+  (loopback / `file://` / `null`), and with NO configured token **both deny** unless
+  `GROK_CORE_ALLOW_NO_TOKEN=1` is set (explicit dev opt-in; `server.py` logs a warning on startup).
+  CORS is narrowed to dev loopback + packaged `file://` (P1-9), not `*`. The renderer ships a
+  **CSP** meta (P2-10: source-restricted `connect-src`/`img-src`/…), and `main/index.ts` blocks
+  off-origin navigation (`will-navigate`) and allows only `media` permission requests (mic).
+- **Shared backend helpers** (reuse them, don't reinvent). M1/M2: `grok_core/errors.py`
+  `upstream_error()` (log raw exc → return generic detail; use for xAI 5xx / `auth.py` so raw errors
+  don't leak), `grok_core/validation.py` (route input limits + data-URI validators, used in
+  `media.py`/`voice.py` Pydantic models), `config.atomic_write_text()` (temp + `os.replace` for all
+  JSON state writes). M5–M6: `routes/_ws.py` **`WsStream`** (the WS streaming skeleton — see above),
+  `state.require_workspace` (FastAPI dep used by `/fs` + `/git`; was the duplicated `_require_ws`),
+  `tools.scrubbed_env()` (secret-free env for `run_command` **and** the terminal pty),
+  `config.load_json_or_backup()` (corrupt-tolerant JSON load for all five state files).
   Server logs go to **stderr** (`logging`, configured in `__main__.py`) — never `print()` to stdout
   (reserved for the handshake line).
 

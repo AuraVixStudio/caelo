@@ -57,12 +57,14 @@ export function Video({ conn }: { conn: Conn }) {
   const [error, setError] = useState<string | null>(null)
   const [video, setVideo] = useState<VideoStatus | null>(null)
   const aliveRef = useRef(true)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null) // P2-9: do anulowania
   const { models: modelsResp } = useModels(conn) // P2-2: współdzielony cache /models
 
   useEffect(() => {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current) // P2-9: nie pollu po unmount
     }
   }, [])
 
@@ -107,9 +109,20 @@ export function Video({ conn }: { conn: Conn }) {
     void addFile(e.dataTransfer.files)
   }
 
+  // P2-9: górny limit czasu pollingu — zadanie zacięte w stanie nieterminalnym nie
+  // poll-uje w nieskończoność (mimo deklaracji „~2 min").
+  const POLL_DEADLINE_MS = 10 * 60 * 1000
+
   function poll(id: string): void {
+    const deadline = Date.now() + POLL_DEADLINE_MS
     const tick = async (): Promise<void> => {
       if (!aliveRef.current) return
+      if (Date.now() > deadline) {
+        setError('Video job timed out (still rendering after 10 minutes). Try again later.')
+        setStatus('')
+        setBusy(false)
+        return
+      }
       try {
         const st = await pollVideoJob(conn, id)
         if (st.status === 'done') {
@@ -123,13 +136,23 @@ export function Video({ conn }: { conn: Conn }) {
           setBusy(false)
           return
         }
-        setTimeout(tick, 5000)
+        pollTimerRef.current = setTimeout(tick, 5000)
       } catch (e) {
         setError(String((e as Error).message || e))
         setBusy(false)
       }
     }
-    setTimeout(tick, 4000)
+    pollTimerRef.current = setTimeout(tick, 4000)
+  }
+
+  /** P2-9: przerwij polling i zwolnij UI (przycisk Cancel). */
+  function cancel(): void {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+    setBusy(false)
+    setStatus('')
   }
 
   async function run(): Promise<void> {
@@ -210,8 +233,9 @@ export function Video({ conn }: { conn: Conn }) {
           <button
             key={m.id}
             onClick={() => setMode(m.id)}
+            aria-pressed={mode === m.id}
             className={cn(
-              'rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors',
+              'rounded-md px-3.5 py-1.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent',
               mode === m.id ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg'
             )}
           >
@@ -311,6 +335,8 @@ export function Video({ conn }: { conn: Conn }) {
                   max={VIDEO_DURATION_MAX}
                   step={1}
                   value={duration}
+                  aria-label="Duration in seconds"
+                  aria-valuetext={`${duration} seconds`}
                   onChange={(e) => setDuration(parseInt(e.target.value, 10))}
                 />
               </Field>
@@ -342,6 +368,8 @@ export function Video({ conn }: { conn: Conn }) {
                 max={EXTEND_DURATION_MAX}
                 step={1}
                 value={extDuration}
+                aria-label="Seconds to add"
+                aria-valuetext={`${extDuration} seconds`}
                 onChange={(e) => setExtDuration(parseInt(e.target.value, 10))}
               />
             </Field>
@@ -367,7 +395,14 @@ export function Video({ conn }: { conn: Conn }) {
         ) : null}
       </Card>
 
-      {busy ? <p className="mt-4 text-sm text-muted">{status}</p> : null}
+      {busy ? (
+        <div className="mt-4 flex items-center gap-3">
+          <p className="text-sm text-muted">{status}</p>
+          <Button variant="outline" size="sm" onClick={cancel}>
+            Cancel
+          </Button>
+        </div>
+      ) : null}
       {error ? <p className="mt-4 text-sm text-error">{error}</p> : null}
 
       {videoUrl ? (

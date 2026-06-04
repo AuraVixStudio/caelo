@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime
-from config import CONFIG_FILE, HISTORY_DIR, atomic_write_text
+from config import CONFIG_FILE, HISTORY_DIR, atomic_write_text, load_json_or_backup
 
 log = logging.getLogger(__name__)
 
@@ -13,14 +13,12 @@ class HistoryManager:
         self.load_settings()
 
     def load_settings(self):
-        if CONFIG_FILE.exists():
-            try:
-                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                self.history = data.get("history", [])
-                self.chat_history = data.get("chat_history", [])
-                self.save_path = data.get("save_path", str(HISTORY_DIR))
-            except Exception:
-                log.error("Could not load %s (corrupt JSON?)", CONFIG_FILE.name, exc_info=True)
+        # P1-11: korupcja → backup .corrupt + wartości domyślne (wspólny loader).
+        data = load_json_or_backup(CONFIG_FILE, None)
+        if isinstance(data, dict):
+            self.history = data.get("history", [])
+            self.chat_history = data.get("chat_history", [])
+            self.save_path = data.get("save_path", str(HISTORY_DIR))
 
     def save_to_history(self, mode, url, prompt):
         entry = {

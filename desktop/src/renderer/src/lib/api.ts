@@ -67,15 +67,60 @@ export type SettingsPatch = Partial<{
   chat_temperature: number
 }>
 
-async function api<T>(conn: Conn, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(conn.baseUrl + path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${conn.token}`,
-      ...(init?.headers as Record<string, string> | undefined)
+/** Błąd HTTP z kodem statusu — pozwala wywołującym rozróżnić auth (401/403),
+ *  timeout/anulowanie (status 0) od reszty (P2-11). */
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+export type ApiInit = RequestInit & { timeoutMs?: number }
+
+const DEFAULT_TIMEOUT_MS = 30_000
+
+/** Łączy sygnały (timeout + opcjonalny sygnał wywołującego) — pierwszy abort wygrywa. */
+function combineSignals(signals: AbortSignal[]): AbortSignal {
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals)
+  const ctrl = new AbortController()
+  for (const s of signals) {
+    if (s.aborted) {
+      ctrl.abort(s.reason)
+      break
     }
-  })
+    s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true })
+  }
+  return ctrl.signal
+}
+
+async function api<T>(conn: Conn, path: string, init?: ApiInit): Promise<T> {
+  // P2-9: każde żądanie ma timeout (nie wisi w nieskończoność), a wywołujący może
+  // dołożyć własny AbortSignal (przycisk Cancel) — pierwszy abort wygrywa.
+  const { timeoutMs, signal: userSignal, headers, ...rest } = init ?? {}
+  const timeout = AbortSignal.timeout(timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const signal = userSignal ? combineSignals([userSignal, timeout]) : timeout
+
+  let res: Response
+  try {
+    res = await fetch(conn.baseUrl + path, {
+      ...rest,
+      signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${conn.token}`,
+        ...(headers as Record<string, string> | undefined)
+      }
+    })
+  } catch (e) {
+    const name = (e as Error)?.name
+    if (name === 'TimeoutError') throw new ApiError('Request timed out', 0)
+    if (name === 'AbortError') throw new ApiError('Request cancelled', 0)
+    throw new ApiError(`Network error: ${String((e as Error)?.message || e)}`, 0)
+  }
+
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
     try {
@@ -84,7 +129,11 @@ async function api<T>(conn: Conn, path: string, init?: RequestInit): Promise<T> 
     } catch {
       /* ignore */
     }
-    throw new Error(detail)
+    // P2-11: 401/403 to problem tokenu SESJI backendu (nie OAuth xAI) — podpowiedz restart.
+    if (res.status === 401 || res.status === 403) {
+      detail = `Authentication failed (${res.status}) — the backend session may need a restart.`
+    }
+    throw new ApiError(detail, res.status)
   }
   return (await res.json()) as T
 }
@@ -97,7 +146,8 @@ export const putSettings = (c: Conn, patch: SettingsPatch): Promise<{ ok: boolea
 
 // --- Auth (OAuth) ---
 export const login = (c: Conn): Promise<{ ok: boolean; account: Record<string, unknown> }> =>
-  api(c, '/auth/login', { method: 'POST' })
+  // Backend czeka do 300 s na ukończenie logowania w przeglądarce — daj zapas.
+  api(c, '/auth/login', { method: 'POST', timeoutMs: 310_000 })
 export const logout = (c: Conn): Promise<{ ok: boolean }> =>
   api(c, '/auth/logout', { method: 'POST' })
 
@@ -153,20 +203,22 @@ export interface VideoStatus {
   [k: string]: unknown
 }
 
+// Generowanie obrazu bywa wolne (zwłaszcza model „quality") — hojny limit.
 export const generateImage = (c: Conn, body: GenerateImageBody): Promise<{ results: MediaResult[] }> =>
-  api(c, '/images/generate', { method: 'POST', body: JSON.stringify(body) })
+  api(c, '/images/generate', { method: 'POST', body: JSON.stringify(body), timeoutMs: 180_000 })
 
 export const editImage = (c: Conn, body: EditImageBody): Promise<{ results: MediaResult[] }> =>
-  api(c, '/images/edit', { method: 'POST', body: JSON.stringify(body) })
+  api(c, '/images/edit', { method: 'POST', body: JSON.stringify(body), timeoutMs: 180_000 })
 
+// Zadania wideo zwracają request_id (potem polling) — zwykle szybko, ale z zapasem.
 export const createVideoJob = (c: Conn, body: VideoJobBody): Promise<{ request_id: string }> =>
-  api(c, '/video/jobs', { method: 'POST', body: JSON.stringify(body) })
+  api(c, '/video/jobs', { method: 'POST', body: JSON.stringify(body), timeoutMs: 60_000 })
 
 export const editVideoJob = (c: Conn, body: VideoEditBody): Promise<{ request_id: string }> =>
-  api(c, '/video/edits', { method: 'POST', body: JSON.stringify(body) })
+  api(c, '/video/edits', { method: 'POST', body: JSON.stringify(body), timeoutMs: 60_000 })
 
 export const extendVideoJob = (c: Conn, body: VideoExtendBody): Promise<{ request_id: string }> =>
-  api(c, '/video/extensions', { method: 'POST', body: JSON.stringify(body) })
+  api(c, '/video/extensions', { method: 'POST', body: JSON.stringify(body), timeoutMs: 60_000 })
 
 export const pollVideoJob = (c: Conn, id: string): Promise<VideoStatus> =>
   api<VideoStatus>(c, `/video/jobs/${encodeURIComponent(id)}`)
@@ -199,10 +251,10 @@ export interface STTResp {
 }
 
 export const textToSpeech = (c: Conn, body: TTSBody): Promise<TTSResp> =>
-  api<TTSResp>(c, '/voice/tts', { method: 'POST', body: JSON.stringify(body) })
+  api<TTSResp>(c, '/voice/tts', { method: 'POST', body: JSON.stringify(body), timeoutMs: 120_000 })
 
 export const speechToText = (c: Conn, body: STTBody): Promise<STTResp> =>
-  api<STTResp>(c, '/voice/stt', { method: 'POST', body: JSON.stringify(body) })
+  api<STTResp>(c, '/voice/stt', { method: 'POST', body: JSON.stringify(body), timeoutMs: 120_000 })
 
 /** WebSocket URL for the realtime voice proxy (token + optional model in query). */
 export function voiceRealtimeUrl(c: Conn, model?: string): string {

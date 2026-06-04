@@ -18,10 +18,13 @@ nie pasuje → odcięta. Bez credentials (token w nagłówku, nie w cookies).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable, Optional
+
+log = logging.getLogger("grok_core.server")
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -90,6 +93,14 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.session_token = token
         app.state.port = port
+        # P1-10: bez tokenu REST i WS są FAIL-CLOSED (symetrycznie). Głośno
+        # ostrzegamy — inaczej „nic nie działa" byłoby trudne do zdiagnozowania.
+        if not token and os.environ.get("GROK_CORE_ALLOW_NO_TOKEN") != "1":
+            log.warning(
+                "No session token configured — REST and WebSocket are FAIL-CLOSED "
+                "(every request denied). Set GROK_CORE_TOKEN, or "
+                "GROK_CORE_ALLOW_NO_TOKEN=1 for an explicit dev opt-in."
+            )
         try:
             app.state.backend = Backend()
             app.state.backend_error = None

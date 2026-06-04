@@ -160,7 +160,8 @@ async function verifyConnection(): Promise<void> {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const res = await fetch(`${connection.baseUrl}/whoami`, {
-        headers: { Authorization: `Bearer ${connection.token}` }
+        headers: { Authorization: `Bearer ${connection.token}` },
+        signal: AbortSignal.timeout(5000) // P2-10: nie czekaj w nieskończoność na zawieszony socket
       })
       if (!res.ok) throw new Error(`/whoami -> HTTP ${res.status}`)
       connection = { ...connection, status: 'ready' }
@@ -298,7 +299,9 @@ function startHealthMonitor(): void {
   stopHealthMonitor()
   healthTimer = setInterval(() => {
     if (!coreProcess || connection.status !== 'ready' || !connection.baseUrl) return
-    fetch(`${connection.baseUrl}/health`)
+    // P2-10: timeout — sidecar żywy, ale nieodpowiadający nie może opóźniać detekcji
+    // pada poza zamierzone ~30 s (3× interwał) do czasu TCP-timeoutu OS.
+    fetch(`${connection.baseUrl}/health`, { signal: AbortSignal.timeout(5000) })
       .then((res) => {
         if (res.ok) {
           healthFails = 0
@@ -356,6 +359,10 @@ function createWindow(): void {
     title: 'Grok Desktop',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      // sandbox=false: preload jest minimalny (4 mosty IPC), ale `contextIsolation`
+      // + `nodeIntegration:false` izolują renderer. Włączenie sandbox=true jest
+      // kandydatem (preload używa tylko contextBridge/ipcRenderer) — wymaga jednak
+      // weryfikacji w runtime spakowanej apki (P2-10).
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false
@@ -373,6 +380,25 @@ function createWindow(): void {
   })
 
   const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+
+  // P2-10: blokuj nawigację górnego poziomu poza renderer (np. drag&drop URL na okno,
+  // przypadkowe window.location). SPA nawiguje stanem Reacta, więc realny 'will-navigate'
+  // to anomalia — podmiana ramki aplikacji.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const ok = rendererUrl ? url.startsWith(rendererUrl) : url.startsWith('file://')
+    if (!ok) {
+      event.preventDefault()
+      console.warn('[main] blocked navigation to', url)
+    }
+  })
+
+  // P2-10: ogranicz uprawnienia renderera do mikrofonu (Voice/dyktowanie). Inne
+  // (geolokalizacja, powiadomienia, MIDI…) — odmowa zamiast domyślnego auto-grantu
+  // dla treści na pętli zwrotnej.
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === 'media')
+  })
+
   if (rendererUrl) {
     void mainWindow.loadURL(rendererUrl)
   } else {

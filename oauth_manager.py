@@ -11,6 +11,7 @@ Endpointy potwierdzone z https://auth.x.ai/.well-known/openid-configuration.
 import base64
 import hashlib
 import json
+import logging
 import secrets
 import threading
 import time
@@ -29,7 +30,11 @@ from config import (
     OAUTH_REDIRECT_PORT,
     OAUTH_REDIRECT_PATH,
     AUTH_FILE,
+    atomic_write_text,
+    load_json_or_backup,
 )
+
+log = logging.getLogger(__name__)
 
 # Bezpieczeństwo: token wolno wysyłać tylko do tego hosta.
 API_HOST = "https://api.x.ai"
@@ -98,17 +103,16 @@ class OAuthManager:
 
     # --- trwałość ---
     def _load(self):
-        if AUTH_FILE.exists():
-            try:
-                self.tokens = json.loads(AUTH_FILE.read_text(encoding="utf-8")) or {}
-            except Exception:
-                self.tokens = {}
+        # P1-11: korupcja → backup .corrupt + pusty (nie kasuj tokenów po cichu).
+        self.tokens = load_json_or_backup(AUTH_FILE, {}) or {}
 
     def _save(self):
+        # P1-11: zapis ATOMOWY (temp + os.replace) — crash w trakcie nie zostawi
+        # uszkodzonego pliku z tokenami (był prosty write_text z połykaniem błędu).
         try:
-            AUTH_FILE.write_text(json.dumps(self.tokens, indent=2), encoding="utf-8")
+            atomic_write_text(AUTH_FILE, json.dumps(self.tokens, indent=2))
         except Exception:
-            pass
+            log.warning("Failed to save %s", AUTH_FILE.name, exc_info=True)
 
     # --- stan ---
     def is_authenticated(self) -> bool:

@@ -17,13 +17,15 @@ Protokół (JSON):
     {"type":"done"}                               # koniec tury
 
 Most: tura agenta biegnie w wątku (blokujące LLM + narzędzia). Zdarzenia trafiają
-do kolejki asyncio (call_soon_threadsafe) i są wysyłane po WS. `approval_request`
-blokuje wątek na threading.Event aż dotrze {"type":"approval"}.
+do `WsStream` (ograniczona kolejka + backpressure — P0-9) i są wysyłane po WS.
+`approval_request` blokuje wątek na threading.Event aż dotrze {"type":"approval"}.
+Na rozłączeniu `WsStream.aclose()` DOŁĄCZA wątek tury (≤5 s) — agent nie pisze
+plików ani nie uruchamia komend po zniknięciu socketu (P0-9).
 """
 
 from __future__ import annotations
 
-import asyncio
+import logging
 import json
 import threading
 from typing import Optional
@@ -34,7 +36,15 @@ import config  # type: ignore
 
 from grok_core.agent.llm import stream_chat_with_tools
 from grok_core.agent.session import AgentSession
+from grok_core.routes._ws import WsStream
 from grok_core.state import ws_authorized
+
+log = logging.getLogger(__name__)
+
+# P1-12: górny limit oczekiwania na decyzję zatwierdzenia. Bez niego wątek tury
+# blokował się na `event.wait()` bez końca (gdyby `finally` go nie odblokował) —
+# trzymając workspace. Timeout = traktuj jak „reject".
+APPROVAL_TIMEOUT_S = 600  # 10 min — z zapasem na realną reakcję człowieka
 
 router = APIRouter()
 
@@ -52,100 +62,99 @@ async def agent_stream(ws: WebSocket) -> None:
         await ws.close()
         return
 
-    loop = asyncio.get_running_loop()
-    out_q: asyncio.Queue = asyncio.Queue()
     pending: dict[str, dict] = {}
     stop_event = threading.Event()
     gate = backend.permissions  # trwała allowlista współdzielona z REST /permissions
     state = {"session": None, "busy": False}
 
-    async def sender() -> None:
-        while True:
-            item = await out_q.get()
-            if item is None:
-                return
-            try:
-                await ws.send_json(item)
-            except Exception:
-                return
+    async with WsStream(ws) as stream:
 
-    sender_task = asyncio.create_task(sender())
-
-    def emit(ev: dict) -> None:
-        loop.call_soon_threadsafe(out_q.put_nowait, ev)
-
-    def request_approval(call_id: str, name: str, detail: Optional[dict]) -> str:
-        event = threading.Event()
-        pending[call_id] = {"event": event, "decision": "reject"}
-        emit({"type": "approval_request", "id": call_id, "name": name, "detail": detail})
-        event.wait()
-        return pending.pop(call_id, {}).get("decision", "reject")
-
-    def run_turn(text: str, model: str, images: list) -> None:
-        state["busy"] = True
-        try:
-            ws_obj = backend.get_workspace()
-            if ws_obj is None:
-                emit({"type": "error", "error": "No workspace selected"})
-                return
-            session = state["session"]
-            if session is None:
-                session = AgentSession(
-                    ws_obj, gate, stream_chat_with_tools, backend.get_api_key,
-                    config.API_BASE, emit=emit, request_approval=request_approval,
-                )
-                state["session"] = session
-            else:
-                session.ws = ws_obj  # workspace mógł się zmienić
-            stop_event.clear()
-            session.run_turn(text, model, stop_flag=stop_event.is_set, images=images)
-        except Exception as exc:  # noqa: BLE001
-            emit({"type": "error", "error": str(exc)})
-        finally:
-            state["busy"] = False
-            emit({"type": "done"})
-
-    try:
-        while True:
-            raw = await ws.receive_text()
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                continue
-            mtype = msg.get("type")
-            if mtype == "workspace":
-                try:
-                    backend.set_workspace(msg["path"])
-                    emit({"type": "workspace", "path": backend.get_workspace().root.as_posix()})
-                except Exception as exc:  # noqa: BLE001
-                    emit({"type": "error", "error": str(exc)})
-            elif mtype == "message":
-                if state["busy"]:
-                    emit({"type": "error", "error": "Agent is busy"})
-                    continue
-                text = msg.get("text", "")
-                images = msg.get("images") or []
-                model = (
-                    msg.get("model")
-                    or backend.read_settings().get("code_model")
-                    or "grok-build-0.1"
-                )
-                threading.Thread(target=run_turn, args=(text, model, images), daemon=True).start()
-            elif mtype == "approval":
-                slot = pending.get(msg.get("id"))
-                if slot:
-                    slot["decision"] = msg.get("decision", "reject")
-                    slot["event"].set()
-            elif mtype == "stop":
+        def emit(ev: dict) -> None:
+            # Z wątku-workera (tura agenta). Gdy konsument zniknął → ustaw Stop,
+            # żeby pętla agenta przerwała się przy najbliższym sprawdzeniu (P0-9).
+            if not stream.emit(ev):
                 stop_event.set()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        stop_event.set()
-        for slot in pending.values():
-            slot["event"].set()
-        out_q.put_nowait(None)
+
+        def request_approval(call_id: str, name: str, detail: Optional[dict]) -> str:
+            event = threading.Event()
+            pending[call_id] = {"event": event, "decision": "reject"}
+            emit({"type": "approval_request", "id": call_id, "name": name, "detail": detail})
+            # P1-12: timeout → domyślna decyzja „reject" (z pending). Brak limitu
+            # mógł zakleszczyć wątek tury na zawsze.
+            if not event.wait(timeout=APPROVAL_TIMEOUT_S):
+                log.warning("Approval for %s (%s) timed out → reject", name, call_id)
+            return pending.pop(call_id, {}).get("decision", "reject")
+
+        def run_turn(text: str, model: str, images: list) -> None:
+            state["busy"] = True
+            try:
+                ws_obj = backend.get_workspace()
+                if ws_obj is None:
+                    emit({"type": "error", "error": "No workspace selected"})
+                    return
+                session = state["session"]
+                if session is None:
+                    session = AgentSession(
+                        ws_obj, gate, stream_chat_with_tools, backend.get_api_key,
+                        config.API_BASE, emit=emit, request_approval=request_approval,
+                    )
+                    state["session"] = session
+                else:
+                    session.ws = ws_obj  # workspace mógł się zmienić
+                stop_event.clear()
+                session.run_turn(text, model, stop_flag=stop_event.is_set, images=images)
+            except Exception:  # noqa: BLE001
+                # P1-13: nie wysyłaj surowego str(exc) (może zawierać szczegóły xAI/
+                # ścieżki). Loguj pełny ślad, do klienta — ogólny komunikat.
+                log.exception("Agent turn failed")
+                emit({"type": "error", "error": "Agent error (see server log for details)"})
+            finally:
+                state["busy"] = False
+                emit({"type": "done"})
+
         try:
-            await sender_task
-        except Exception:
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+                mtype = msg.get("type")
+                if mtype == "workspace":
+                    # Ramki sterujące z PĘTLI ZDARZEŃ → await send (emit() z pętli
+                    # zakleszczyłby się na własnej korutynie).
+                    try:
+                        backend.set_workspace(msg["path"])
+                        await stream.send({"type": "workspace",
+                                           "path": backend.get_workspace().root.as_posix()})
+                    except Exception as exc:  # noqa: BLE001
+                        await stream.send({"type": "error", "error": str(exc)})
+                elif mtype == "message":
+                    if state["busy"]:
+                        await stream.send({"type": "error", "error": "Agent is busy"})
+                        continue
+                    text = msg.get("text", "")
+                    images = msg.get("images") or []
+                    model = (
+                        msg.get("model")
+                        or backend.read_settings().get("code_model")
+                        or "grok-build-0.1"
+                    )
+                    t = threading.Thread(target=run_turn, args=(text, model, images), daemon=True)
+                    stream.track(t)   # P0-9: dołączony przy zamykaniu
+                    t.start()
+                elif mtype == "approval":
+                    slot = pending.get(msg.get("id"))
+                    if slot:
+                        slot["decision"] = msg.get("decision", "reject")
+                        slot["event"].set()
+                elif mtype == "stop":
+                    stop_event.set()
+        except WebSocketDisconnect:
             pass
+        finally:
+            # Najpierw odblokuj wszystko, co czeka — by worker mógł się domknąć,
+            # zanim WsStream.aclose() go dołączy (P0-9).
+            stop_event.set()
+            for slot in pending.values():
+                slot["event"].set()

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from grok_core.agent.tools import atomic_write_text
 from grok_core.agent.workspace import WorkspaceError
-from grok_core.state import Backend, get_backend
+from grok_core.state import Backend, get_backend, require_workspace
 
 router = APIRouter(prefix="/fs", tags=["fs"])
 
@@ -23,13 +23,6 @@ class WorkspaceReq(BaseModel):
 class WriteReq(BaseModel):
     path: str
     content: str
-
-
-def _require_ws(b: Backend):
-    ws = b.get_workspace()
-    if ws is None:
-        raise HTTPException(status_code=400, detail="No workspace selected")
-    return ws
 
 
 @router.get("/workspace")
@@ -54,8 +47,7 @@ def recent(b: Backend = Depends(get_backend)) -> dict:
 
 
 @router.get("/tree")
-def tree(path: str = ".", b: Backend = Depends(get_backend)) -> dict:
-    ws = _require_ws(b)
+def tree(path: str = ".", ws=Depends(require_workspace)) -> dict:
     try:
         target = ws.resolve(path)
     except WorkspaceError as exc:
@@ -74,8 +66,7 @@ def tree(path: str = ".", b: Backend = Depends(get_backend)) -> dict:
 
 
 @router.get("/read")
-def read(path: str, b: Backend = Depends(get_backend)) -> dict:
-    ws = _require_ws(b)
+def read(path: str, ws=Depends(require_workspace)) -> dict:
     try:
         p = ws.resolve(path)
     except WorkspaceError as exc:
@@ -86,8 +77,7 @@ def read(path: str, b: Backend = Depends(get_backend)) -> dict:
 
 
 @router.post("/write")
-def write(req: WriteReq, b: Backend = Depends(get_backend)) -> dict:
-    ws = _require_ws(b)
+def write(req: WriteReq, ws=Depends(require_workspace)) -> dict:
     try:
         p = ws.resolve(req.path)
         atomic_write_text(p, req.content)  # P0-7: zapis atomowy

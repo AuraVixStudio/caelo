@@ -1,6 +1,10 @@
+import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+_log = logging.getLogger("grok.config")
 
 APP_NAME = "AI Studio Pro"
 # UWAGA (P3-4): to wersja LEGACY archiwalnej apki customtkinter — używana WYŁĄCZNIE
@@ -59,6 +63,30 @@ def atomic_write_text(path, text: str) -> None:
         except Exception:
             pass
         raise
+
+
+def load_json_or_backup(path, default=None):
+    """Wczytaj JSON z `path`. Brak pliku → `default`. Przy KORUPCJI (niepoprawny
+    JSON / błąd odczytu): przenieś uszkodzony plik do `<path>.corrupt` (zachowanie
+    danych do ręcznego odzysku), zaloguj i zwróć `default` (P1-11).
+
+    Wspólne dla PIĘCIU czytników stanu (settings/chats/history/auth/permissions),
+    by korupcja jednego pliku nie kasowała danych po cichu (wcześniej tylko
+    `read_settings` robił backup; pozostałe cztery resetowały do pustych)."""
+    path = Path(path)
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log.error("Corrupt %s (%s); backing up to .corrupt and using default",
+                   path.name, exc)
+        try:
+            backup = path.with_suffix(path.suffix + ".corrupt")
+            os.replace(path, backup)
+        except OSError:
+            pass
+        return default
 
 
 def resource_path(rel):

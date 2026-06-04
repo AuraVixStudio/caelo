@@ -1,6 +1,10 @@
 # Plan naprawy i rozwoju — Grok Desktop
 
 > **Status:** ✅ ZREALIZOWANY (2026-06-04). Wszystkie punkty P0–P3 (M1–M4) wdrożone i oznaczone `[x]`.
+> **Kontynuacja → [`PLAN_NAPRAWY_2.md`](PLAN_NAPRAWY_2.md)** (runda 2): niezależny przegląd kodu wykrył
+> luki rezydualne tej samej klasy, co już naprawione, ale **nieprzeniesione** w bliźniacze miejsca
+> (m.in. kolejka WS agenta vs `chat.py`, atomic write tylko dla `grok_settings.json`, REST fail-open) —
+> ID i kamienie (M5–M8) kontynuują ten plan.
 > Pierwotnie PROPOZYCJA (2026-06-03) — wynik gruntownej analizy kodu (backend, silnik agenta,
 > frontend Electron/React, pakowanie/dokumentacja). Realne ścieżki sieciowe xAI (czat/media/głos/OAuth/
 > przebieg agenta) weryfikuje użytkownik z ważnymi poświadczeniami — sandbox blokuje TLS do `api.x.ai`.

@@ -19,12 +19,11 @@ from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
-from fastapi import Header, HTTPException, Request, WebSocket
+from fastapi import Depends, Header, HTTPException, Request, WebSocket
 
 # Legacy moduły z korzenia repo (sys.path ustawiony w grok_core/__init__.py).
 import config  # type: ignore
 from api_manager import APIManager  # type: ignore
-from chats_manager import ChatStore  # type: ignore
 from history_manager import HistoryManager  # type: ignore
 from oauth_manager import OAuthManager  # type: ignore
 
@@ -32,6 +31,9 @@ try:
     import requests  # type: ignore
 except Exception:  # pragma: no cover
     requests = None  # type: ignore
+
+# P1-14: twardy limit pobieranych mediów (anty-OOM / miękki DoS przy spoofie URL).
+MAX_MEDIA_BYTES = 256 * 1024 * 1024  # 256 MB (wideo bywa duże, ale nie nieograniczone)
 
 
 class Backend:
@@ -42,7 +44,11 @@ class Backend:
 
         self.history = HistoryManager()
         self.oauth = OAuthManager()
-        self.chats = ChatStore()
+        # P2-8: rozmowy czatu są przechowywane w localStorage renderera (świadomy
+        # wybór — patrz useConversations). Backend ich NIE utrwala; `ChatStore`
+        # usunięto, bo żadna trasa go nie wystawiała, a tworzył grok_chats.json
+        # przy każdym starcie (martwy kod robiący I/O). `chats_manager.py` pozostaje
+        # w rdzeniu (reużywalny), ale sidecar go nie instancjonuje.
         self.api = APIManager(self.get_api_key)
         self._workspace = None  # agent/IDE workspace (Workspace | None)
         # Trwała allowlista agenta ("Always allow") współdzielona przez WS i REST.
@@ -75,20 +81,9 @@ class Backend:
 
     # --- ustawienia (grok_settings.json) ---
     def read_settings(self) -> dict:
-        if config.SETTINGS_FILE.exists():
-            try:
-                return json.loads(config.SETTINGS_FILE.read_text(encoding="utf-8")) or {}
-            except Exception as exc:
-                # P1-6: nie kasuj po cichu — zaloguj i ZACHOWAJ uszkodzony plik w
-                # kopii .corrupt, by zwrot {} (i nadpisanie) nie zniszczył danych bezpowrotnie.
-                log.error("Corrupt %s (%s); backing up and starting empty",
-                          config.SETTINGS_FILE.name, exc)
-                try:
-                    backup = config.SETTINGS_FILE.with_suffix(config.SETTINGS_FILE.suffix + ".corrupt")
-                    os.replace(config.SETTINGS_FILE, backup)
-                except OSError:
-                    pass
-        return {}
+        # P1-6/P1-11: korupcja → backup .corrupt + pusty wynik (wspólny loader,
+        # ten sam mechanizm co dla chats/history/auth/permissions).
+        return config.load_json_or_backup(config.SETTINGS_FILE, {}) or {}
 
     def write_settings(self, data: dict) -> None:
         # P1-6/P1-7: zapis ATOMOWY (config.atomic_write_text) i błąd PROPAGOWANY —
@@ -143,11 +138,7 @@ class Backend:
             path = None
             if download and requests is not None:
                 try:
-                    data = requests.get(url, timeout=180).content
-                    fn = f"studio_{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
-                    target = save_dir / fn
-                    target.write_bytes(data)
-                    path = str(target)
+                    path = self._download_media(url, save_dir, mode, ext)
                 except Exception:
                     log.warning("Failed to download/save media from %s", url, exc_info=True)
                     path = None
@@ -157,6 +148,38 @@ class Backend:
                 log.warning("Failed to record media in history", exc_info=True)
             out.append({"url": url, "path": path})
         return out
+
+    def _download_media(self, url: str, save_dir: Path, mode: str, ext: str) -> str:
+        """P1-14: pobranie mediów z xAI BEZPIECZNIE — tylko `https` (blokuje SSRF do
+        http/file/itp.), strumieniowo na dysk z TWARDYM limitem rozmiaru (bez
+        buforowania całości w pamięci). Zwraca ścieżkę pliku albo rzuca wyjątek."""
+        if urlparse(url).scheme != "https":
+            raise ValueError("refused non-https media URL")
+        fn = f"studio_{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
+        target = save_dir / fn
+        total = 0
+        try:
+            with requests.get(url, timeout=180, stream=True) as r:
+                r.raise_for_status()
+                cl = r.headers.get("Content-Length")
+                if cl and cl.isdigit() and int(cl) > MAX_MEDIA_BYTES:
+                    raise ValueError("media exceeds size cap")
+                with open(target, "wb") as f:
+                    for chunk in r.iter_content(65536):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > MAX_MEDIA_BYTES:
+                            raise ValueError("media exceeds size cap")
+                        f.write(chunk)
+            return str(target)
+        except Exception:
+            try:
+                if target.exists():
+                    target.unlink()  # usuń częściowy plik
+            except OSError:
+                pass
+            raise
 
     def save_media_bytes(self, data: bytes, prompt: str, mode: str, ext: str) -> dict:
         """Zapis gotowych bajtów (np. audio z TTS) do folderu wyjściowego + historia."""
@@ -186,10 +209,24 @@ def get_backend(request: Request) -> Backend:
     return backend
 
 
+def require_workspace(b: "Backend" = Depends(get_backend)):
+    """Zależność: zwraca aktywny Workspace lub 400 'No workspace selected'.
+    Wspólna dla tras /fs i /git (P2-12 — wcześniej zdublowany `_require_ws`)."""
+    ws = b.get_workspace()
+    if ws is None:
+        raise HTTPException(status_code=400, detail="No workspace selected")
+    return ws
+
+
 def require_token(request: Request, authorization: Optional[str] = Header(default=None)) -> None:
     expected = getattr(request.app.state, "session_token", "")
     if not expected:
-        return  # tryb otwarty (standalone/dev bez tokenu)
+        # P1-10: FAIL-CLOSED symetrycznie do WS (P0-8). Bez skonfigurowanego tokenu
+        # odmawiamy — chyba że jawny opt-in dev GROK_CORE_ALLOW_NO_TOKEN=1. Wcześniej
+        # REST było „otwarte" (dowolny lokalny proces mógł pisać pliki/wydawać quotę).
+        if os.environ.get("GROK_CORE_ALLOW_NO_TOKEN") == "1":
+            return
+        raise HTTPException(status_code=401, detail="Server is running without a session token")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = authorization[len("Bearer ") :].strip()

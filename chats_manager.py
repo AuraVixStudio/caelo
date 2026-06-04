@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 
-from config import CHATS_FILE, atomic_write_text
+from config import CHATS_FILE, atomic_write_text, load_json_or_backup
 
 log = logging.getLogger(__name__)
 
@@ -27,14 +27,10 @@ class ChatStore:
 
     # --- trwałość ---
     def _load(self):
-        if CHATS_FILE.exists():
-            try:
-                loaded = json.loads(CHATS_FILE.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict) and isinstance(loaded.get("chats"), list):
-                    self.data = loaded
-            except Exception:
-                log.error("Could not load %s (corrupt JSON?); starting fresh",
-                          CHATS_FILE.name, exc_info=True)
+        # P1-11: korupcja → backup .corrupt + start od zera (wspólny loader).
+        loaded = load_json_or_backup(CHATS_FILE, None)
+        if isinstance(loaded, dict) and isinstance(loaded.get("chats"), list):
+            self.data = loaded
 
     def _save(self):
         try:

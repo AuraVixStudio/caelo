@@ -6,17 +6,22 @@ Protokół (JSON):
 
 pywinpty jest OPCJONALNE — gdy brak, WS zwraca błąd z instrukcją instalacji
 (agentowy run_command działa bez pty). Autoryzacja: token w query.
+
+Bezpieczeństwo (P0-11): pty startuje ze ŚRODOWISKIEM POZBAWIONYM SEKRETÓW
+(`scrubbed_env`) — tym samym scrubem co `run_command` (P0-6). Inaczej `set`/`env`
+w shellu ujawniłyby GROK_CORE_TOKEN / XAI_API_KEY przez ten sam WS.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import threading
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from grok_core.agent.tools import scrubbed_env
+from grok_core.routes._ws import WsStream
 from grok_core.state import ws_authorized
 
 router = APIRouter()
@@ -44,68 +49,55 @@ async def terminal(ws: WebSocket) -> None:
     cwd = str(ws_obj.root) if ws_obj else os.getcwd()
     shell = os.environ.get("COMSPEC", "cmd.exe") if os.name == "nt" else os.environ.get("SHELL", "/bin/bash")
 
-    loop = asyncio.get_running_loop()
-    out_q: asyncio.Queue = asyncio.Queue()
     alive = threading.Event()
     alive.set()
 
     try:
-        proc = PtyProcess.spawn(shell, cwd=cwd)
+        # P0-11: env bez sekretów (jak run_command) — `set`/`env` nie ujawnią tokenu/klucza.
+        proc = PtyProcess.spawn(shell, cwd=cwd, env=scrubbed_env())
     except Exception as exc:  # noqa: BLE001
         await ws.send_json({"type": "error", "error": f"Cannot start shell: {exc}"})
         await ws.close()
         return
 
-    def reader() -> None:
+    async with WsStream(ws) as stream:
+
+        def reader() -> None:
+            try:
+                while alive.is_set() and proc.isalive():
+                    data = proc.read(1024)
+                    if data:
+                        # backpressure (P0-9): blokuje, gdy klient nie nadąża — bez OOM.
+                        if not stream.emit({"type": "output", "data": data}):
+                            return
+            except Exception:
+                pass
+            finally:
+                stream.emit({"type": "exit"})
+
+        rt = threading.Thread(target=reader, daemon=True)
+        stream.track(rt)   # P0-9: dołączony przy zamykaniu
+        rt.start()
+
         try:
-            while alive.is_set() and proc.isalive():
-                data = proc.read(1024)
-                if data:
-                    loop.call_soon_threadsafe(out_q.put_nowait, {"type": "output", "data": data})
-        except Exception:
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    msg = json.loads(raw)
+                except Exception:
+                    continue
+                if msg.get("type") == "input":
+                    proc.write(msg.get("data", ""))
+                elif msg.get("type") == "resize":
+                    try:
+                        proc.setwinsize(int(msg.get("rows", 24)), int(msg.get("cols", 80)))
+                    except Exception:
+                        pass
+        except WebSocketDisconnect:
             pass
         finally:
-            loop.call_soon_threadsafe(out_q.put_nowait, {"type": "exit"})
-            loop.call_soon_threadsafe(out_q.put_nowait, None)
-
-    threading.Thread(target=reader, daemon=True).start()
-
-    async def sender() -> None:
-        while True:
-            item = await out_q.get()
-            if item is None:
-                return
+            alive.clear()
             try:
-                await ws.send_json(item)
+                proc.terminate(force=True)  # zakończ pty → reader wyjdzie → aclose dołączy
             except Exception:
-                return
-
-    sender_task = asyncio.create_task(sender())
-
-    try:
-        while True:
-            raw = await ws.receive_text()
-            try:
-                msg = json.loads(raw)
-            except Exception:
-                continue
-            if msg.get("type") == "input":
-                proc.write(msg.get("data", ""))
-            elif msg.get("type") == "resize":
-                try:
-                    proc.setwinsize(int(msg.get("rows", 24)), int(msg.get("cols", 80)))
-                except Exception:
-                    pass
-    except WebSocketDisconnect:
-        pass
-    finally:
-        alive.clear()
-        try:
-            proc.terminate(force=True)
-        except Exception:
-            pass
-        out_q.put_nowait(None)
-        try:
-            await sender_task
-        except Exception:
-            pass
+                pass

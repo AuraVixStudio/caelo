@@ -105,11 +105,18 @@ export default function App() {
 
   function renderModule() {
     if (!ready) {
+      // P2-11: pełnoekranowy wskaźnik stanu backendu (także przy padzie/reconnect w
+      // trakcie sesji — App podmienia moduł, gdy połączenie znika). `aria-live` ogłasza
+      // zmiany czytnikom ekranu; spinner sygnalizuje trwający restart.
       return (
-        <main className="flex flex-1 items-center justify-center p-10">
+        <main role="status" aria-live="polite" className="flex flex-1 items-center justify-center p-10">
           <div className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-2">
-              <span className={cn('h-3 w-3 rounded-full', STATUS[conn.status].dot)} />
+              {conn.status === 'starting' ? (
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-border border-t-accent" />
+              ) : (
+                <span className={cn('h-3 w-3 rounded-full', STATUS[conn.status].dot)} />
+              )}
             </div>
             <h1 className="text-lg font-semibold">{STATUS[conn.status].label}</h1>
             {conn.error ? <p className="mt-2 text-sm text-error">{conn.error}</p> : null}

@@ -218,7 +218,13 @@ export function AgentPanel({
         />
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3" ref={scrollRef}>
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-label="Agent activity"
+      >
         {entries.length === 0 ? (
           <p className="text-xs text-muted">
             Ask the agent to read, edit or run code in the workspace.

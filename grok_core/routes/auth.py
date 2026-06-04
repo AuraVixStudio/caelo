@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
+from grok_core.errors import upstream_error
 from grok_core.state import Backend, get_backend
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -29,7 +30,9 @@ def auth_login(b: Backend = Depends(get_backend)) -> dict:
     try:
         account = b.oauth.login(timeout=300)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        # P1-13: nie zwracaj surowego str(exc) — komunikaty z wymiany tokenu mogą
+        # zawierać `r.text` z auth.x.ai (szczegóły). Loguj surowy, zwróć ogólny.
+        raise upstream_error(exc, public="Sign-in failed (see server log for details)", status=400)
     return {"ok": True, "account": account}
 
 

@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      P2-10: Content-Security-Policy (obrona w głąb). Renderuje markdown z modelu i
+      ładuje media z dowolnych URL xAI (https) + data:. Polityka ogranicza ŹRÓDŁA
+      (connect tylko do loopbacku backendu + ws; brak skryptów/stylów z sieci), choć
+      pozostawia 'unsafe-inline'/'unsafe-eval' wymagane przez Vite HMR (dev) i style
+      wstrzykiwane inline (Tailwind/CodeMirror/highlight.js). Brak zewnętrznych fontów/CDN.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    />
     <title>Grok Desktop</title>
   </head>
   <body>

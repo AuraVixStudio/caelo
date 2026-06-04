@@ -10,9 +10,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+import config  # type: ignore  # repo-root (sys.path z grok_core/__init__.py)
+
+log = logging.getLogger(__name__)
 
 
 READONLY = {"read_file", "list_dir", "glob", "grep"}
@@ -36,33 +41,55 @@ def _norm_path(path: str) -> str:
     return os.path.normpath(path).replace("\\", "/")
 
 
-def command_metachars(command: str) -> set[str]:
+def command_metachars(command: str, posix: Optional[bool] = None) -> set[str]:
     """Zwraca zbiór metaznaków powłoki, które w `command` mogłyby spowodować
     łańcuchowanie/wstrzyknięcie. Pusty zbiór = komenda to pojedyncze wywołanie
-    programu (bezpieczna do uruchomienia z ``shell=True``).
+    programu.
 
-    Świadomy cudzysłowów (parsuje wg reguł cmd.exe — środowiska docelowego:
-    cudzysłów podwójny `"` przełącza tryb literalny, `'` i `\\` są zwykłymi
-    znakami). Dzięki temu `python -c "print(1)"` czy `cd "C:\\Program Files"`
-    przechodzą, a `git status && rm -rf x`, `a | b`, `$(...)` są odrzucane.
+    Świadomy cudzysłowów. Domyślnie model dopasowany do platformy
+    (`posix=None` → `os.name != 'nt'`):
 
-    UWAGA (platforma): poprawne i bezpieczne dla cmd.exe (Windows = cel aplikacji,
-    `shell=True` → cmd). Na POSIX-owym `sh` `\\` jest znakiem ucieczki, więc
-    sekwencja `\\"` mogłaby ukryć operator łańcuchujący przed tym skanerem
-    (np. `echo "\\"" && rm`). Jeśli sidecar miałby działać na Linux/Mac, na tej
-    platformie uruchamiać run_command z `shell=False` + argv (shlex) albo dodać
-    obsługę `\\`-escape tutaj.
+    - **cmd.exe** (Windows): `"` przełącza tryb literalny; `'` i `\\` to zwykłe
+      znaki. Stąd `python -c "print(1)"` i `cd "C:\\Program Files"` przechodzą,
+      a `git && rm`, `a | b`, `$(...)` są odrzucane.
+    - **POSIX `sh`** (P0-10): dodatkowo `\\` ESKAPUJE następny znak (oba stają się
+      literalne — w szczególności `\\"` NIE przełącza cudzysłowu, jak w `sh`),
+      a `'...'` to twardy literał (metaznaki w środku są martwe). Domyka to dziurę
+      parzystości cudzysłowów (`git \\" && echo hi"` było puste dla cmd.exe, a `sh`
+      wykonałoby `&&`). Niezależnie od tego `run_command` na POSIX uruchamia
+      `shell=False` + argv — skaner jest tam zachowawczym pre-filtrem, nie jedyną
+      obroną.
+
+    `posix` można wymusić jawnie (testy).
     """
+    if posix is None:
+        posix = os.name != "nt"
     found: set[str] = set()
-    in_quote = False
-    for ch in command:
+    in_quote = False  # tryb cudzysłowu podwójnego
+    i, n = 0, len(command)
+    while i < n:
+        ch = command[i]
+        if posix and ch == "\\":
+            # POSIX: `\` eskapuje następny znak → oba literalne (pomiń parę).
+            i += 2
+            continue
+        if posix and not in_quote and ch == "'":
+            # POSIX: '...' literalne — przeskocz do zamykającego apostrofu.
+            j = command.find("'", i + 1)
+            if j == -1:
+                found.add("'")  # niezbalansowany apostrof → odrzuć
+                break
+            i = j + 1
+            continue
         if ch == '"':
             in_quote = not in_quote
+            i += 1
             continue
         if ch in _META_ALWAYS:
             found.add(ch)
         elif not in_quote and ch in _META_UNQUOTED:
             found.add(ch)
+        i += 1
     if in_quote:
         found.add('"')  # niezbalansowany cudzysłów → niejednoznaczne, odrzuć
     return found
@@ -76,24 +103,26 @@ class PermissionGate:
 
     # --- trwałość (grok_permissions.json) ---
     def _load(self) -> None:
-        if not self._store_path or not self._store_path.exists():
+        if not self._store_path:
             return
-        try:
-            data = json.loads(self._store_path.read_text(encoding="utf-8")) or {}
-            self._allowed = set(data.get("allowed") or [])
-        except Exception:
-            self._allowed = set()
+        # P1-11: korupcja → backup .corrupt + pusta allowlista (wcześniej cichy
+        # reset kasował wszystkie reguły „Always allow" bez śladu).
+        data = config.load_json_or_backup(self._store_path, {}) or {}
+        self._allowed = set(data.get("allowed") or [])
 
     def _save(self) -> None:
         if not self._store_path:
             return
+        # P1-11: zapis ATOMOWY (był prosty write_text z połykaniem błędu — crash
+        # w trakcie korumpował allowlistę, a kolejny _load cicho ją zerował).
         try:
-            self._store_path.write_text(
+            config.atomic_write_text(
+                self._store_path,
                 json.dumps({"allowed": sorted(self._allowed)}, indent=2),
-                encoding="utf-8",
             )
         except Exception:
-            pass
+            log.warning("Failed to save %s",
+                        getattr(self._store_path, "name", self._store_path), exc_info=True)
 
     @staticmethod
     def _key(name: str, args: dict) -> Optional[str]:

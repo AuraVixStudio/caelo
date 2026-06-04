@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Component, createRef, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, RotateCw } from 'lucide-react'
 import { Button } from './ui/Button'
 
@@ -24,6 +24,7 @@ interface State {
  */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
+  private fallbackRef = createRef<HTMLElement>()
 
   static getDerivedStateFromError(error: Error): State {
     return { error }
@@ -34,7 +35,10 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Unhandled render error:', error, info.componentStack)
   }
 
-  componentDidUpdate(prev: Props): void {
+  componentDidUpdate(prev: Props, prevState: State): void {
+    // P2-13: po pojawieniu się błędu przenieś fokus na fallback (fokus nie zostaje
+    // na usuniętym przed chwilą elemencie — czytniki ekranu/klawiatura go „widzą").
+    if (this.state.error && !prevState.error) this.fallbackRef.current?.focus()
     if (this.state.error && !keysEqual(prev.resetKeys, this.props.resetKeys)) {
       this.setState({ error: null })
     }
@@ -47,7 +51,12 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children
 
     return (
-      <main className="flex h-screen w-full flex-1 flex-col items-center justify-center bg-bg p-10 text-fg">
+      <main
+        ref={this.fallbackRef}
+        tabIndex={-1}
+        role="alert"
+        className="flex h-screen w-full flex-1 flex-col items-center justify-center bg-bg p-10 text-fg outline-none"
+      >
         <div className="max-w-md text-center">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-error/12 text-error">
             <AlertTriangle size={22} />

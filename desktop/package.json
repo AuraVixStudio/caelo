@@ -12,6 +12,8 @@
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint src",
+    "test": "vitest run",
     "pack:sidecar": "powershell -ExecutionPolicy Bypass -File ../build_sidecar.ps1",
     "dist": "npm run build && electron-builder --win",
     "dist:full": "npm run pack:sidecar && npm run build && electron-builder --win"

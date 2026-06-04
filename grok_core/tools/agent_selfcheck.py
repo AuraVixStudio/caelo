@@ -12,6 +12,8 @@
 8) Spójność historii (P0-5): każdy tool_call ma odpowiedź tool (też przy Stop).
 9) Scrub środowiska (P0-6): run_command nie ujawnia sekretów (token/API key).
 10) Atomowość i symlinki (P0-7): zapisy atomowe, enumeratory nie wychodzą poza root.
+11) Skaner metaznaków na POSIX (P0-10): model `sh` zamyka dziurę parzystości `\"`.
+12) Most WS (P0-9/P2-12): WsStream ma ograniczoną kolejkę i dołącza workera.
 Kod wyjścia 0 = wszystkie asercje OK.
 """
 
@@ -20,6 +22,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -331,7 +334,7 @@ def test_run_command_env_scrub() -> None:
             os.environ["XAI_API_KEY"] = "sk-LEAKKEY_should_not_appear"
             os.environ["GROK_VISIBLE"] = "VISIBLE_marker_ok"
 
-            env = T._scrubbed_env()
+            env = T.scrubbed_env()
             check("env scrub removes token", "GROK_CORE_TOKEN" not in env)
             check("env scrub removes api key", "XAI_API_KEY" not in env)
             check("env scrub keeps normal var", env.get("GROK_VISIBLE") == "VISIBLE_marker_ok")
@@ -361,6 +364,19 @@ def test_command_security() -> None:
     check("metachars: quoted parens safe", command_metachars('python -c "print(1)"') == set())
     check("metachars: quoted path safe", command_metachars('cd "C:\\Program Files"') == set())
     check("metachars: unbalanced quote rejected", '"' in command_metachars('echo "oops'))
+
+    # P0-10: model POSIX zamyka dziurę parzystości cudzysłowów. Ten sam payload
+    # (`\"` przed `&&`) jest PUSTY dla modelu cmd.exe, a NIEPUSTY dla `sh` — bo w
+    # `sh` `\"` jest literałem i NIE przełącza cudzysłowu, więc `&&` jest poza nim.
+    parity = 'git \\" && echo hi"'
+    check("metachars: cmd.exe model misses \\\" parity payload",
+          command_metachars(parity, posix=False) == set())
+    check("metachars: posix model catches \\\" parity payload",
+          bool(command_metachars(parity, posix=True)))
+    check("metachars: posix single-quote is literal",
+          command_metachars("echo 'a && b'", posix=True) == set())
+    check("metachars: posix backslash-escaped char then chain still flagged",
+          "&" in command_metachars("echo \\a && b", posix=True))
 
     # bramka uprawnień: klucz po pełnej komendzie, nie po nazwie exe
     with tempfile.TemporaryDirectory() as d:
@@ -399,6 +415,43 @@ def test_command_security() -> None:
         check("run_command still runs safe command", "hello-agent" in safe and "exit 0" in safe)
 
 
+def test_ws_stream() -> None:
+    """P0-9/P2-12: WsStream ma OGRANICZONĄ kolejkę i DOŁĄCZA workera na zamknięciu
+    (worker nie działa po rozłączeniu; ramki są dostarczane do momentu zamknięcia)."""
+    import asyncio as _aio
+
+    class _FakeWS:
+        def __init__(self) -> None:
+            self.sent: list = []
+
+        async def send_json(self, item) -> None:
+            self.sent.append(item)
+
+    async def _run() -> None:
+        from grok_core.routes._ws import WsStream
+
+        ws = _FakeWS()
+        holder: dict = {}
+        async with WsStream(ws, maxsize=8) as stream:
+            check("wsstream: bounded queue", stream.out_q.maxsize == 8)
+
+            def worker() -> None:
+                for i in range(3):
+                    stream.emit({"type": "frame", "i": i})
+
+            t = threading.Thread(target=worker, daemon=True)
+            holder["t"] = t
+            stream.track(t)
+            t.start()
+            await _aio.sleep(0.2)  # pozwól pętli opróżnić kolejkę do sendera
+        # po wyjściu z async with: sender domknięty, worker dołączony
+        check("wsstream: worker joined on close", not holder["t"].is_alive())
+        check("wsstream: frames delivered",
+              sum(1 for m in ws.sent if m.get("type") == "frame") == 3)
+
+    _aio.run(_run())
+
+
 def main() -> int:
     test_tools()
     test_sandbox()
@@ -414,6 +467,7 @@ def main() -> int:
     test_atomic_write()
     test_symlink_sandbox()
     test_command_security()
+    test_ws_stream()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

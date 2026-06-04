@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -316,10 +317,11 @@ def edit_file(ws: Workspace, path: str, old_string: str, new_string: str,
     return f"Edited {path} ({count if replace_all else 1} replacement(s))"
 
 
-def _scrubbed_env() -> dict:
-    """Środowisko dla run_command bez sekretów (P0-6). Denylista (nie minimalny
-    allowlist), by nie psuć narzędzi wymagających PATH/APPDATA/SystemRoot itd.,
-    a jednocześnie nie ujawnić GROK_CORE_TOKEN/XAI_API_KEY i podobnych modelowi."""
+def scrubbed_env() -> dict:
+    """Środowisko bez sekretów (P0-6). Denylista (nie minimalny allowlist), by nie
+    psuć narzędzi wymagających PATH/APPDATA/SystemRoot itd., a jednocześnie nie
+    ujawnić GROK_CORE_TOKEN/XAI_API_KEY i podobnych. Reużywane przez `run_command`
+    oraz pty terminala (P0-11) — tam też `set`/`env` nie mogą wyciec sekretów."""
     env = {}
     for k, v in os.environ.items():
         ku = k.upper()
@@ -363,13 +365,31 @@ def run_command(ws: Workspace, command: str, cwd: Optional[str] = None, timeout:
         return (f"Error: command rejected — shell operators are not allowed ({shown}). "
                 f"Run a single program per call; issue separate run_command calls to chain steps.")
     workdir = ws.resolve(cwd) if cwd else ws.root
-    popen_kwargs: dict = {"env": _scrubbed_env()}  # P0-6: bez sekretów w env
-    if os.name != "nt":
+    popen_kwargs: dict = {"env": scrubbed_env()}  # P0-6: bez sekretów w env
+    # P0-10: dobór powłoki zależnie od platformy.
+    #  • Windows: shell=True — zgodność z `.cmd` (npm/npx/tsc) i builtinami cmd
+    #    (`echo`/`dir`/`cd`); skaner metaznaków (świadomy cudzysłowów cmd.exe) już
+    #    odrzucił łańcuchowanie, więc komenda to pojedyncze wywołanie.
+    #  • POSIX: shell=False + argv (shlex) — nawet GDYBY metaznak prześlizgnął się
+    #    obok skanera, NIE ma `sh`, które zinterpretowałoby `&&`/`;`/`|`/`$()`.
+    #    Skaner sh jest tu tylko zachowawczym pre-filtrem, nie jedyną obroną.
+    if os.name == "nt":
+        popen_target: object = command
+        use_shell = True
+    else:
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            return f"Error: cannot parse command: {exc}"
+        if not argv:
+            return "Error: empty command"
+        popen_target = argv
+        use_shell = False
         # nowa sesja = własna grupa procesów → killpg ubije całe drzewo (P0-4)
         popen_kwargs["start_new_session"] = True
     try:
         proc = subprocess.Popen(
-            command, shell=True, cwd=str(workdir),
+            popen_target, shell=use_shell, cwd=str(workdir),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
             **popen_kwargs,
