@@ -11,7 +11,7 @@
 
 ## Status (2026-06-04)
 
-**Backend — UKOŃCZONY.** **Frontend — w toku (F1, F3 gotowe).**
+**Backend — UKOŃCZONY.** **Frontend — w toku (F1–F3, F6 gotowe; zostają F4, F5).**
 
 Backend:
 - [x] **B1** — model artefaktu + magazyn SQLite/FTS5 + `history_check` (`38863c9`)
@@ -23,11 +23,11 @@ Backend:
 
 Frontend:
 - [x] **F1** — klient API huba + `Hub` context (`hub.tsx`/`hubQuery.ts`) (`42b7f1b`)
-- [ ] **F2** — wzorzec „Send to…"
+- [x] **F2** — wzorzec „Send to…" (`SendToMenu` + konsumenci Chat/Code) (`507ac28`)
 - [x] **F3** — jedna przeszukiwalna historia (przebudowa `History.tsx`) (`42b7f1b`)
 - [ ] **F4** — pipeline załączników (drag&drop + podgląd)
 - [ ] **F5** — paleta komend (Ctrl-K)
-- [ ] **F6** — przełącznik projektu
+- [x] **F6** — przełącznik projektu (`ProjectSwitcher`) (`507ac28`)
 
 Jakość: `history_check` 59 PASS, `api_smoke` rozszerzony, frontend typecheck czysty, Vitest gotowy
 (`hubQuery.test.ts`). Zero regresji M1/M5–M6. **Następne: F2 → F6.**
@@ -146,7 +146,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **DoD:** dowolny tryb rejestruje wytworzony artefakt; kontekst trzyma stan w sesji.
 - **Test:** Vitest (`desktop/test/`) — reduktor/util stanu artefaktu (czyste funkcje).
 
-### M9-F2 [P0] Wzorzec „Send to…"  — M
+### ✅ M9-F2 [P0] Wzorzec „Send to…"  — M
 - **Cel:** jedno kliknięcie przenosi artefakt do innego trybu z preloadowanym wejściem.
 - **Zakres:** menu na każdym artefakcie (obraz/wideo/plik/wiadomość/kod): **Send to → Chat / Code /
   Image / Describe**. Cel otwiera się z artefaktem jako wejściem (przez B4). To usystematyzowanie
@@ -175,7 +175,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **DoD:** Ctrl-K otwiera; wpisywanie znajduje tryby/komendy/ostatnie artefakty; Enter wykonuje.
 - **Test:** Vitest — util filtrowania/rankingu komend.
 
-### M9-F6 [P1] Przełącznik projektu  — S
+### ✅ M9-F6 [P1] Przełącznik projektu  — S
 - **Cel:** tworzenie/zmiana projektu scope'ująca historię i artefakty.
 - **Zakres:** UI tworzenia/wyboru projektu (na bazie `recent_workspaces`); zmiana odświeża History
   i listy artefaktów.
