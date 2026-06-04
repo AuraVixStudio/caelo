@@ -45,6 +45,9 @@ SETTINGS_FILE = DATA_DIR / "grok_settings.json"  # API key (fallback) + chat mod
 AUTH_FILE = DATA_DIR / "grok_auth.json"          # OAuth tokens (do NOT commit)
 CHATS_FILE = DATA_DIR / "grok_chats.json"        # conversations
 PERMISSIONS_FILE = DATA_DIR / "grok_permissions.json"  # agent allowlist ("Always allow")
+# M9-B1: kręgosłup huba — magazyn artefaktów + historii (SQLite + FTS5). Własny plik,
+# NIE dotyka grok_config.json (HistoryManager). Cross-platform (sqlite3 ze stdlib).
+HISTORY_DB_FILE = DATA_DIR / "grok_history.db"   # artifacts + history (grok_core.history_store)
 
 
 def atomic_write_text(path, text: str) -> None:

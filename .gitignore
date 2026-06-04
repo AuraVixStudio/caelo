@@ -42,4 +42,10 @@ grok_permissions.json
 # Siatka: dowolny grok_*.json (też przyszłe) oraz ich kopie/temp (.bak/.tmp/.old).
 grok_*.json
 grok_*.json.*
+# M9: magazyn SQLite huba (grok_history.db) + pliki poboczne WAL (-wal/-shm),
+# backup korupcji (.corrupt) i przyszłe bazy grok_*.db. W dev DATA_DIR = korzeń repo,
+# więc bez tej siatki baza wyciekłaby do commita.
+grok_*.db
+grok_*.db-*
+grok_*.db.*
 generated_history/
