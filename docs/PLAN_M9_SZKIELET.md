@@ -11,12 +11,26 @@
 
 ## Status (2026-06-04)
 
-**Backend M9 — UKOŃCZONY (B1–B5).** B6 pominięty (zrealizowany przez B2 — patrz niżej).
-Commity: `38863c9` B1 (magazyn SQLite/FTS5 + `history_check`), `3991357` B2 (rejestracja
-zdarzeń ze wszystkich trybów), `ed75f2e` B3 (REST `/history`,`/artifacts` + fix kolizji),
-`166ac57` B4 (send-to bus → blok wejściowy), `c4cc512` B5 (projekt jako scope).
-Selfchecki: `history_check` 59 PASS, `api_smoke` rozszerzony, `agent_selfcheck` + typecheck bez regresji.
-**Następne: frontend F1–F6.**
+**Backend — UKOŃCZONY.** **Frontend — w toku (F1, F3 gotowe).**
+
+Backend:
+- [x] **B1** — model artefaktu + magazyn SQLite/FTS5 + `history_check` (`38863c9`)
+- [x] **B2** — rejestracja zdarzeń ze wszystkich trybów (`3991357`)
+- [x] **B3** — REST `/history`,`/artifacts`,`/artifacts/{id}/content` (+ fix kolizji z legacy `/history`) (`ed75f2e`)
+- [x] **B4** — magistrala „send-to" → blok wejściowy LLM (`166ac57`)
+- [x] **B5** — projekt jako wspólny scope historii/artefaktów (`c4cc512`)
+- [~] **B6** — POMINIĘTY (zrealizowany przez B2 — patrz niżej)
+
+Frontend:
+- [x] **F1** — klient API huba + `Hub` context (`hub.tsx`/`hubQuery.ts`) (`42b7f1b`)
+- [ ] **F2** — wzorzec „Send to…"
+- [x] **F3** — jedna przeszukiwalna historia (przebudowa `History.tsx`) (`42b7f1b`)
+- [ ] **F4** — pipeline załączników (drag&drop + podgląd)
+- [ ] **F5** — paleta komend (Ctrl-K)
+- [ ] **F6** — przełącznik projektu
+
+Jakość: `history_check` 59 PASS, `api_smoke` rozszerzony, frontend typecheck czysty, Vitest gotowy
+(`hubQuery.test.ts`). Zero regresji M1/M5–M6. **Następne: F2 → F6.**
 
 ---
 
@@ -59,7 +73,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 
 ## 1. Backend (`grok_core`)
 
-### M9-B1 [P0] Model artefaktu + magazyn SQLite  — M
+### ✅ M9-B1 [P0] Model artefaktu + magazyn SQLite  — M
 - **Cel:** trwały, przeszukiwalny magazyn artefaktów i zdarzeń historii.
 - **Zakres:** nowy moduł `grok_core/history_store.py`. Schemat: tabele `artifacts`,
   `history_events`, wirtualna tabela `history_fts` (FTS5 nad treścią + meta). Inicjalizacja
@@ -69,7 +83,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **Selfcheck:** nowy `grok_core/tools/history_check.py` — roundtrip insert→get, FTS zwraca trafienie,
   ścieżka bazy faktycznie pod `DATA_DIR` (brak ucieczki), uszkodzony plik → backup nie wipe.
 
-### M9-B2 [P0] Rejestracja zdarzeń ze wszystkich trybów  — M
+### ✅ M9-B2 [P0] Rejestracja zdarzeń ze wszystkich trybów  — M
 - **Cel:** każdy tryb dorzuca zdarzenie do wspólnej historii.
 - **Zakres:** cienki helper `history_store.record_event(mode, text, artifact_id?, project_id)`
   wpięty w istniejące trasy: chat (po odpowiedzi), media image/video (po wygenerowaniu),
@@ -78,7 +92,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **DoD:** wiadomość czatu, generacja obrazu i transkrypt głosu produkują wyszukiwalne zdarzenia.
 - **Selfcheck:** `history_check` — dla każdego trybu zdarzenie ląduje i jest znajdowane przez FTS.
 
-### M9-B3 [P0] REST: historia i artefakty  — M
+### ✅ M9-B3 [P0] REST: historia i artefakty  — M
 - **Cel:** front ma czym czytać kręgosłup.
 - **Zakres:** nowy router `grok_core/routes/history.py`:
   - `GET /history` — lista + filtry `mode`, `project_id`, `from/to`, `q` (FTS), paginacja.
@@ -90,7 +104,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
   brak/zły token → 401.
 - **Selfcheck:** rozszerz `grok_core/tools/api_smoke.py` o te trasy + enforcement tokenu.
 
-### M9-B4 [P0] Magistrala „send-to": artefakt → wejście trybu  — M
+### ✅ M9-B4 [P0] Magistrala „send-to": artefakt → wejście trybu  — M
 - **Cel:** wynik jednego trybu staje się poprawnym wejściem innego (rdzeń „all-in-one").
 - **Zakres:** `history_store`/helper zamienia `artifact_id` na gotowy blok wejściowy dla celu:
   - obraz → blok vision (base64 `image`) dla czatu/agenta,
@@ -100,7 +114,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **DoD:** dla artefaktu-obrazu backend zwraca blok vision gotowy do `chat`; dla pdf — blok document.
 - **Selfcheck:** `history_check` — kształt bloku zgodny z typem artefaktu (image→vision, pdf→document).
 
-### M9-B5 [P1] Projekt jako obywatel pierwszej kategorii  — S/M
+### ✅ M9-B5 [P1] Projekt jako obywatel pierwszej kategorii  — S/M
 - **Cel:** historia i artefakty są scope'owane projektem.
 - **Zakres:** rekord `project` (id, name, root, created). `history_events`/`artifacts` niosą
   `project_id`. `recent_workspaces` z ustawień podniesione do listy projektów (most, nie duplikat).
@@ -124,7 +138,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 
 ## 2. Frontend (`desktop/src/renderer`)
 
-### M9-F1 [P0] `ArtifactContext` + typ „artefakt" + most `window.grok`  — M
+### ✅ M9-F1 [P0] `ArtifactContext` + typ „artefakt" + most `window.grok`  — M
 - **Cel:** wspólny stan artefaktów dla wszystkich trybów.
 - **Zakres:** React context (typy lustrzane do backendu), stan „pending send"; metody w preload/
   `window.grok`: `listHistory`, `searchHistory`, `getArtifact`, `getArtifactContent`. Buduj na
@@ -140,7 +154,7 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **DoD:** generacja obrazu → „Describe" → czat otwarty z obrazem jako wejściem vision.
 - **Test:** Vitest — akcja send-to mapuje `artifact → payload` celu.
 
-### M9-F3 [P0] Jedna przeszukiwalna historia (przebudowa History)  — M
+### ✅ M9-F3 [P0] Jedna przeszukiwalna historia (przebudowa History)  — M
 - **Cel:** zakładka History pokazuje wszystkie tryby z pełnotekstowym szukaniem.
 - **Zakres:** czyta `GET /history` z polem szukania + filtry (mode, project, data). Klik wpisu →
   skok do trybu-źródła / podgląd artefaktu.
