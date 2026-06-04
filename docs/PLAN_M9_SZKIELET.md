@@ -11,7 +11,7 @@
 
 ## Status (2026-06-04)
 
-**Backend — UKOŃCZONY.** **Frontend — w toku (F1–F3, F6 gotowe; zostają F4, F5).**
+## ✅ M9 UKOŃCZONY — Backend (B1–B5) + Frontend (F1–F6). B6 pominięty (zrealizowany przez B2).
 
 Backend:
 - [x] **B1** — model artefaktu + magazyn SQLite/FTS5 + `history_check` (`38863c9`)
@@ -25,12 +25,13 @@ Frontend:
 - [x] **F1** — klient API huba + `Hub` context (`hub.tsx`/`hubQuery.ts`) (`42b7f1b`)
 - [x] **F2** — wzorzec „Send to…" (`SendToMenu` + konsumenci Chat/Code) (`507ac28`)
 - [x] **F3** — jedna przeszukiwalna historia (przebudowa `History.tsx`) (`42b7f1b`)
-- [ ] **F4** — pipeline załączników (drag&drop + podgląd)
-- [ ] **F5** — paleta komend (Ctrl-K)
+- [x] **F4** — załączniki: miniatury w History (`ArtifactThumb`) + drop plików do composera (`efa4db1`)
+- [x] **F5** — paleta komend Ctrl-K (`CommandPalette`) (`efa4db1`)
 - [x] **F6** — przełącznik projektu (`ProjectSwitcher`) (`507ac28`)
 
 Jakość: `history_check` 59 PASS, `api_smoke` rozszerzony, frontend typecheck czysty, Vitest gotowy
-(`hubQuery.test.ts`). Zero regresji M1/M5–M6. **Następne: F2 → F6.**
+(`hubQuery`/`sendTo`/`commands`), render-smoke palety w podglądzie web. Zero regresji M1/M5–M6.
+**Następny kamień: M10** (czat: Responses API + live search) — patrz `PLAN_M10_CZAT.md`.
 
 ---
 
@@ -161,14 +162,14 @@ Wszystko inne w M9 (historia, „Wyślij do…", paleta) operuje na tym typie.
 - **DoD:** wpisanie frazy filtruje w poprzek trybów; klik otwiera element.
 - **Test:** Vitest — util stanu zapytania/filtrów.
 
-### M9-F4 [P1] Pipeline załączników (drag&drop + podgląd)  — M
+### ✅ M9-F4 [P1] Pipeline załączników (drag&drop + podgląd)  — M
 - **Cel:** jeden komponent załącznika dla czatu/agenta/obrazu (wejście) i „send-to".
 - **Zakres:** wspólny „chip"/podgląd artefaktu; drag&drop pliku lub artefaktu (np. z History) →
   staje się wejściem. Reużycie w „Send to…".
 - **DoD:** przeciągnięcie obrazu z History do composera czatu → załączony jako wejście.
 - **Test:** Vitest — normalizacja modelu załącznika.
 
-### M9-F5 [P1] Paleta komend (Ctrl/Cmd-K)  — S/M
+### ✅ M9-F5 [P1] Paleta komend (Ctrl/Cmd-K)  — S/M
 - **Cel:** klawiaturowy skok do trybu/akcji/artefaktu — natychmiastowa spójność UX.
 - **Zakres:** rejestr komend: nawigacja do trybów, ostatnie artefakty, szukaj w historii, szybkie
   akcje (New chat, New project). Buduj na `components/ui/`.
