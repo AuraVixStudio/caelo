@@ -271,8 +271,11 @@ export interface HistoryEntry {
   url: string
 }
 
+// Legacy media-generations history. M9-B3 moved it from '/history' to
+// '/history/generations' (the hub history backbone now owns '/history'). The
+// History tab keeps this until it is rebuilt to consume hub events (M9-F3).
 export const getHistory = (c: Conn): Promise<{ entries: HistoryEntry[] }> =>
-  api(c, '/history')
+  api(c, '/history/generations')
 
 export const getOutputDir = (c: Conn): Promise<{ path: string }> =>
   api(c, '/config/output-dir')

@@ -10,9 +10,13 @@ from grok_core.state import Backend, get_backend
 router = APIRouter(tags=["system"])
 
 
-@router.get("/history")
+@router.get("/history/generations")
 def get_history(b: Backend = Depends(get_backend)) -> dict:
-    """Wpisy historii generacji (najnowsze pierwsze) — {timestamp, mode, prompt, url}."""
+    """Legacy historia generacji mediów (HistoryManager) — {timestamp, mode, prompt, url}.
+
+    M9-B3: ścieżka przeniesiona z `/history` na `/history/generations`, bo kanoniczne
+    `/history` przejął kręgosłup huba (grok_core.routes.history — zdarzenia wszystkich
+    trybów). Ta trasa zostaje dla obecnej zakładki History do czasu jej przebudowy (M9-F3)."""
     return {"entries": list(b.history.get_entries())}
 
 

@@ -37,6 +37,7 @@ from grok_core.routes import (
     chat,
     fs,
     git,
+    history,
     media,
     models,
     permissions,
@@ -150,6 +151,7 @@ def create_app(
     app.include_router(system.router, dependencies=guard)
     app.include_router(fs.router, dependencies=guard)
     app.include_router(git.router, dependencies=guard)
+    app.include_router(history.router, dependencies=guard)
     app.include_router(permissions.router, dependencies=guard)
     # WebSockety same weryfikują token z query (nagłówków nie da się ustawić w WS).
     app.include_router(chat.router)

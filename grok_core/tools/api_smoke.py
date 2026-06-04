@@ -775,6 +775,104 @@ def _unit_git_routes(checks: list) -> None:
                            git_route.CommitReq(message="   ", stage_all=False), ws=ws))))
 
 
+def _unit_history_routes(checks: list) -> None:
+    """M9-B3: trasy /history i /artifacts (lista + filtry FTS + paginacja) oraz
+    /artifacts/{id} i /artifacts/{id}/content (strumień + walidacja ścieżki).
+    In-process: magazyn podmieniony na temp (HS._default_store), Backend bez I/O
+    (__new__), legacy history zatrapowane — bez sieci i bez realnych plików danych."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from fastapi.responses import FileResponse  # noqa: E402
+    import grok_core.history_store as HS  # noqa: E402
+    from grok_core.history_store import HistoryStore  # noqa: E402
+    from grok_core.routes import history as hist_route  # noqa: E402
+    from grok_core.state import Backend  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        prev = HS._default_store
+        HS._default_store = store  # Backend.history_store → temp
+        try:
+            b = Backend.__new__(Backend)  # bez __init__ (bez I/O / sieci)
+
+            class _FakeHistory:
+                def get_save_path(self_) -> str:
+                    return d  # dozwolony katalog treści = temp
+
+            b.history = _FakeHistory()
+
+            # seed: artefakt-obraz z plikiem na dysku + zdarzenia dwóch trybów
+            pic = Path(d) / "pic.png"
+            pic.write_bytes(b"\x89PNG\r\n\x1a\nfake-bytes")
+            art = store.add_artifact(type="image", mode="image", mime="image/png",
+                                     path=str(pic), meta={"prompt": "neon cyberpunk"})
+            store.record_event(mode="image", text="neon cyberpunk skyline", artifact_id=art.id)
+            store.record_event(mode="chat", text="hello about dragons")
+
+            def H(**kw):
+                p = dict(q=None, mode=None, project_id=None, from_=None, to=None,
+                         limit=50, offset=0)
+                p.update(kw)
+                return hist_route.list_history(b=b, **p)
+
+            def A(**kw):
+                p = dict(mode=None, project_id=None, from_=None, to=None,
+                         limit=50, offset=0)
+                p.update(kw)
+                return hist_route.list_artifacts(b=b, **p)
+
+            r = H()
+            checks.append(("/history lists all events", len(r["events"]) == 2))
+            r = H(q="cyberpunk")
+            checks.append(("/history q (FTS) filters + ranks",
+                           len(r["events"]) == 1 and r["events"][0]["mode"] == "image"))
+            r = H(mode="chat")
+            checks.append(("/history mode filter",
+                           len(r["events"]) == 1 and r["events"][0]["mode"] == "chat"))
+            r = H(limit=1)
+            checks.append(("/history paginates (limit)", len(r["events"]) == 1 and r["limit"] == 1))
+
+            r = A()
+            checks.append(("/artifacts lists artifacts", len(r["artifacts"]) == 1))
+            r = A(mode="video")
+            checks.append(("/artifacts mode filter narrows", r["artifacts"] == []))
+
+            meta = hist_route.get_artifact(art.id, b=b)
+            checks.append(("/artifacts/{id} metadata",
+                           meta["id"] == art.id and meta["mime"] == "image/png"))
+
+            missing404 = False
+            try:
+                hist_route.get_artifact("does-not-exist", b=b)
+            except HTTPException as e:
+                missing404 = e.status_code == 404
+            checks.append(("/artifacts/{id} missing -> 404", missing404))
+
+            resp = hist_route.get_artifact_content(art.id, b=b)
+            checks.append(("/artifacts/{id}/content -> FileResponse (inline)",
+                           isinstance(resp, FileResponse)
+                           and Path(resp.path).name == "pic.png"
+                           and resp.media_type == "image/png"))
+
+            # anty-traversal: artefakt wskazujący POZA dozwolone katalogi → 403
+            outside = Path(d).resolve().parent / "grok_b3_outside_marker.bin"
+            evil = store.add_artifact(type="file", mode="file", path=str(outside))
+            denied = False
+            try:
+                hist_route.get_artifact_content(evil.id, b=b)
+            except HTTPException as e:
+                denied = e.status_code == 403
+            checks.append(("/artifacts/{id}/content outside allowed dirs -> 403", denied))
+        except Exception as exc:  # noqa: BLE001
+            checks.append((f"history routes: scenario ran ({exc})", False))
+        finally:
+            HS._default_store = prev
+            store.close()
+
+
 def main() -> int:
     token = secrets.token_urlsafe(16)
     env = dict(os.environ, GROK_CORE_TOKEN=token)
@@ -829,6 +927,18 @@ def main() -> int:
 
         s, body = _get(base, "/fs/recent", token)
         checks.append(("/fs/recent == 200 + recent list", s == 200 and body is not None and isinstance(body.get("recent"), list)))
+
+        # M9-B3: historia/artefakty huba — 200 + kształt (treść zależy od stanu bazy).
+        s, body = _get(base, "/history", token)
+        checks.append(("/history == 200 + events list",
+                       s == 200 and body is not None and isinstance(body.get("events"), list)))
+        s, body = _get(base, "/artifacts", token)
+        checks.append(("/artifacts == 200 + artifacts list",
+                       s == 200 and body is not None and isinstance(body.get("artifacts"), list)))
+        s, _ = _get(base, "/history")
+        checks.append(("/history (no token) == 401", s == 401))
+        s, _ = _get(base, "/history", "wrong")
+        checks.append(("/history (bad token) == 403", s == 403))
 
         s, _ = _get(base, "/models")
         checks.append(("/models (no token) == 401", s == 401))
@@ -895,6 +1005,9 @@ def main() -> int:
         # M8 — testy tras (P3-8): fs/git in-process (sandbox, round-trip, commit).
         _unit_fs_routes(checks)
         _unit_git_routes(checks)
+
+        # M9-B3: trasy historii/artefaktów (lista + filtry FTS + content + anty-traversal).
+        _unit_history_routes(checks)
 
         ok = True
         for name, passed in checks:

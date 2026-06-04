@@ -20,6 +20,11 @@ MAX_VIDEO_URI = 64 * 1024 * 1024   # data-URI wideo (znaki)
 MAX_TTS_TEXT = 8000        # długość tekstu do TTS
 MAX_STT_B64 = 30 * 1024 * 1024     # ~22 MB audio w base64 (znaki)
 
+# Historia/artefakty huba (M9-B3) — limity zapytań GET /history /artifacts.
+MAX_HISTORY_QUERY = 256    # długość frazy szukania (q, FTS)
+MAX_HISTORY_LIMIT = 200    # górny limit paginacji (rekordów na stronę)
+MAX_ID_LEN = 64            # długość identyfikatorów (artifact_id / project_id / mode)
+
 _IMAGE_DATA_URI = re.compile(r"^data:image/[a-zA-Z0-9.+-]+;base64,", re.IGNORECASE)
 
 
