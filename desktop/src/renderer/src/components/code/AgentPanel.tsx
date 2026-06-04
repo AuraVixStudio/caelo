@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AgentConnection, type AgentEvent } from '../../lib/agentClient'
 import type { ChatAttachment, Conn } from '../../lib/api'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
+import { useHub } from '../../lib/hub'
+import { inputBlockToAttachment } from '../../lib/sendTo'
 import { useAttachments } from '../../lib/useAttachments'
 import { cn } from '../../lib/cn'
 import { Markdown } from '../Markdown'
@@ -44,6 +46,7 @@ export function AgentPanel({
   const [entries, setEntries] = useState<Entry[]>([])
   const [input, setInput] = useState('')
   const att = useAttachments() // P2-3: wspólny hook załączników
+  const hub = useHub()
   const [busy, setBusy] = useState(false)
   const [connected, setConnected] = useState(false)
 
@@ -93,6 +96,18 @@ export function AgentPanel({
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [entries])
+
+  // M9-F2: „Send to → Code" — podnieś artefakt jako załącznik agenta (np. obraz),
+  // a opcjonalny prompt wstaw do pola (bez kasowania tekstu użytkownika).
+  useEffect(() => {
+    const ps = hub.pendingSend
+    if (!ps || ps.target !== 'Code') return
+    const a = inputBlockToAttachment(ps.block)
+    if (a) att.add(a)
+    if (ps.prompt) setInput((prev) => prev || ps.prompt!)
+    hub.setPendingSend(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub.pendingSend])
 
   // P2-7: `e` to discriminated union (zwalidowany na granicy WS) — pola są już
   // poprawnych typów, więc bez `String(...)`/`as`; switch zawęża po `e.type`.

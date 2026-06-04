@@ -3,6 +3,8 @@ import { ArrowUpRight, RotateCw, Search } from 'lucide-react'
 import { listHistory, type Conn, type HubEvent } from '../lib/api'
 import { useHub } from '../lib/hub'
 import { buildHistoryQuery, eventTitle, modeToModule, modeTone } from '../lib/hubQuery'
+import { ProjectSwitcher } from './ProjectSwitcher'
+import { SendToMenu } from './SendToMenu'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -20,7 +22,7 @@ function fmtTime(epoch: number): string {
 }
 
 export function History({ conn }: { conn: Conn }) {
-  const { navigate } = useHub()
+  const { navigate, currentProjectId } = useHub()
   const [q, setQ] = useState('')
   const [mode, setMode] = useState('all')
   const [events, setEvents] = useState<HubEvent[]>([])
@@ -29,11 +31,11 @@ export function History({ conn }: { conn: Conn }) {
   const reqId = useRef(0)
 
   const run = useCallback(
-    (search: string, m: string) => {
+    (search: string, m: string, projectId: string | null) => {
       const id = ++reqId.current
       setLoading(true)
       setError(null)
-      listHistory(conn, buildHistoryQuery({ q: search, mode: m }))
+      listHistory(conn, buildHistoryQuery({ q: search, mode: m, projectId }))
         .then((r) => {
           if (id === reqId.current) setEvents(r.events)
         })
@@ -47,11 +49,11 @@ export function History({ conn }: { conn: Conn }) {
     [conn]
   )
 
-  // Debounce typing (and mode changes) so we don't fire a request per keystroke.
+  // Debounce typing (and mode/project changes) so we don't fire a request per keystroke.
   useEffect(() => {
-    const t = setTimeout(() => run(q, mode), 200)
+    const t = setTimeout(() => run(q, mode, currentProjectId), 200)
     return () => clearTimeout(t)
-  }, [q, mode, run])
+  }, [q, mode, currentProjectId, run])
 
   const openInMode = (e: HubEvent): void => {
     const target = modeToModule(e.mode)
@@ -67,13 +69,14 @@ export function History({ conn }: { conn: Conn }) {
           variant="outline"
           size="sm"
           icon={<RotateCw size={14} />}
-          onClick={() => run(q, mode)}
+          onClick={() => run(q, mode, currentProjectId)}
         >
           Refresh
         </Button>
       }
     >
       <div className="mb-4 flex items-center gap-2">
+        <ProjectSwitcher />
         <div className="relative flex-1">
           <Search
             size={15}
@@ -122,18 +125,19 @@ export function History({ conn }: { conn: Conn }) {
                   {eventTitle(e)}
                 </span>
                 <span className="text-xs text-muted">{fmtTime(e.created_at)}</span>
-                {target ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={<ArrowUpRight size={14} />}
-                    onClick={() => openInMode(e)}
-                  >
-                    Open in {target}
-                  </Button>
-                ) : (
-                  <span />
-                )}
+                <div className="flex items-center gap-1">
+                  {e.artifact_id ? <SendToMenu conn={conn} artifactId={e.artifact_id} /> : null}
+                  {target ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<ArrowUpRight size={14} />}
+                      onClick={() => openInMode(e)}
+                    >
+                      Open in {target}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             )
           })}

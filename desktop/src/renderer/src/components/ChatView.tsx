@@ -24,6 +24,8 @@ import {
 import { type ChatMessage, type Conn } from '../lib/api'
 import { saveSettings, useModels, useSettings } from '../lib/serverState'
 import { toApiMessages } from '../lib/attachments'
+import { inputBlockToAttachment } from '../lib/sendTo'
+import { useHub } from '../lib/hub'
 import { useAttachments } from '../lib/useAttachments'
 import { useChatStream } from '../lib/useChatStream'
 import { useConversations } from '../lib/useConversations'
@@ -160,6 +162,7 @@ export function ChatView({ conn }: { conn: Conn }) {
   // P2-3/P2-4: logika wydzielona do hooków (stabilne callbacki dla memoizacji wierszy).
   const convo = useConversations()
   const att = useAttachments()
+  const hub = useHub()
   const stream = useChatStream(conn)
   const tts = useTts(conn, defaultVoice)
   const dictation = useDictation(conn, (t) => {
@@ -201,6 +204,21 @@ export function ChatView({ conn }: { conn: Conn }) {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [convo.active?.messages])
+
+  // M9-F2: „Send to → Chat / Describe" — podnieś artefakt jako załącznik (vision),
+  // a dla „Describe" wstaw podpowiedź promptu (bez kasowania tekstu użytkownika).
+  useEffect(() => {
+    const ps = hub.pendingSend
+    if (!ps || ps.target !== 'Chat') return
+    const a = inputBlockToAttachment(ps.block)
+    if (a) att.add(a)
+    if (ps.prompt) {
+      setInput((prev) => prev || ps.prompt!)
+      taRef.current?.focus()
+    }
+    hub.setPendingSend(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub.pendingSend])
 
   /** Uruchamia turę dla danej historii (wspólne dla send i retry). Dba o pusty
    *  bąbel asystenta do streamowania i NIE utrwala błędu jako treści (P2-11). */

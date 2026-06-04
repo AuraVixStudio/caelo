@@ -2,6 +2,7 @@
 // mapowanie trybu→moduł i tytuł zdarzenia. Bez DOM (vitest node env).
 import { describe, it, expect } from 'vitest'
 import {
+  basename,
   buildHistoryQuery,
   eventTitle,
   modeToModule,
@@ -60,5 +61,19 @@ describe('eventTitle', () => {
     expect(eventTitle({ text: 'hello world', mode: 'chat' })).toBe('hello world')
     expect(eventTitle({ text: '   ', mode: 'video' })).toBe('(video)')
     expect(eventTitle({ text: '', mode: 'image' })).toBe('(image)')
+  })
+})
+
+describe('basename', () => {
+  it('returns the last path segment for posix and windows paths', () => {
+    expect(basename('/home/user/my-project')).toBe('my-project')
+    expect(basename('C:\\Users\\me\\repo')).toBe('repo')
+    expect(basename('G:/Projekty/grok_desktop_app')).toBe('grok_desktop_app')
+  })
+
+  it('handles trailing separators and bare names', () => {
+    expect(basename('/home/user/proj/')).toBe('proj')
+    expect(basename('C:\\Users\\me\\repo\\')).toBe('repo')
+    expect(basename('solo')).toBe('solo')
   })
 })

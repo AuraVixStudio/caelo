@@ -55,3 +55,11 @@ export function eventTitle(e: { text: string; mode: string }): string {
   const t = (e.text || '').trim()
   return t || `(${e.mode})`
 }
+
+/** Ostatni segment ścieżki (nazwa folderu) — do etykiety projektu z `recent_workspaces`.
+ *  Obsługuje separatory `/` i `\` (Windows). */
+export function basename(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  const parts = trimmed.split(/[\\/]/)
+  return parts[parts.length - 1] || trimmed || path
+}

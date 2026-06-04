@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   Code2,
   History as HistoryIcon,
@@ -95,6 +95,12 @@ export default function App() {
   })
   const conn = useConnection()
   const ready = conn.status === 'ready' && !!conn.baseUrl && !!conn.token
+  // Stabilna tożsamość Conn (baseUrl+token) — przekazywana do HubProvider; bez
+  // memoizacji nowy obiekt co render zapętlałby efekt ładujący projekty.
+  const c = useMemo<Conn | null>(
+    () => (ready ? { baseUrl: conn.baseUrl!, token: conn.token! } : null),
+    [ready, conn.baseUrl, conn.token]
+  )
 
   useEffect(() => {
     try {
@@ -105,7 +111,7 @@ export default function App() {
   }, [collapsed])
 
   function renderModule() {
-    if (!ready) {
+    if (!ready || !c) {
       // P2-11: pełnoekranowy wskaźnik stanu backendu (także przy padzie/reconnect w
       // trakcie sesji — App podmienia moduł, gdy połączenie znika). `aria-live` ogłasza
       // zmiany czytnikom ekranu; spinner sygnalizuje trwający restart.
@@ -125,7 +131,6 @@ export default function App() {
         </main>
       )
     }
-    const c: Conn = { baseUrl: conn.baseUrl!, token: conn.token! }
     // Per-module boundary: a crash in one module shows a fallback in the content
     // area instead of blanking the window; switching modules (resetKeys) recovers it.
     // Suspense (P2-4): pokaż loader, gdy chunk leniwego modułu się doczytuje.
@@ -139,7 +144,7 @@ export default function App() {
   const status = STATUS[conn.status]
 
   return (
-    <HubProvider navigate={(m) => setActive(m as Module)}>
+    <HubProvider conn={c} navigate={(m) => setActive(m as Module)}>
     <div className="flex h-screen overflow-hidden bg-bg text-fg">
       <aside
         className={cn(
