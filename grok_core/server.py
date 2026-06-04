@@ -17,11 +17,16 @@ nie pasuje → odcięta. Bez credentials (token w nagłówku, nie w cookies).
 
 from __future__ import annotations
 
+import json
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+
+import config  # type: ignore
 
 from grok_core.routes import (
     agent,
@@ -39,7 +44,32 @@ from grok_core.routes import (
 )
 from grok_core.state import Backend, require_token
 
-APP_VERSION = "0.1.0"
+
+def _resolve_app_version() -> str:
+    """Wersja PRODUKTU — JEDNO źródło prawdy: desktop/package.json (P3-4).
+
+    Pierwszeństwo:
+      1) env GROK_CORE_APP_VERSION — wstrzykiwane przez proces główny Electron
+         (`app.getVersion()`); działa też w SPAKOWANYM buildzie, gdzie package.json
+         nie leży obok sidecara.
+      2) odczyt desktop/package.json — dev/standalone uruchamiany z korzenia repo.
+      3) "0.0.0" — sygnał błędnej konfiguracji (nie zgadujemy).
+
+    Dzięki temu handshake / `/health` / `/whoami` raportują tę samą wersję, którą
+    pokazuje instalator. (Legacy `config.APP_VERSION` to OSOBNA wersja archiwalnej
+    apki customtkinter — patrz komentarz w config.py.)
+    """
+    env_v = os.environ.get("GROK_CORE_APP_VERSION")
+    if env_v:
+        return env_v
+    try:
+        pkg = Path(config.BASE_DIR) / "desktop" / "package.json"
+        return json.loads(pkg.read_text(encoding="utf-8")).get("version") or "0.0.0"
+    except Exception:
+        return "0.0.0"
+
+
+APP_VERSION = _resolve_app_version()
 SERVICE_NAME = "grok-core"
 
 

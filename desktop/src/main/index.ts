@@ -195,6 +195,10 @@ function startCore(): void {
     env: {
       ...process.env,
       GROK_CORE_TOKEN: token,
+      // P3-4: wersja PRODUKTU (desktop/package.json) wstrzyknięta do sidecara, by
+      // raportował ją w handshake/`/health` także w spakowanym buildzie (gdzie nie
+      // może odczytać package.json). To JEDNO źródło prawdy dla wersji.
+      GROK_CORE_APP_VERSION: app.getVersion(),
       PYTHONUNBUFFERED: '1',
       PYTHONUTF8: '1'
     }

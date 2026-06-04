@@ -3,7 +3,14 @@
 > **Status:** Fazy 0–8 WYKONANE (2026-06-03). Legacy customtkinter zdemotowane do `legacy/` (fallback);
 > finalne USUNIĘCIE legacy odłożone do czasu weryfikacji nowej apki z poświadczeniami xAI.
 > **Data:** 2026-06-02 (utworzenie), 2026-06-03 (Fazy 0–8)
-> **Dokument źródłowy decyzji:** ten plik jest jedynym źródłem prawdy dla przebudowy.
+> **Dokument źródłowy decyzji:** ten plik jest źródłem prawdy dla **Faz 0–8** (poniżej — zapis historyczny).
+>
+> **Po Fazach 0–8** projekt rozwinął się o nadbudowę (moduł **Voice**, scalenie Generator+Edit → **Image**,
+> **edycja/przedłużanie wideo**, załączniki w Chat/Code) oraz hardening — patrz
+> **[`MODYFIKACJE.md`](MODYFIKACJE.md)** (żywa specyfikacja modułów Image/Video/Voice/załączniki)
+> i **[`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md)** (P0–P3). Aktualny stan modułów/bibliotek/endpointów zebrano
+> w **§13 „Faza 9"** na końcu. Uwaga: edytor to **CodeMirror 6**, nie Monaco (decyzja w §10f); UI to
+> **Tailwind v4** (nie shadcn/Radix), a stan serwera trzyma własny lekki cache (nie zustand/react-query).
 
 ---
 
@@ -12,6 +19,7 @@
 Przebudowa obecnej aplikacji (Python + customtkinter) na nowoczesną aplikację desktopową, która:
 
 1. **Zachowuje wszystkie obecne moduły** — Chat, Generator, Edit, Video, History, Settings.
+   *(W nadbudowie: Generator+Edit scalone w **Image**, dodano **Voice** — aktualny zestaw w §13.)*
 2. **Dodaje agentowy moduł programistyczny** z dostępem do lokalnych plików (czytanie/edycja, uruchamianie poleceń, drzewo projektu, diff, zatwierdzanie zmian) — tak jak Claude Code i Codex.
 
 ---
@@ -156,6 +164,9 @@ Definicje w formacie function-calling xAI (jak obecne `CHAT_TOOLS`).
 ---
 
 ## 7. Moduł „Code" — mini-IDE (UI)
+
+> **Uwaga (po Fazie 5):** edytor i diff to faktycznie **CodeMirror 6**, nie Monaco — decyzja i powód
+> w §10f. Poniższy szkic (z etapu planowania) mówi jeszcze o „Monaco editor"/„Monaco DiffEditor".
 
 ```
 ┌───────────┬──────────────────────────────────┬──────────────────────┐
@@ -510,6 +521,42 @@ Definicje w formacie function-calling xAI (jak obecne `CHAT_TOOLS`).
 
 1. **Faza 0** — założyć monorepo (`git init`), strukturę `/desktop` + `/grok_core`, scaffold electron-vite, pusty FastAPI, handshake port+token, spawn sidecara.
 2. Po Fazie 0 — przejść do ekstrakcji backendu (Faza 1) i portu modułu Chat (Faza 2).
+
+---
+
+## 13. Faza 9 — Nadbudowa i hardening (po Fazach 0–8)
+
+Sekcje 1–12 to **zapis historyczny** planu (stan na Fazy 0–8). Po nich projekt się rozwinął; ta sekcja
+rekonsoliduje **aktualny stan**, by §1–12 nie wprowadzały w błąd (P3-5).
+
+**Moduły (renderer, 7):** Chat · Code · **Image** · Video · **Voice** · History · Settings.
+- Generator + Edit **scalone w Image** (bez referencji → generowanie, z referencjami → edycja).
+- **Video**: generowanie (tekst→wideo / obraz startowy) + **edycja** + **przedłużanie**.
+- **Voice** (nowy): Speak (TTS) / Transcribe (STT) / Live (realtime przez WS).
+- **Chat**: doszły **załączniki** (obraz/plik) i **głos** (TTS odpowiedzi, dyktowanie STT).
+- Szczegóły i kontrakty: **[`MODYFIKACJE.md`](MODYFIKACJE.md)** (żywa specyfikacja tych modułów).
+
+**Frontend — faktyczny stack** (różni się od planu w §3–4):
+- **Edytor/diff: CodeMirror 6** (nie Monaco — §10f), izolowany w `CodeEditor.tsx`.
+- **Style: Tailwind v4** (CSS-first: tokeny + motywy jasny/ciemny) — nie shadcn/Radix.
+- **Stan serwera:** własny lekki cache (`lib/serverState.ts`: `useModels`/`useSettings`) — nie react-query/zustand.
+- **Markdown:** react-markdown + rehype-highlight; **terminal:** xterm; **panele:** react-resizable-panels.
+
+**Pełna lista endpointów (stan obecny):**
+- **REST** (Bearer, poza `/health`): `GET /health` · `GET /whoami` · `GET /auth/status` · `POST /auth/login`
+  · `POST /auth/logout` · `GET /models` · `GET`/`PUT /settings` · `POST /images/generate` · `POST /images/edit`
+  · `POST /video/jobs` · `POST /video/edits` · `POST /video/extensions` · `GET /video/jobs/{id}`
+  · `POST /voice/tts` · `POST /voice/stt` · `GET /history` · `GET`/`PUT /config/output-dir`
+  · `GET`/`POST /fs/workspace` · `GET /fs/tree` · `GET /fs/read` · `GET /fs/recent` · `POST /fs/write`
+  · `GET /git/status` · `GET /git/diff` · `POST /git/add` · `POST /git/commit` · `GET`/`DELETE /permissions`.
+- **WebSocket** (token w query `?token=`): `WS /chat/stream` · `WS /agent/stream` · `WS /terminal` · `WS /voice/realtime`.
+
+**Wersja produktu (P3-4):** jedno źródło prawdy = `desktop/package.json`; sidecar raportuje ją w
+handshake / `/health` / `/whoami` (env `GROK_CORE_APP_VERSION` ← Electron, z odczytem package.json jako
+fallbackiem). Legacy `config.APP_VERSION` to **osobna** wersja archiwalnej apki customtkinter.
+
+**Hardening (P0–P3):** bezpieczeństwo agenta, odporność streamingu/WS, obsługa błędów, trwałość danych,
+jakość/wydajność frontu, CI + testy logiki — pełny rejestr i status w **[`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md)**.
 
 ---
 

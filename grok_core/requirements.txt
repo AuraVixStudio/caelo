@@ -1,5 +1,6 @@
-# grok-core (backend-sidecar) — zależności
+# grok-core (backend-sidecar) — zależności (bezpośrednie, luźne dolne granice).
 # Instalacja do izolowanego venv:  python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
+# Powtarzalny build (PRZYPIĘTE wersje, P3-6):  pip install -r requirements.lock
 fastapi>=0.110
 uvicorn[standard]>=0.29
 requests>=2.31

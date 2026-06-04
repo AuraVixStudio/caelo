@@ -27,6 +27,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PKG_DIR = os.path.dirname(THIS_DIR)
@@ -550,6 +551,21 @@ def main() -> int:
 
         s, body = _get(base, "/health")
         checks.append(("/health == 200", s == 200 and bool(body)))
+
+        # P3-4: wersja z JEDNEGO źródła — sidecar (handshake + /health) raportuje
+        # wersję z desktop/package.json (tu bez env GROK_CORE_APP_VERSION → odczyt pliku).
+        try:
+            pkg_v = json.loads(
+                (Path(REPO_DIR) / "desktop" / "package.json").read_text(encoding="utf-8")
+            ).get("version")
+        except Exception as exc:  # noqa: BLE001
+            pkg_v = None
+            checks.append((f"version: read desktop/package.json ({exc})", False))
+        if pkg_v:
+            checks.append(("version: handshake == package.json (single source)",
+                           info.get("version") == pkg_v))
+            checks.append(("version: /health == package.json",
+                           bool(body) and body.get("version") == pkg_v))
 
         s, body = _get(base, "/whoami", token)
         checks.append(("/whoami(token) == 200 + backend_ready", s == 200 and body and body.get("backend_ready") is True))

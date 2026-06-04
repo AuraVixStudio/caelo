@@ -2,7 +2,9 @@
 
 Desktopowa aplikacja dla **Grok (xAI)** w stylu **Claude Code / Codex** — czat, generowanie/edycja obrazów i wideo, oraz **agentowy moduł programistyczny** z dostępem do lokalnych plików (czytanie/edycja, uruchamianie poleceń, drzewo projektu, podgląd diff i zatwierdzanie zmian).
 
-> **Status:** Fazy 0–8 wykonane (2026-06-03). Pełny plan i postęp: [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md).
+> **Status:** Fazy 0–8 wykonane (2026-06-03); plan i status faz: [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md).
+> Nadbudowa (Image/Video/Voice/załączniki) — żywa specyfikacja: [`docs/MODYFIKACJE.md`](docs/MODYFIKACJE.md);
+> hardening do jakości produkcyjnej (P0–P3): [`docs/PLAN_NAPRAWY.md`](docs/PLAN_NAPRAWY.md).
 > Aplikacja customtkinter zdemotowana do [`archive/`](archive/) (fallback). Pozostaje finalne usunięcie archiwum
 > po weryfikacji nowej aplikacji z ważnymi poświadczeniami xAI.
 
@@ -17,14 +19,14 @@ To monorepo to przebudowa wcześniejszej aplikacji w customtkinter (Python) na a
 │  okno, menu, IPC, cykl życia sidecara; spawn `python -m grok_core`         │
 │  handshake: generuje token sesji → env GROK_CORE_TOKEN; czyta port ze stdout│
 │  preload (contextBridge) → window.grok ; Renderer: React + TypeScript        │
-│  Moduły: Chat · Code (mini-IDE) · Generator · Edit · Video · History · Settings │
+│  Moduły: Chat · Code (mini-IDE) · Image · Video · Voice · History · Settings  │
 └───────────────────────────────────────────────────────────────────────────┘
               │  HTTP (REST) + WebSocket (streaming) — tylko 127.0.0.1 + token
               ▼
 ┌──────────────── Python backend „grok-core" (FastAPI / uvicorn) ────────────┐
 │  Reużyte managery legacy: api_manager · oauth_manager · chats · history     │
-│  Trasy: /auth /models /settings /chat(WS) /images /video /history           │
-│         /fs /git /agent(WS) /terminal(WS)                                   │
+│  Trasy: /auth /models /settings /chat(WS) /images /video /voice(+WS) /history│
+│         /fs /git /permissions /agent(WS) /terminal(WS)                      │
 │  Silnik agenta: narzędzia plikowe + sandbox + zatwierdzanie + pętla LLM      │
 └───────────────────────────────────────────────────────────────────────────┘
               │  Bearer (OAuth/API key) — wyłącznie do api.x.ai
@@ -39,7 +41,7 @@ grok_desktop_app/
 ├── grok_core/               # backend-sidecar (FastAPI)
 │   ├── server.py            # montaż tras, app.state (token/backend), lifespan
 │   ├── state.py             # Backend: managery, klucze, workspace, zależności
-│   ├── routes/              # auth, models, settings, chat, media, system, fs, git, agent, terminal
+│   ├── routes/              # auth, models, settings, chat, media, voice, system, fs, git, permissions, agent, terminal
 │   ├── agent/               # workspace(sandbox), permissions, tools, llm, session
 │   ├── tools/               # self-checki (handshake_check, api_smoke, agent_selfcheck)
 │   └── requirements.txt
@@ -66,7 +68,7 @@ grok_desktop_app/
 ```powershell
 cd grok_core
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements.txt   # lub: -r requirements.lock (przypięte wersje — powtarzalny build)
 # w sieci z przechwytywaniem TLS dodaj:
 #   --trusted-host pypi.org --trusted-host files.pythonhosted.org
 cd ..
@@ -75,7 +77,7 @@ cd ..
 **2) Frontend (`desktop`):**
 ```powershell
 cd desktop
-npm install      # instaluje WSZYSTKIE zależności z package.json
+npm ci           # instalacja z package-lock.json (powtarzalna; `npm install` tylko przy zmianie zależności)
 npm run dev      # uruchamia okno Electron + spawnuje backend
 ```
 
@@ -88,11 +90,15 @@ czyta handshake (port + token) i łączy się z backendem po 127.0.0.1.
 ---
 
 ## Moduły
-- **Chat** — streaming, multi-rozmowy, picker modelu, system prompt + temperatura, markdown + kod.
+- **Chat** — streaming, multi-rozmowy, picker modelu, system prompt + temperatura, markdown + kod, **załączniki** (obraz/plik) oraz **głos** (TTS odpowiedzi + dyktowanie STT).
 - **Code** — mini-IDE: drzewo plików, edytor (CodeMirror), terminal (xterm), **czat agenta** z narzędziami plikowymi i **kartami zatwierdzania** (Accept/Reject/Always) + podgląd diff.
-- **Generator / Edit / Video** — generowanie i edycja obrazów, generowanie wideo (polling).
+- **Image** — generowanie i edycja obrazów w jednym panelu (bez referencji → generowanie, z referencjami → edycja), wybór modelu, warianty.
+- **Video** — generowanie (tekst→wideo / obraz startowy), **edycja** i **przedłużanie** wideo (polling zadania).
+- **Voice** — Speak (TTS), Transcribe (STT) i Live (realtime przez WebSocket).
 - **History** — historia generacji.
-- **Settings** — konto OAuth, klucz API, folder wyjściowy, domyślne modele.
+- **Settings** — konto OAuth, klucz API, folder wyjściowy, domyślne modele, uprawnienia agenta.
+
+> Moduły Image/Video/Voice i załączniki to nadbudowa na Fazach 0–8 — szczegóły w [`docs/MODYFIKACJE.md`](docs/MODYFIKACJE.md).
 
 ## Bezpieczeństwo
 - Backend nasłuchuje **wyłącznie na 127.0.0.1** (niedostępny z sieci).
@@ -114,7 +120,9 @@ grok_core\.venv\Scripts\python grok_core\tools\agent_selfcheck.py   # narzędzia
 - Pakowanie do instalatora `.exe` — gotowe (Faza 7): sidecar PyInstaller zbudowany i przetestowany; instalator NSIS przez `cd desktop && npm run dist` (pobiera NSIS/electron z sieci — uruchamiane u użytkownika).
 
 ## Dokumentacja
-- [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md) — plan przebudowy, decyzje, status faz, ryzyka.
+- [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md) — plan przebudowy, decyzje, status faz 0–8, ryzyka (§13 = stan obecny).
+- [`docs/MODYFIKACJE.md`](docs/MODYFIKACJE.md) — nadbudowa (Image/Video/Voice/załączniki) — żywa specyfikacja.
+- [`docs/PLAN_NAPRAWY.md`](docs/PLAN_NAPRAWY.md) — plan napraw/hardeningu (P0–P3) i postęp.
 - [`desktop/README.md`](desktop/README.md) — frontend (skrypty, struktura, interpreter Pythona).
 - [`grok_core/README.md`](grok_core/README.md) — backend (instalacja, endpointy, self-checki).
 

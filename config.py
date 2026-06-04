@@ -3,6 +3,10 @@ import sys
 from pathlib import Path
 
 APP_NAME = "AI Studio Pro"
+# UWAGA (P3-4): to wersja LEGACY archiwalnej apki customtkinter — używana WYŁĄCZNIE
+# przez archive/app.py (tytuł okna). Wersja NOWEGO produktu (Electron + sidecar) ma
+# JEDNO źródło prawdy w desktop/package.json i jest raportowana przez grok_core/server.py
+# (env GROK_CORE_APP_VERSION ← Electron, z odczytem package.json jako fallbackiem).
 APP_VERSION = "1.1"
 
 # --- API Configuration ---

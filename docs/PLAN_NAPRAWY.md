@@ -1,7 +1,9 @@
 # Plan naprawy i rozwoju — Grok Desktop
 
-> **Status:** PROPOZYCJA (2026-06-03). Wynik gruntownej analizy kodu (backend, silnik agenta,
-> frontend Electron/React, pakowanie/dokumentacja).
+> **Status:** ✅ ZREALIZOWANY (2026-06-04). Wszystkie punkty P0–P3 (M1–M4) wdrożone i oznaczone `[x]`.
+> Pierwotnie PROPOZYCJA (2026-06-03) — wynik gruntownej analizy kodu (backend, silnik agenta,
+> frontend Electron/React, pakowanie/dokumentacja). Realne ścieżki sieciowe xAI (czat/media/głos/OAuth/
+> przebieg agenta) weryfikuje użytkownik z ważnymi poświadczeniami — sandbox blokuje TLS do `api.x.ai`.
 > **Powiązane:** [`REBUILD_PLAN.md`](REBUILD_PLAN.md) (Fazy 0–8), [`MODYFIKACJE.md`](MODYFIKACJE.md) (Voice/Image/Video/załączniki).
 > **Cel:** doprowadzić działający prototyp (8 faz + nadbudowa) do jakości produkcyjnej, zaczynając
 > od bezpieczeństwa silnika agenta kodowania.
@@ -543,24 +545,71 @@ To serce aplikacji (LLM ma dostęp do plików i powłoki) — tu naprawiamy najp
   (→`.env.*`), `app.token` (→`*.token`); a `grok_core.spec`, `grok_core_sidecar.py`, `grok_core/server.py`,
   `make_icon.py`, `config.py` oraz `desktop/build/icon.ico` (P3-2) **nadal śledzone**.
 
-### P3-4 — Dryf wersji (3 źródła)  🟡 ŚREDNIE
+### [x] P3-4 — Dryf wersji (3 źródła)  🟡 ŚREDNIE
 - **Pliki:** `config.py:6` (`1.1`) vs `grok_core/server.py:41` (`0.1.0`) vs `desktop/package.json:4`
   (`0.0.1` — instalator pokaże tę).
 - **Rekomendacja:** jedno źródło prawdy; pozostałe wyprowadzać/zsynchronizować.
+- **✅ Zrobione (2026-06-04):** Ustanowiono **JEDNO źródło prawdy wersji PRODUKTU =
+  `desktop/package.json`** (to ją pokazuje instalator). Analiza użyć ujawniła, że to NIE są trzy
+  zduplikowane kopie tej samej wartości: `config.APP_VERSION` (`1.1`) jest konsumowane **wyłącznie**
+  przez legacy `archive/app.py` (tytuł okna) — to wersja OSOBNEGO, archiwalnego produktu, więc jej nie
+  fałszujemy; dodano tylko komentarz w `config.py` jasno to rozgraniczający. Drift dotyczył realnie
+  pary **sidecar vs instalator**: (1) `grok_core/server.py` przestał hardkodować `"0.1.0"` — nowy
+  `_resolve_app_version()` ustala wersję z `env GROK_CORE_APP_VERSION` → odczyt `desktop/package.json`
+  (dev/standalone z korzenia) → `"0.0.0"` (sygnał błędu); raportowana w handshake/`/health`/`/whoami`
+  i jako `FastAPI(version=…)`. (2) `desktop/src/main/index.ts` **wstrzykuje** `GROK_CORE_APP_VERSION =
+  app.getVersion()` do env sidecara przy `spawn` — dzięki temu **spakowany** build (gdzie sidecar nie
+  widzi `package.json`) też raportuje wersję produktu. (3) **Strażnik w `api_smoke.py`**: handshake
+  oraz `/health` muszą równać się `desktop/package.json.version` → przyszły dryf = czerwone CI.
+  **Efekt:** cały nowy produkt raportuje teraz `0.0.1` (było: sidecar `0.1.0`); `config.APP_VERSION`
+  `1.1` zostaje świadomie jako wersja legacy. **Weryfikacja:** `api_smoke.py` 57/57 (było 55; +2
+  wersji), `handshake_check.py` OK (`version=0.0.1`), `agent_selfcheck.py` 74/74, `npm run typecheck`
+  czysty.
 
-### P3-5 — Dryf dokumentacji  🟡 ŚREDNIE
+### [x] P3-5 — Dryf dokumentacji  🟡 ŚREDNIE
 - **Problem:** `REBUILD_PLAN.md` (deklarowane „jedyne źródło prawdy") nie wspomina Voice/Image-merge/
   Video-edit i mówi o Monaco; `README.md` ma stary zestaw modułów (brak Voice; są usunięte
   Generator/Edit) i niepełną listę endpointów.
 - **Rekomendacja:** dopisać „Fazę 9" lub wskazać `MODYFIKACJE.md` jako żywą specyfikację; zsynchronizować
   README (moduły + endpointy `/voice/*`, `/video/edits|extensions`).
+- **✅ Zrobione (2026-06-04):** Zsynchronizowano dokumentację z faktycznym stanem (ustalonym z kodu:
+  `App.tsx` → 7 modułów, dekoratory tras + prefiksy routerów → pełna lista endpointów). **`README.md`:**
+  diagram architektury i sekcja „Moduły" — `Generator/Edit` → **Image**, dodany **Voice**, doprecyzowane
+  Video (edycja/przedłużanie) i Chat (załączniki + głos); linia tras o `/voice(+WS)` i `/permissions`;
+  `routes/` w strukturze repo o `voice, permissions`; nagłówek statusu i sekcja „Dokumentacja" wskazują
+  teraz **[`MODYFIKACJE.md`](MODYFIKACJE.md)** (żywa specyfikacja) i ten plik. **`REBUILD_PLAN.md`:** §1–12
+  zachowane jako **zapis historyczny** (datowane statusy faz nietknięte), ale dodano (a) notę u góry
+  rozgraniczającą „źródło prawdy faz 0–8" od stanu obecnego i wskazującą `MODYFIKACJE.md`/`PLAN_NAPRAWY.md`,
+  (b) ostrzeżenie w §7, że szkic mówi o Monaco, choć edytor to **CodeMirror 6** (decyzja w §10f), (c) nową
+  **§13 „Faza 9"** rekonsolidującą stan: 7 modułów, faktyczny stack frontu (CodeMirror/Tailwind v4/własny
+  cache stanu — nie Monaco/shadcn/zustand/react-query), **pełną listę endpointów REST+WS**, źródło wersji
+  (P3-4) i wskaźnik do hardeningu. **`grok_core/README.md`** (kanoniczna lista endpointów): dopisane
+  `/permissions`, `/git/add|commit`, `/fs/recent` oraz nadbudowa media/głos (`/video/edits|extensions`,
+  `/voice/tts|stt`, WS `/voice/realtime`, rozszerzone `/models`). **Weryfikacja:** brak pozostałych
+  „Generator/Edit" jako bieżących modułów; jedyna wzmianka „Monaco" to świadoma nota „zamiast Monaco";
+  cross-check 9 nowych endpointów obecnych w §13. (Czysto dokumentacja — bez zmian w kodzie/testach.)
 
-### P3-6 — Pakowanie i zależności  🟡 ŚREDNIE
+### [x] P3-6 — Pakowanie i zależności  🟡 ŚREDNIE
 - **Problem:** brak podpisu kodu i auto-update (świadomie odłożone); Windows-only; `requirements.txt`
   bez górnych granic i bez locka. `code.html` (stray) trafiłby do commita.
 - **Rekomendacja:** `requirements.lock` (pip-compile) dla powtarzalności; używać `npm ci` (nie
   `npm install`); usunąć/zarchiwizować `code.html`; zaplanować podpis przed dystrybucją publiczną.
   OAuth redirect port 56121 sztywny (`config.py:58`) — dodać fallback na port efemeryczny.
+- **✅ Zrobione (2026-06-04):** (1) **`grok_core/requirements.lock`** — pełny przypięty snapshot venv
+  (`pip freeze`, 32 pakiety) dla powtarzalnych buildów; nagłówek opisuje instalację (`-r requirements.lock`),
+  regenerację i że runtime-minimum to nadal `requirements.txt`; `requirements.txt` dostał wskaźnik do
+  locka. (2) **`npm ci`** — CI (`.github/workflows/ci.yml` z P3-1) już go używa; docs (`README.md`,
+  `desktop/README.md`) zmienione z `npm install` → **`npm ci`** (npm install tylko przy zmianie
+  zależności). (3) **`code.html` USUNIĘTY** — stray makieta projektowa (CDN Tailwind, inny system
+  kolorów `#3858fa`, `lang=pl`, niereferencjonowana przez build); była untracked (nie weszła do
+  pierwszego commita). (4) **Fallback portu OAuth — JUŻ ZAIMPLEMENTOWANY** (`oauth_manager._start_server`):
+  próbuje `OAUTH_REDIRECT_PORT` (56121), przy zajętości `0` (efemeryczny), a `redirect_uri` używa
+  **faktycznie zbindowanego portu** (loopback per RFC 8252) — zweryfikowane w kodzie, bez zmian. (5)
+  **Podpis kodu / auto-update** — świadomie odłożone do dystrybucji publicznej (udokumentowane w
+  `REBUILD_PLAN.md` §9). Przy okazji domknięto dryf w `desktop/README.md` (lista komponentów
+  `Generator/Edit`→Image/Voice, `styles.css`→`index.css`, dołożone Tailwind v4 / react-resizable-panels).
+  **Weryfikacja:** `api_smoke.py` 57/57, `agent_selfcheck.py` 74/74 (bez regresji; brak zmian w kodzie
+  Pythona — same docs/lock/usunięcie stray).
 
 ---
 
@@ -595,6 +644,12 @@ dostępność `<button>`/Popover/`aria-*`, discriminated union ramek WS + walida
 
 **M4 — Testy/pakowanie/dokumentacja (P3):** P3-3/2 (higiena `.gitignore`) → pierwszy commit →
 P3-1 (CI) → P3-4/5/6.
+**✅ UKOŃCZONY (2026-06-04).** Wszystkie P3-1…P3-6 wdrożone. `.gitignore` zahartowany (ikona
+instalatora śledzona, siatka sekretów); **pierwszy commit** repo (`5dfe375`); GitHub Actions CI
+(3 self-checki + typecheck) + nowe testy logiki (`api_smoke.py` 57/57: SSE UTF-8, trasy media/voice,
+strażnik własności JSON i wersji); jedno źródło wersji (`desktop/package.json`); dokumentacja
+zsynchronizowana (README + `REBUILD_PLAN §13` + `grok_core/README`); `requirements.lock`, `npm ci`,
+`code.html` usunięty. Świadomie odłożone (poza zakresem prototypu): podpis kodu + auto-update.
 
 ---
 

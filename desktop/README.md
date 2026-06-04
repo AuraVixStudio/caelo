@@ -10,7 +10,8 @@ sidecar i łączy się z nim po 127.0.0.1 z tokenem sesji (handshake). Zob. też
 
 ## Uruchomienie (dev)
 ```powershell
-npm install      # instaluje WSZYSTKIE zależności z package.json (jednorazowo)
+npm ci           # instalacja z package-lock.json (powtarzalna; preferowana — P3-6)
+# npm install    # tylko gdy DODAJESZ/zmieniasz zależności (aktualizuje lockfile)
 npm run dev      # Electron + Vite HMR; proces główny spawnuje `python -m grok_core`
 ```
 > Po dołożeniu nowych zależności zrestartuj `npm run dev` — Vite musi je przeoptymalizować.
@@ -72,18 +73,20 @@ src/renderer/
   src/types.ts               typy współdzielone (CoreConnection, window.grok)
   src/lib/                   api.ts (REST+WS), agentClient.ts (WS agenta),
                              storage.ts (rozmowy), useConnection.ts, constants.ts
-  src/components/            ChatView, CodeView, Generator, Edit, Video, History,
-                             Settings, Markdown, MediaGallery, Placeholder
+  src/components/            ChatView, CodeView, Image, Video, Voice, History,
+                             Settings, Markdown, MediaGallery, Attachments, ErrorBoundary
   src/components/code/       FileTree, CodeEditor (CodeMirror), Terminal (xterm),
-                             AgentPanel (czat agenta + karty zatwierdzania), DiffView
-  src/styles.css             motyw + style modułów
+                             AgentPanel (czat agenta + karty zatwierdzania), DiffView, GitPanel
+  src/index.css              motyw (Tailwind v4: tokeny + jasny/ciemny) — dawniej styles.css
 ```
 
 ## Kluczowe biblioteki
 - **electron-vite** (vite 7) + React 19 + TypeScript
+- **Tailwind v4** (CSS-first; tokeny + motywy jasny/ciemny w `src/index.css`)
 - **react-markdown** + **rehype-highlight** — render czatu
 - **@uiw/react-codemirror** (CodeMirror 6) — edytor modułu Code
 - **@xterm/xterm** — terminal modułu Code
+- **react-resizable-panels** (v4) — układ paneli (mini-IDE, czat)
 
 ## Uwagi
 - UI jest po angielsku (zasada projektu); komentarze w kodzie mogą być po polsku.

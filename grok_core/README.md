@@ -48,6 +48,17 @@ Faza 4 (agent kodowania):
 - **WS `/agent/stream?token=...`** — agent kodowania (narzędzia + zatwierdzanie)
 - **WS `/terminal?token=...`** — terminal (wymaga `pywinpty`)
 
+Faza 6 (uprawnienia / git / recent):
+- `GET /permissions`, `DELETE /permissions` — allowlista agenta („Always allow")
+- `POST /git/add`, `POST /git/commit`
+- `GET /fs/recent` — ostatnie workspace
+
+Nadbudowa — media / głos (patrz [`../docs/MODYFIKACJE.md`](../docs/MODYFIKACJE.md)):
+- `POST /video/edits`, `POST /video/extensions` — edycja / przedłużanie wideo (odpyt przez `GET /video/jobs/{id}`)
+- `POST /voice/tts`, `POST /voice/stt` — TTS / STT (audio base64 w JSON)
+- **WS `/voice/realtime?token=...`** — most do `wss://api.x.ai/v1/realtime`
+- `GET /models` — dodatkowo: `image`, `voices`, `default_image`, `default_voice`, `realtime_model`
+
 ## Self-checki
 ```bash
 # handshake + /health + autoryzacja /whoami
