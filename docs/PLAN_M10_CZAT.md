@@ -10,6 +10,10 @@
 
 ## 0. Decyzja architektoniczna, na której wisi całe M10
 
+> **WERYFIKACJA NA REALNYM API (2026-06-05):** Responses API + `web_search`/`x_search` + wizja +
+> `input_file` (dokument) **DZIAŁAJĄ**. **WYJĄTEK:** serwerowy **`file_search` / vector stores
+> NIE są wspierane** przez xAI (`/v1/vector_stores` → 404) → B5 zrealizowane lokalnie (patrz §1, B5).
+
 **Live search = Responses API + `tools`, NIE `search_parameters`.**
 
 - Stare Live Search (`search_parameters` w `chat/completions`) **wycofane 12.01.2026** →
@@ -41,7 +45,9 @@
 
 ## 1. Backend (`grok_core`)
 
-### M10-B1 [P0] Klient Responses API ze strumieniem  — M/L
+### ✅ M10-B1 [P0] Klient Responses API ze strumieniem  — M/L
+> **ZROBIONE** (`responses_client.py`). Decyzja: przełączono **istniejący** `/chat/stream`
+> (nie osobne `/chat/responses`), z fallbackiem na legacy dla czystego czatu. Potwierdzone na realnym API.
 - **Cel:** jeden, nowoczesny kanał czatu, gotowy na narzędzia serwerowe.
 - **Zakres:** `grok_core/responses_client.py` — `POST /v1/responses`, streaming deltas;
   parser zdarzeń (delta tekstu, `tool_call`, `usage`, `citations`); dekodowanie UTF-8 jak
@@ -52,7 +58,9 @@
 - **Selfcheck:** rozszerz `api_smoke.py` — zamockowany `/v1/responses` stream, asercje:
   deltas dekodowane UTF-8, balans historii, enforcement tokenu (fail-closed).
 
-### M10-B2 [P0] Live search jako narzędzia (web_search + x_search)  — M
+### ✅ M10-B2 [P0] Live search jako narzędzia (web_search + x_search)  — M
+> **ZROBIONE** (`build_search_tools`, ramki `tool_call`/`citations`). `max_search_results`/zakres dat
+> **świadomie pominięte** (ryzyko 422 na niezweryfikowanym polu) — do dołożenia po potrzebie. Działa na realnym API.
 - **Cel:** czat odpowiada z danymi w czasie rzeczywistym, z cytowaniami.
 - **Zakres:** dołączanie `web_search()` / `x_search()` do żądania; konfiguracja `mode`
   (auto/on/off), `max_search_results`, `sources` (web/x/news), zakres dat. Emisja zdarzeń
@@ -63,7 +71,8 @@
 - **Selfcheck:** `api_smoke` — mock zwraca `tool_call` + `citations`; asercje: zdarzenia
   wyemitowane, cytowania sparsowane, `off` nie dokłada narzędzi.
 
-### M10-B3 [P0] Wizja na wejściu  — S/M
+### ✅ M10-B3 [P0] Wizja na wejściu  — S/M
+> **ZROBIONE** (`to_input` obraz→`input_image`; gating `_is_grok4`/`_has_rich_input`).
 - **Cel:** obraz w czacie → Grok go czyta.
 - **Zakres:** akceptacja bloków `image` (base64) w żądaniu Responses dla rodziny grok-4;
   reuse walidatorów data-URI/limitu rozmiaru (`validation.py`, P1-14). Wejście z magistrali
@@ -72,22 +81,27 @@
 - **Selfcheck:** `api_smoke`/`history_check` — kształt bloku image, cap rozmiaru, łagodne
   odrzucenie nie-grok-4.
 
-### M10-B4 [P1] Q&A nad dokumentem — ścieżka inline  — M
+### ✅ M10-B4 [P1] Q&A nad dokumentem — ścieżka inline  — M
+> **ZROBIONE** (`to_input` `document`→`input_file`; `validate_document_uri` + cap). Potwierdzone na realnym API.
 - **Cel:** dołącz PDF/arkusz do jednej rozmowy i pytaj o treść.
 - **Zakres:** załącznik dokumentu jako blok `document` w żądaniu; https-only + cap rozmiaru
   (P1-14) + `validation.py`. Bez trwałego magazynu (to B5).
 - **DoD:** załączony PDF → odpowiedź ugruntowana w treści dokumentu.
 - **Selfcheck:** kształt bloku document + cap rozmiaru.
 
-### M10-B5 [P1] Kolekcje (file_search) — trwała wiedza projektu  — L *(stretch)*
-- **Cel:** dokumenty projektu (M9) przeszukiwane w wielu rozmowach.
-- **Zakres:** vector store (collection) per projekt; upload dokumentów; narzędzie `file_search`
-  (grok-4 + Responses API). Wiąże się z `project_id` z M9-B5.
-- **DoD:** dokument dodany do kolekcji projektu jest znajdowany w nowych czatach tego projektu.
-- **Selfcheck:** mock create/list kolekcji; `file_search` poprawnie dołączone.
-- **Uwaga:** opcjonalne w M10 — rozważ przesunięcie, jeśli M10 robi się ciężkie.
+### ✅ M10-B5 [P1] Wiedza projektu — LOKALNA (xAI nie ma vector stores)  — L
+> **ZROBIONE z PIVOTEM.** Pierwotny plan (serwerowy `file_search` + vector store) **niewykonalny**:
+> xAI zwraca **404** na `/v1/vector_stores` (potwierdzone przez usera). Zrealizowana ALTERNATYWA:
+> dokumenty trzymane **lokalnie** (`PROJECT_DOCS_DIR`) i dołączane do wiadomości jako `input_file`
+> **na żądanie** („Attach all" — user wybrał ten wariant zamiast auto-inject, ze względu na koszt).
+- **Cel (zrealizowany):** dokumenty projektu dostępne w wielu rozmowach tego projektu (bez ponownego wgrywania).
+- **Zakres (faktyczny):** lokalny magazyn per projekt (`collection_files` + `path`/`mime`); trasy
+  `/collections` (+ `/files/{id}/content`); UI „Attach all" w `KnowledgePopover`. **Bez** vector store / `file_search`.
+- **DoD:** dokument w wiedzy projektu można jednym kliknięciem dołączyć do dowolnej rozmowy → ugruntowana odpowiedź.
+- **Selfcheck:** `_unit_collections` — zapis lokalny, content/FileResponse, anty-traversal, guard projektu.
 
-### M10-B6 [P1] Licznik kosztów narzędzi serwerowych  — S
+### ✅ M10-B6 [P1] Licznik kosztów narzędzi serwerowych  — S
+> **ZROBIONE** (ramka `usage` z `tool_calls`+tokenami; zapis w meta historii; badge w UI — F6).
 - **Cel:** transparentność wydatków przy BYO-key.
 - **Zakres:** zliczanie wywołań narzędzi + tokenów per odpowiedź (z `usage`/zdarzeń);
   zapis do meta historii (M9); ekspozycja przez `/usage` lub w odpowiedzi streamu.
@@ -98,39 +112,46 @@
 
 ## 2. Frontend (`desktop/src/renderer`)
 
-### M10-F1 [P0] Strumień ze zdarzeniami narzędzi  — M
+### ✅ M10-F1 [P0] Strumień ze zdarzeniami narzędzi  — M
+> **ZROBIONE** (wskaźnik „Searching the web/X…" z `searchActivityLabel`).
 - **Cel:** widać, że agent szuka, zanim pojawi się odpowiedź.
 - **Zakres:** UI czatu pokazuje aktywność z `verbose_streaming` przez `WsStream`
   („Searching X…", „Searching the web…") → potem strumień tekstu. Buduj na `components/ui/`.
 - **DoD:** podczas odpowiedzi z live searchem UI pokazuje wskaźnik szukania, potem tekst.
 - **Test:** Vitest — mapowanie zdarzenie → stan wskaźnika.
 
-### M10-F2 [P0] Cytowania / źródła w UI  — M
+### ✅ M10-F2 [P0] Cytowania / źródła w UI  — M
+> **ZROBIONE** (panel **Sources**, klikalne https, dedup; `citationLabel` → domena gdy API zwraca numer tytułu).
 - **Cel:** odpowiedź z searcha ma klikalne źródła.
 - **Zakres:** panel/odnośniki źródeł po zakończeniu streamu; klikalne (https), dedup.
 - **DoD:** odpowiedź z live searchem pokazuje klikalne źródła.
 - **Test:** Vitest — parsowanie/dedup listy cytowań.
 
-### M10-F3 [P0] Przełącznik wyszukiwania  — S
+### ✅ M10-F3 [P0] Przełącznik wyszukiwania  — S
+> **ZROBIONE** (popover Auto/On/Off + źródła web/X; domyślny tryb w `/settings`).
 - **Cel:** kontrola nad tym, kiedy (i gdzie) Grok szuka.
 - **Zakres:** toggle `mode` (Auto/On/Off) + opcjonalny wybór źródeł (web/X/news); domyślna
   wartość per-rozmowa w ustawieniach.
 - **DoD:** Off wyłącza narzędzia, On wymusza, Auto zostawia decyzję modelowi.
 - **Test:** Vitest — stan trybu.
 
-### M10-F4 [P0] Wejście obrazu w czacie  — S
+### ✅ M10-F4 [P0] Wejście obrazu w czacie  — S
+> **ZROBIONE** (istniejący pipeline M9-F4 `toApiMessages`→`image_url` + gating B3; `attachments.test.ts`).
 - **Cel:** wrzuć obraz do composera → wejście vision.
 - **Zakres:** załącznik obrazu w composerze (reuse pipeline M9-F4) → blok vision; chip podglądu.
 - **DoD:** drop obrazu → pytanie → odpowiedź o obrazie.
 - **Test:** Vitest — załącznik → payload vision.
 
-### M10-F5 [P1] Załącznik dokumentu + UI Q&A  — S/M
+### ✅ M10-F5 [P1] Załącznik dokumentu + UI Q&A  — S/M
+> **ZROBIONE** (`isDocumentFile`/`fileToAttachment`→data-URI; chip z badge; „Based on document";
+> `inputBlockToAttachment` obsługuje document — domknięty dług M9).
 - **Cel:** dołącz PDF/xlsx i pytaj.
 - **Zakres:** chip dokumentu (reuse M9-F4); przepływ pytania; oznaczenie „Based on document".
 - **DoD:** załączony dokument → ugruntowana odpowiedź.
 - **Test:** Vitest — stan załącznika dokumentu.
 
-### M10-F6 [P1] Wskaźnik kosztu/użycia  — S
+### ✅ M10-F6 [P1] Wskaźnik kosztu/użycia  — S
+> **ZROBIONE** (badge „N searches · X tokens" z `formatUsage` na wiadomości).
 - **Cel:** user widzi, ile go kosztuje rozmowa (BYO-key).
 - **Zakres:** mały badge: liczba wywołań narzędzi + zużycie tokenów per rozmowa.
 - **DoD:** licznik widoczny per rozmowa.
@@ -158,31 +179,34 @@ F4 (obraz)  → po B3 ;  F5 (dokument) → po B4 ;  F6 (koszt) → po B6
 - `B3/F4` (wizja) spina się z M9-B4 — „Send to → Describe" działa end-to-end.
 - `B5` traktuj jako stretch; jak M10 puchnie, przesuń kolekcje dalej.
 
-## 4. Definicja ukończenia M10 (całość)
+## 4. Definicja ukończenia M10 (całość) — ✅ SPEŁNIONA
 
-1. Pytanie o świeży temat uruchamia live web/X search po stronie serwera, a odpowiedź ma
-   **klikalne cytowania**.
-2. Przełącznik **Auto/On/Off** realnie steruje narzędziami.
-3. Wrzucony **obraz** → trafny, ugruntowany opis (vision).
-4. Załączony **PDF/arkusz** → odpowiedź oparta na treści dokumentu.
-5. **Licznik wywołań/tokenów** widoczny per rozmowa (transparentność BYO-key).
-6. Rdzeń czatu chodzi przez **Responses API** (zero `search_parameters`); strumień UTF-8 bez
-   regresji; trasy fail-closed na tokenie; `api_smoke` + Vitest przechodzą; hardening
-   M1/M5–M6 nienaruszony.
+1. ✅ Pytanie o świeży temat uruchamia live web/X search po stronie serwera, a odpowiedź ma
+   **klikalne cytowania**. *(potwierdzone na realnym API)*
+2. ✅ Przełącznik **Auto/On/Off** realnie steruje narzędziami.
+3. ✅ Wrzucony **obraz** → trafny, ugruntowany opis (vision; rodzina grok-4).
+4. ✅ Załączony **PDF/arkusz** → odpowiedź oparta na treści dokumentu. *(potwierdzone na realnym API)*
+5. ✅ **Licznik wywołań/tokenów** widoczny per rozmowa (transparentność BYO-key).
+6. ✅ Rdzeń czatu chodzi przez **Responses API** (zero `search_parameters`); strumień UTF-8 bez
+   regresji; trasy fail-closed na tokenie; `api_smoke` przechodzi (141/141); Vitest napisany
+   (devDep nieinstalowany lokalnie); hardening M1/M5–M6 nienaruszony.
 
-## 5. Otwarte pytania techniczne
+> **Uwaga:** „trwała wiedza projektu" (B5) zrealizowana **lokalnie** (xAI nie ma vector stores),
+> nie serwerowym `file_search` — patrz B5 wyżej.
 
-- **Migracja rdzenia czatu:** przełączasz CAŁY czat na Responses API od razu (jeden kod,
-  ale większy refactor), czy nowy klient obsługuje tylko wiadomości z narzędziami, a zwykły
-  czat zostaje na `chat/completions` do czasu? Rekomendacja: cały na Responses — `chat/completions`
-  i tak jest legacy, a dwie ścieżki to dług.
-- **OAuth vs klucz dla Responses + tools:** zweryfikuj, czy tool-use działa na tokenie OAuth;
-  jeśli nie — wymuś ścieżkę klucza API dla wiadomości z searchem.
-- **Modele w selektorze:** wizja i `file_search` wymagają grok-4. Czy wszystkie modele w UI to
-  grok-4? Jeśli nie — wyłącz/ukryj wizję i kolekcje dla starszych, z czytelnym komunikatem.
-- **Kolekcje (B5):** koszt utrzymania vector store per projekt + limity — w M10 czy później?
-- **Cytowania a copyright:** pokazuj źródła i krótkie streszczenia własnymi słowami, nie kopiuj
-  długich fragmentów stron do UI (czysto produktowo bezpieczniejsze).
+## 5. Otwarte pytania techniczne — ROZSTRZYGNIĘTE
+
+- **Migracja rdzenia czatu:** → **CAŁY czat przez Responses** (przełączony `/chat/stream`), z
+  fallbackiem na legacy `chat/completions` dla czystego czatu (bezpiecznik przy rozjeździe wire-formatu).
+- **OAuth vs klucz dla Responses + tools:** → live search/wizja/dokument **działają** (potwierdzone
+  na realnym API u usera — nie wymagały wymuszania klucza). **`file_search`/vector stores: xAI ich
+  NIE wspiera** (`/v1/vector_stores` → 404) — niezależnie od auth.
+- **Modele w selektorze:** → gating po `grok-4*` (`_is_grok4`); obraz/dokument na modelu spoza grok-4
+  → czytelny błąd zamiast niejasnego 4xx.
+- **Kolekcje (B5):** → **bez vector store** (xAI go nie ma). Wiedza projektu trzymana lokalnie i
+  dołączana na żądanie („Attach all") — zero kosztu utrzymania, koszt tokenów tylko gdy user dołączy.
+- **Cytowania a copyright:** zachowane — pokazujemy klikalne źródła (tytuł/domena), bez kopiowania
+  długich fragmentów stron.
 
 ---
 

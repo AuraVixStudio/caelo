@@ -88,6 +88,17 @@ threadsafe `emit()` (backpressure) + `send()` (event-loop) + worker `track()`/jo
 A `{"type":"stop"}` frame sets a `threading.Event`. See the WS protocol docstrings at the top of
 [`routes/chat.py`](grok_core/routes/chat.py) and [`routes/agent.py`](grok_core/routes/agent.py).
 
+**Chat core = Responses API (M10, see [`docs/PLAN_M10_CZAT.md`](docs/PLAN_M10_CZAT.md)):** `/chat/stream`
+runs through **[`grok_core/responses_client.py`](grok_core/responses_client.py)** (`POST /v1/responses`,
+streaming) — live web/X search (`web_search`/`x_search`), vision (grok-4 family), document Q&A
+(`input_file`), citations + token/usage counter. Legacy `chat_completion_stream` stays only as a
+fallback for plain (no-tool) chat. New WS frames: `tool_call` · `citations` · `usage`; new `chat` fields:
+`search_mode` (auto/on/off) + `sources`. **Don't restructure root `api_manager.py`** — the new client
+is the thin endpoint/auth layer (CLAUDE.md rule). **Verified on the real API:** live search, vision,
+`input_file` work; **xAI has NO server-side vector stores** (`/v1/vector_stores` → 404), so "project
+knowledge" (B5) is **local** (`config.PROJECT_DOCS_DIR`) + attached on demand ("Attach all"), not
+`file_search`. Mirror the `responses_client` UTF-8 SSE decode if you touch streaming.
+
 ## Commands
 
 All paths below are relative to the repo root. The frontend npm scripts run from `desktop/`.
@@ -153,12 +164,18 @@ run external copy would use its own `config.py`, hence its own data dir.)
 
 - `grok_config.json` — **owned exclusively by `HistoryManager`**, rewritten wholesale (history /
   chat_history / save_path only). Never write anything else here — it wipes the data.
-- `grok_settings.json` — API key (fallback), chat/code model, system prompt, temperature, `recent_workspaces`.
+- `grok_settings.json` — API key (fallback), chat/code model, system prompt, temperature, `recent_workspaces`,
+  `current_project_id`, `chat_search_mode`/`chat_search_sources` (M10 live-search defaults).
 - `grok_auth.json` — OAuth tokens (gitignored; never commit).
 - `grok_chats.json` — legacy conversation store. **No longer written by the sidecar** (P2-8: `ChatStore`
   removed from `Backend`); chat conversations now live in the renderer's `localStorage` (`useConversations`).
   `chats_manager.py` stays in the root (reusable) but is not instantiated.
 - `grok_permissions.json` — agent "Always allow" allowlist (atomic writes, P1-11).
+- `grok_history.db` (M9) — SQLite+FTS5 hub backbone: artifacts + searchable history + projects +
+  `collection_files` ([`grok_core/history_store.py`](grok_core/history_store.py)). Own file; **never**
+  touch `grok_config.json`. Corrupt → `.corrupt` backup (like the JSON readers).
+- `project_docs/<project_id>/` (M10-B5) — local "project knowledge" documents (xAI has no vector
+  stores); served sandboxed via `/collections/files/{id}/content`, attached on demand ("Attach all").
 
 All five JSON readers go through **`config.load_json_or_backup`** (P1-11): a corrupt file is moved to
 `<name>.corrupt` and logged, not silently wiped. The API key is **stored but never returned** by

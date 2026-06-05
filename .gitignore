@@ -49,3 +49,6 @@ grok_*.db
 grok_*.db-*
 grok_*.db.*
 generated_history/
+# M10-B5: lokalne dokumenty „wiedzy projektu" (config.PROJECT_DOCS_DIR). W dev
+# DATA_DIR = korzeń repo, więc bez tego wgrane PDF-y wyciekłyby do commita.
+project_docs/

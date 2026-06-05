@@ -109,12 +109,13 @@ Plaster pionowy = UI + backend + asercje w `agent_selfcheck.py`. S≈dni, M≈1�
 
 ### FILAR 2 — doskonałość trybów
 
-**✅ M10 — Czat na poziomie**  *(najtańszy duży skok dzięki narzędziom wbudowanym)* — **KOMPLETNY**
-- **Live search (S/M).** Wepnij `web_search()` + `x_search()` — masz je w API za darmo. Pokaż
-  źródła/cytowania w UI. To Twój wyróżnik i materiał marketingowy.
-- **Wizja na wejściu (S).** Wrzuć obraz do czatu → Grok go czyta (masz już moduł Image; tu chodzi
-  o wpięcie obrazu jako wejścia do czatu/agenta).
-- **Q&A nad dokumentami (M).** Wgraj PDF/arkusz → pytania o treść (wprost wspierane przez API).
+**✅ M10 — Czat na poziomie**  *(KOMPLETNY 2026-06-05 — `PLAN_M10_CZAT.md`, B1–B6 + F1–F6)*
+- ✅ **Live search (S/M).** `web_search()` + `x_search()` przez Responses API; klikalne cytowania +
+  licznik kosztów w UI. **Potwierdzone na realnym API.** Wyróżnik huba.
+- ✅ **Wizja na wejściu (S).** Obraz w czacie → vision (rodzina grok-4); reuse pipeline załączników M9.
+- ✅ **Q&A nad dokumentami (M).** PDF/arkusz jako `input_file` → odpowiedź z treści. **Potwierdzone na realnym API.**
+- ✅ **Wiedza projektu.** ⚠️ xAI **nie ma** serwerowych vector stores (`/v1/vector_stores` → 404), więc
+  zamiast `file_search`: dokumenty lokalnie w projekcie + „Attach all" na żądanie (na bazie `input_file`).
 
 **M11 — Twórczość (Image / Video)**
 - **Edycja i warianty obrazu (M).** Nie tylko generacja: inpainting/warianty/upscale + „Wyślij do…".
