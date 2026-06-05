@@ -99,6 +99,25 @@ is the thin endpoint/auth layer (CLAUDE.md rule). **Verified on the real API:** 
 knowledge" (B5) is **local** (`config.PROJECT_DOCS_DIR`) + attached on demand ("Attach all"), not
 `file_search`. Mirror the `responses_client` UTF-8 SSE decode if you touch streaming.
 
+**Creative = GenJob queue (M11, see [`docs/PLAN_M11_TWORCZOSC.md`](docs/PLAN_M11_TWORCZOSC.md)):** image
+and video generation share **one async job engine** — [`grok_core/genjobs.py`](grok_core/genjobs.py)
+`GenJobManager` (a `queue.Queue` + worker threads, statuses queued→running→done|failed|cancelled,
+cancel/retry/`max_active` limit, cost estimate). The **executor is injected** by `Backend` — `genjobs.py`
+must NOT import `api_manager`/`state` (no cycles, testable on a stub); `Backend._run_image_job`/
+`_run_video_job` reuse the legacy `api_manager` calls + `save_media_urls` (the video worker polls
+`poll_video_status` **server-side** so long renders don't block FastAPI). Every output is registered as an
+**M9 Artifact**; `save_media_urls`/`_record_media_artifact` take `project_id` and return `artifact_id`.
+Routes ([`routes/genjobs.py`](grok_core/routes/genjobs.py)): `POST /genjobs/image` (text2img|edit|variation,
+≤3 refs), `POST /genjobs/video` (text2video|img2video|edit|extend), `GET /genjobs`(+`total_cost`)/`{id}`,
+`POST /{id}/cancel|retry`, `DELETE /genjobs[/{id}]` (clear finished). Media management: `DELETE
+/artifacts/{id}` ([`routes/history.py`](grok_core/routes/history.py)) removes the record + the file
+(sandboxed to the media dirs). Transport is **REST polling** (`useGenJobs` polls `/genjobs` only while a
+job is active); `GenJobManager.on_update` is an unused hook for an optional WS push. Selfcheck:
+[`grok_core/tools/genjobs_check.py`](grok_core/tools/genjobs_check.py) (don't regress the lifecycle/cancel/
+queue-limit asserts) + `/genjobs` guards in `api_smoke.py`. Renderer staged inputs (Image refs, Video
+frame/source) live in the **Hub context** (`lib/hub.tsx`) — panels are lazy and unmount on tab switch,
+so per-panel `useState` would lose them.
+
 ## Commands
 
 All paths below are relative to the repo root. The frontend npm scripts run from `desktop/`.
@@ -172,8 +191,8 @@ run external copy would use its own `config.py`, hence its own data dir.)
   `chats_manager.py` stays in the root (reusable) but is not instantiated.
 - `grok_permissions.json` — agent "Always allow" allowlist (atomic writes, P1-11).
 - `grok_history.db` (M9) — SQLite+FTS5 hub backbone: artifacts + searchable history + projects +
-  `collection_files` ([`grok_core/history_store.py`](grok_core/history_store.py)). Own file; **never**
-  touch `grok_config.json`. Corrupt → `.corrupt` backup (like the JSON readers).
+  `collection_files` + `gen_jobs` (M11 generation queue) ([`grok_core/history_store.py`](grok_core/history_store.py)).
+  Own file; **never** touch `grok_config.json`. Corrupt → `.corrupt` backup (like the JSON readers).
 - `project_docs/<project_id>/` (M10-B5) — local "project knowledge" documents (xAI has no vector
   stores); served sandboxed via `/collections/files/{id}/content`, attached on demand ("Attach all").
 

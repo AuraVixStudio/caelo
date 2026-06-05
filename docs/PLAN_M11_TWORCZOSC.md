@@ -227,3 +227,27 @@ Oryginalne pytania (kontekst):
   `.grok/`/katalog media do `.gitignore`.
 - **Spójność modeli z M10:** wizja w czacie i generacja obrazu używają tej samej rodziny grok-imagine/
   grok-4 — utrzymaj jeden selektor/źródło prawdy o dostępnych modelach, by nie rozjechać UI.
+
+## 6. Follow-upy po ukończeniu (zgłoszone przez usera, 2026-06-05) — ✅ ZROBIONE
+
+Doszlifowania UX naniesione po domknięciu B1–B5/F1–F6:
+
+1. ✅ **Staged inputs przeżywają zmianę zakładki.** Panele są leniwe (P2-4) i odmontowują się przy
+   przełączeniu trybu, więc dodane zdjęcie/wideo żyło w lokalnym `useState` i znikało. Podniesione do
+   **Hub** (`imageRefs`/`videoFrame`/`videoSource` w `lib/hub.tsx`). **Reguła:** stan panelu, który ma
+   przetrwać zakładkę, MUSI żyć w Hub (lub innym trwałym store), nie w komponencie modułu.
+2. ✅ **Czyszczenie listy zadań.** „Clear finished" (per tryb) + ✕ usuń pojedynczy wiersz; backend
+   `clear_finished`/`remove` + `DELETE /genjobs[/{id}]`. Czyści tylko wpisy zadań — artefakty zostają.
+3. ✅ **Popover „Send to" otwiera się w górę** w kartach galerii (`SendToMenu side`, `ArtifactCard side="top"`)
+   — wcześniej uciekał poza ekran w dół.
+4. ✅ **„Send video to → Edit/Extend"** (`VideoSendMenu`): wideo nie ma bloku B4 (415), więc pobieramy
+   data-URI (`getArtifactDataUri`) i ładujemy jako źródło przez `hub.sendVideoToVideo`.
+5. ✅ **Edit/Extend ujednolicone na kolejkę** (patrz F3) — wszystkie tryby wideo to teraz `GenJob`
+   (op `edit`/`extend` + pole `video`; egzekutor dispatchuje po op). Usunięty legacy inline player.
+6. ✅ **Pełny ekran wideo** — `main/index.ts` dopuszcza uprawnienie `'fullscreen'` (Electron żąda go
+   dla `requestFullscreen`; wcześniej tylko `'media'`).
+7. ✅ **Usuwanie mediów** — `DELETE /artifacts/{id}` (rekord + plik, sandbox) + kosz z potwierdzeniem
+   na kartach (Recent/Gallery).
+8. ✅ **Miniatury wideo** — `ArtifactMedia` pokazuje **pierwszą klatkę** (ładowanie od razu, bez leniwego
+   „Preview") i używa **`object-contain`** dla wideo (oryginalne proporcje w karcie i na pełnym ekranie;
+   `object-cover` zoomował też w fullscreenie). Obraz zostaje `object-cover`.
