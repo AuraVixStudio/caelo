@@ -1,6 +1,26 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Check, ChevronDown, History, ListChecks, Pencil, Play, ShieldCheck, Undo2, Zap } from 'lucide-react'
 import { AgentConnection, type AgentEvent } from '../../lib/agentClient'
-import type { ChatAttachment, Conn } from '../../lib/api'
+import {
+  agentUndo,
+  listCheckpoints,
+  type ChatAttachment,
+  type CheckpointInfo,
+  type Conn
+} from '../../lib/api'
+import {
+  AGENT_MODES,
+  canApproveRun,
+  checkpointSubtitle,
+  checkpointTitle,
+  modeBanner,
+  modeInfo,
+  partialUndoNote,
+  planReducer,
+  undoSummary,
+  type AgentMode,
+  type PlanPhase
+} from '../../lib/agentTrust'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
 import { useHub } from '../../lib/hub'
 import { inputBlockToAttachment } from '../../lib/sendTo'
@@ -9,14 +29,30 @@ import { cn } from '../../lib/cn'
 import { Markdown } from '../Markdown'
 import { AttachButton, AttachmentChips } from '../Attachments'
 import { Button } from '../ui/Button'
+import { IconButton } from '../ui/IconButton'
 import { ModelSelect } from '../ui/ModelSelect'
+import { Popover } from '../ui/Popover'
 import { Textarea } from '../ui/Textarea'
 import { DiffView } from './DiffView'
+
+function modeIcon(id: AgentMode, size = 14): ReactNode {
+  switch (id) {
+    case 'accept-edits':
+      return <Pencil size={size} />
+    case 'plan':
+      return <ListChecks size={size} />
+    case 'bypass':
+      return <Zap size={size} />
+    default:
+      return <ShieldCheck size={size} />
+  }
+}
 
 type Entry =
   | { kind: 'user'; id: string; text: string; attachments?: ChatAttachment[] }
   | { kind: 'assistant'; id: string; text: string }
   | { kind: 'error'; id: string; text: string }
+  | { kind: 'info'; id: string; text: string; tone: 'info' | 'warn' }
   | {
       kind: 'tool'
       id: string
@@ -25,7 +61,15 @@ type Entry =
       status: 'pending' | 'awaiting' | 'done' | 'error'
       output: string
       summary: string
-      detail?: { kind?: string; diff?: string; command?: string; cwd?: string }
+      detail?: {
+        kind?: string
+        diff?: string
+        command?: string
+        cwd?: string
+        created?: boolean
+        bytes?: number
+        detail?: string
+      }
     }
 
 export function AgentPanel({
@@ -50,14 +94,22 @@ export function AgentPanel({
   const [busy, setBusy] = useState(false)
   const [connected, setConnected] = useState(false)
   const [dragging, setDragging] = useState(false) // M9-F4: drop plików do composera
+  // M13-F2: tryb agenta (ask/accept-edits/plan/bypass) + faza cyklu plan → review → execute.
+  const [mode, setMode] = useState<AgentMode>('ask')
+  const [planPhase, setPlanPhase] = useState<PlanPhase>('idle')
+  // M13-F3: oś checkpointów sesji + flaga „partial undo".
+  const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([])
+  const [partial, setPartial] = useState(false)
+  const [undoing, setUndoing] = useState(false)
 
   const agentRef = useRef<AgentConnection | null>(null)
   const curAssistant = useRef<string | null>(null)
   const idRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  // Handler zdarzeń rejestrowany jest raz — onFilesChanged przez ref (świeży).
+  // Handlery rejestrowane są raz — świeże wersje przez refy.
   const onFilesChangedRef = useRef(onFilesChanged)
   onFilesChangedRef.current = onFilesChanged
+  const turnWasPlanRef = useRef(false)
 
   const nextId = (): string => `e${++idRef.current}`
 
@@ -66,6 +118,22 @@ export function AgentPanel({
       prev.map((e) => (e.kind === 'tool' && e.id === id ? { ...e, ...patch } : e))
     )
   }
+
+  function pushInfo(text: string, tone: 'info' | 'warn' = 'info'): void {
+    setEntries((prev) => [...prev, { kind: 'info', id: nextId(), text, tone }])
+  }
+
+  // M13-F3: pobierz aktualną oś checkpointów z backendu (autorytatywne źródło).
+  const refreshCheckpoints = (): void => {
+    void listCheckpoints(conn)
+      .then((r) => {
+        setCheckpoints(r.checkpoints)
+        setPartial(r.partial)
+      })
+      .catch(() => undefined)
+  }
+  const refreshCheckpointsRef = useRef(refreshCheckpoints)
+  refreshCheckpointsRef.current = refreshCheckpoints
 
   // Połączenie WS agenta (jedno na sesję modułu Code).
   useEffect(() => {
@@ -87,9 +155,12 @@ export function AgentPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn.baseUrl, conn.token])
 
-  // Zmiana workspace → poinformuj agenta.
+  // Zmiana workspace → poinformuj agenta i odśwież checkpointy nowego workspace.
   useEffect(() => {
-    if (connected && workspacePath) agentRef.current?.setWorkspace(workspacePath)
+    if (connected && workspacePath) {
+      agentRef.current?.setWorkspace(workspacePath)
+      refreshCheckpointsRef.current()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
 
@@ -147,6 +218,10 @@ export function AgentPanel({
       case 'approval_request':
         patchTool(e.id, { status: 'awaiting', detail: e.detail })
         break
+      case 'checkpoint':
+        // M13-F3: agent zsnapshotował pliki → odśwież oś checkpointów.
+        refreshCheckpointsRef.current()
+        break
       case 'output':
         setEntries((prev) =>
           prev.map((x) =>
@@ -174,14 +249,19 @@ export function AgentPanel({
       }
       case 'stopped':
         setBusy(false)
+        setPlanPhase((p) => planReducer(p, { type: 'done' }))
         break
       case 'done':
         setBusy(false)
+        // M13-F2: po planie → faza review (pokaż „Approve & run"); po wykonaniu → idle.
+        setPlanPhase((p) => planReducer(p, { type: 'done' }))
+        refreshCheckpointsRef.current()
         onFilesChangedRef.current()
         break
       case 'error':
         setEntries((prev) => [...prev, { kind: 'error', id: nextId(), text: e.error }])
         setBusy(false)
+        setPlanPhase((p) => planReducer(p, { type: 'done' }))
         break
       case 'workspace':
         break // potwierdzenie ustawienia katalogu — obsługiwane po stronie CodeView
@@ -197,21 +277,55 @@ export function AgentPanel({
       setEntries((prev) => [...prev, { kind: 'error', id: nextId(), text: 'Open a folder first.' }])
       return
     }
+    const usePlan = mode === 'plan'
     const atts = att.attachments
     setEntries((prev) => [
       ...prev,
       { kind: 'user', id: nextId(), text, attachments: atts.length ? atts : undefined }
     ])
     curAssistant.current = null
+    turnWasPlanRef.current = usePlan
+    setPlanPhase((p) => planReducer(p, { type: 'send', plan: usePlan }))
     setBusy(true)
     setInput('')
     att.clear()
-    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts))
+    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts), mode)
+  }
+
+  // M13-F2: zatwierdź plan i wykonaj go w trybie „accept edits" (plan był sprawdzony).
+  function approveAndRun(): void {
+    if (busy || !connected || !workspacePath) return
+    const text = 'Proceed with the plan above and make the changes.'
+    setMode('accept-edits')
+    setPlanPhase((p) => planReducer(p, { type: 'approveRun' }))
+    setEntries((prev) => [...prev, { kind: 'user', id: nextId(), text }])
+    curAssistant.current = null
+    turnWasPlanRef.current = false
+    setBusy(true)
+    agentRef.current?.sendMessage(text, model, [], 'accept-edits')
   }
 
   function approve(id: string, decision: 'accept' | 'reject' | 'always'): void {
     patchTool(id, { status: 'pending' })
     agentRef.current?.approve(id, decision)
+  }
+
+  // M13-F3: cofnij wskazany checkpoint (lub całą sesję, gdy brak id).
+  async function undo(checkpointId?: string): Promise<void> {
+    if (undoing || busy) return
+    setUndoing(true)
+    try {
+      const r = await agentUndo(conn, checkpointId)
+      pushInfo(undoSummary(r), r.partial ? 'warn' : 'info')
+      const note = partialUndoNote(r.partial)
+      if (note) pushInfo(note, 'warn')
+      refreshCheckpointsRef.current()
+      onFilesChangedRef.current() // odśwież drzewo + otwarte pliki w edytorze
+    } catch {
+      pushInfo('Undo failed.', 'warn')
+    } finally {
+      setUndoing(false)
+    }
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -221,6 +335,9 @@ export function AgentPanel({
     }
   }
 
+  const showApproveRun = canApproveRun(planPhase, busy)
+  const banner = modeBanner(mode)
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
@@ -228,6 +345,36 @@ export function AgentPanel({
         <div className="ml-1 min-w-0 flex-1">
           <ModelSelect value={model} models={models} onChange={onModelChange} />
         </div>
+        <Popover
+          align="end"
+          label="Checkpoints"
+          trigger={({ toggle, open, triggerProps }) => (
+            <IconButton
+              label="Checkpoints & undo"
+              icon={<History size={18} />}
+              active={open}
+              tooltip={!open}
+              tooltipSide="bottom-end"
+              onClick={() => {
+                refreshCheckpoints()
+                toggle()
+              }}
+              {...triggerProps}
+            />
+          )}
+        >
+          {(close) => (
+            <CheckpointsMenu
+              checkpoints={checkpoints}
+              partial={partial}
+              undoing={undoing}
+              onUndo={(id) => {
+                void undo(id)
+                close()
+              }}
+            />
+          )}
+        </Popover>
         <span
           title={connected ? 'connected' : 'disconnected'}
           className={cn('h-2 w-2 shrink-0 rounded-full', connected ? 'bg-success' : 'bg-muted')}
@@ -250,6 +397,19 @@ export function AgentPanel({
         )}
       </div>
 
+      {showApproveRun ? (
+        <div className="shrink-0 border-t border-border bg-accent/5 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 text-xs text-muted">
+              Plan ready — review the steps above, then run it.
+            </span>
+            <Button size="sm" icon={<Play size={14} />} onClick={approveAndRun}>
+              Approve &amp; run
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div
         onDragOver={(e) => {
           if (!connected) return
@@ -267,18 +427,31 @@ export function AgentPanel({
           dragging ? 'border-accent' : 'border-border'
         )}
       >
+        {banner ? (
+          <div
+            className={cn(
+              'mb-2 rounded-md px-2.5 py-1.5 text-[11.5px]',
+              banner.tone === 'warn' ? 'bg-warn/10 text-warn' : 'bg-surface-2 text-muted'
+            )}
+          >
+            {banner.text}
+          </div>
+        ) : null}
         <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />
         <div className="flex items-end gap-2">
-          <AttachButton
-            onPick={att.addFiles}
-            disabled={!connected}
-            className="h-8 w-8 rounded-lg"
-          />
+          <ModeSelector mode={mode} disabled={false} onSelect={setMode} />
+          <AttachButton onPick={att.addFiles} disabled={!connected} className="h-8 w-8 rounded-lg" />
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={workspacePath ? 'Ask the agent…' : 'Open a folder to start…'}
+            placeholder={
+              workspacePath
+                ? mode === 'plan'
+                  ? 'Describe the change — get a plan first…'
+                  : 'Ask the agent…'
+                : 'Open a folder to start…'
+            }
             rows={2}
             disabled={!connected}
             className="flex-1 text-[13px]"
@@ -293,11 +466,142 @@ export function AgentPanel({
               onClick={send}
               disabled={(!input.trim() && att.attachments.length === 0) || !connected}
             >
-              Send
+              {mode === 'plan' ? 'Plan' : 'Send'}
             </Button>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function ModeSelector({
+  mode,
+  disabled,
+  onSelect
+}: {
+  mode: AgentMode
+  disabled: boolean
+  onSelect: (m: AgentMode) => void
+}) {
+  const cur = modeInfo(mode)
+  return (
+    <Popover
+      label="Agent mode"
+      side="top"
+      trigger={({ toggle, open, triggerProps }) => (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={`Agent mode: ${cur.label}`}
+          onClick={toggle}
+          className={cn(
+            'inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-xs text-fg transition-colors',
+            'hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50',
+            open && 'bg-surface-2'
+          )}
+          {...triggerProps}
+        >
+          {modeIcon(mode)}
+          <span className="max-w-[68px] truncate">{cur.short}</span>
+          <ChevronDown size={12} className="opacity-60" />
+        </button>
+      )}
+    >
+      {(close) => (
+        <div className="flex w-72 flex-col gap-0.5">
+          <div className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            Mode
+          </div>
+          {AGENT_MODES.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => {
+                onSelect(m.id)
+                close()
+              }}
+              className={cn(
+                'flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-surface-2',
+                m.id === mode && 'bg-surface-2'
+              )}
+            >
+              <span className="mt-0.5 shrink-0 text-muted">{modeIcon(m.id, 15)}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-[13px] font-medium text-fg">
+                  {m.label}
+                  {m.id === mode ? <Check size={13} className="text-accent" /> : null}
+                </div>
+                <div className="text-[11px] text-muted">{m.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </Popover>
+  )
+}
+
+function CheckpointsMenu({
+  checkpoints,
+  partial,
+  undoing,
+  onUndo
+}: {
+  checkpoints: CheckpointInfo[]
+  partial: boolean
+  undoing: boolean
+  onUndo: (id?: string) => void
+}) {
+  const ordered = [...checkpoints].reverse() // najnowszy na górze
+  return (
+    <div className="flex w-80 flex-col gap-2">
+      <div className="flex items-center justify-between px-1 pt-1 text-xs font-semibold text-muted">
+        <span>Session checkpoints</span>
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<Undo2 size={13} />}
+          disabled={undoing || checkpoints.length === 0}
+          onClick={() => onUndo()}
+        >
+          Undo all
+        </Button>
+      </div>
+      {partial ? (
+        <div className="mx-1 rounded-md bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
+          {partialUndoNote(true)}
+        </div>
+      ) : null}
+      {ordered.length === 0 ? (
+        <div className="px-1 pb-1 text-xs text-muted">
+          No checkpoints yet. They appear when the agent edits files.
+        </div>
+      ) : (
+        <div className="flex max-h-72 flex-col gap-1 overflow-auto">
+          {ordered.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] text-fg" title={checkpointTitle(c)}>
+                  {checkpointTitle(c)}
+                </div>
+                <div className="text-[11px] text-muted">{checkpointSubtitle(c)}</div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={undoing}
+                onClick={() => onUndo(c.id)}
+                title="Undo to this checkpoint"
+              >
+                Undo to here
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -339,6 +643,18 @@ function EntryView({
   if (entry.kind === 'error') {
     return <div className="text-[13px] text-error">⚠️ {entry.text}</div>
   }
+  if (entry.kind === 'info') {
+    return (
+      <div
+        className={cn(
+          'rounded-md px-2.5 py-1.5 text-[12px]',
+          entry.tone === 'warn' ? 'bg-warn/10 text-warn' : 'bg-surface-2 text-muted'
+        )}
+      >
+        {entry.text}
+      </div>
+    )
+  }
 
   // tool
   const argSummary =
@@ -361,6 +677,9 @@ function EntryView({
         <span className="min-w-0 flex-1 truncate font-mono text-muted" title={argSummary}>
           {argSummary}
         </span>
+        {entry.detail?.created && entry.status === 'awaiting' ? (
+          <span className="shrink-0 rounded bg-success/15 px-1 text-[10px] text-success">new</span>
+        ) : null}
         <span className="shrink-0 text-[10px] uppercase text-muted">{entry.status}</span>
       </div>
 
@@ -368,6 +687,10 @@ function EntryView({
         <div className="flex flex-col gap-2 p-2.5">
           {entry.detail.kind === 'diff' ? (
             <DiffView diff={entry.detail.diff ?? ''} />
+          ) : entry.detail.kind === 'binary' ? (
+            <div className="rounded-md bg-surface-2 px-2.5 py-2 font-mono text-[11.5px] text-muted">
+              {entry.detail.detail ?? 'Binary file would change'}
+            </div>
           ) : entry.detail.kind === 'command' ? (
             <pre className="m-0 whitespace-pre-wrap rounded-md bg-surface-2 px-2.5 py-2 font-mono text-xs text-fg/90">
               $ {entry.detail.command}

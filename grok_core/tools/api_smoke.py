@@ -1268,6 +1268,77 @@ def _unit_projects_routes(checks: list) -> None:
             store.close()
 
 
+def _unit_agent_routes(checks: list) -> None:
+    """M13-B5: trasy /agent/checkpoints, /agent/undo, /agent/grok-md — in-process,
+    bez sieci. Backend bez __init__ (tylko workspace + checkpointy na temp)."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core.agent.workspace import Workspace  # noqa: E402
+    from grok_core.routes import agent_api as ar  # noqa: E402
+    from grok_core.state import Backend  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        b = Backend.__new__(Backend)  # bez __init__ (bez I/O / sieci)
+        b._workspace = None
+        b._checkpoints = None
+
+        r = ar.list_checkpoints(b=b)
+        checks.append(("/agent/checkpoints no workspace -> empty",
+                       r["has_workspace"] is False and r["checkpoints"] == []))
+
+        undo_400 = False
+        try:
+            ar.undo(ar.UndoReq(), b=b)
+        except HTTPException as e:
+            undo_400 = e.status_code == 400
+        checks.append(("/agent/undo no workspace -> 400", undo_400))
+
+        ws = Workspace(d)
+        b._workspace = ws
+        (ws.root / "a.txt").write_text("orig\n", encoding="utf-8")
+
+        cp = b.get_checkpoints()
+        cp.begin_turn(label="edit a")
+        cp.snapshot("a.txt")
+        (ws.root / "a.txt").write_text("changed\n", encoding="utf-8")
+        cp.snapshot("new.txt")
+        (ws.root / "new.txt").write_text("new\n", encoding="utf-8")
+
+        r = ar.list_checkpoints(b=b)
+        checks.append(("/agent/checkpoints lists session checkpoint",
+                       r["has_workspace"] is True and len(r["checkpoints"]) == 1
+                       and r["checkpoints"][0]["files"] == 2))
+
+        r = ar.undo(ar.UndoReq(), b=b)
+        checks.append(("/agent/undo restores + deletes",
+                       (ws.root / "a.txt").read_text(encoding="utf-8") == "orig\n"
+                       and not (ws.root / "new.txt").exists()
+                       and "a.txt" in r["restored"] and "new.txt" in r["deleted"]))
+
+        # nieznany checkpoint -> 404
+        cp.begin_turn()
+        cp.snapshot("a.txt")
+        (ws.root / "a.txt").write_text("x\n", encoding="utf-8")
+        unknown404 = False
+        try:
+            ar.undo(ar.UndoReq(checkpoint_id="does-not-exist"), b=b)
+        except HTTPException as e:
+            unknown404 = e.status_code == 404
+        checks.append(("/agent/undo unknown checkpoint -> 404", unknown404))
+
+        # GROK.md round-trip (atomowy zapis pod workspace, sandbox)
+        gm = ar.get_grok_md(b=b)
+        checks.append(("/agent/grok-md initial empty",
+                       gm["exists"] is False and gm["content"] == ""))
+        ar.put_grok_md(ar.GrokMdReq(content="never touch /vendor"), ws=ws)
+        gm2 = ar.get_grok_md(b=b)
+        checks.append(("/agent/grok-md round-trips",
+                       gm2["exists"] is True and "never touch /vendor" in gm2["content"]))
+
+
 def main() -> int:
     token = secrets.token_urlsafe(16)
     env = dict(os.environ, GROK_CORE_TOKEN=token)
@@ -1358,6 +1429,17 @@ def main() -> int:
         s, _ = _get(base, "/collections")
         checks.append(("/collections (no token) == 401", s == 401))
 
+        # M13-B5: agent checkpoints/undo/grok-md — 200 + kształt; bramka tokenu.
+        s, body = _get(base, "/agent/checkpoints", token)
+        checks.append(("/agent/checkpoints == 200 + shape",
+                       s == 200 and body is not None and isinstance(body.get("checkpoints"), list)))
+        s, _ = _get(base, "/agent/checkpoints")
+        checks.append(("/agent/checkpoints (no token) == 401", s == 401))
+        s, _ = _post(base, "/agent/undo", {})
+        checks.append(("/agent/undo (no token) == 401", s == 401))
+        s, _ = _post(base, "/agent/undo", {}, "wrong")
+        checks.append(("/agent/undo (bad token) == 403", s == 403))
+
         s, _ = _get(base, "/models")
         checks.append(("/models (no token) == 401", s == 401))
         s, _ = _get(base, "/models", "wrong")
@@ -1436,6 +1518,9 @@ def main() -> int:
 
         # M9-B5: trasy projektów (list/create/select) + stemplowanie aktywnym projektem.
         _unit_projects_routes(checks)
+
+        # M13-B5: trasy agenta (checkpoints/undo/grok-md) — in-process.
+        _unit_agent_routes(checks)
 
         ok = True
         for name, passed in checks:

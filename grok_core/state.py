@@ -55,6 +55,10 @@ class Backend:
         # w rdzeniu (reużywalny), ale sidecar go nie instancjonuje.
         self.api = APIManager(self.get_api_key)
         self._workspace = None  # agent/IDE workspace (Workspace | None)
+        # M13-B3/B5: menedżer checkpointów bieżącego workspace, współdzielony przez
+        # WS (/agent/stream) i REST (/agent/checkpoints,/agent/undo) — jeden mechanizm,
+        # jak allowlista. Tworzony leniwie w get_checkpoints (per korzeń workspace).
+        self._checkpoints = None
         # Trwała allowlista agenta ("Always allow") współdzielona przez WS i REST.
         self.permissions = PermissionGate(config.PERMISSIONS_FILE)
         # M9-B5: ostatnio wybrany projekt (przeżywa restart przez grok_settings.json).
@@ -78,6 +82,20 @@ class Backend:
 
     def get_workspace(self):
         return self._workspace
+
+    # --- checkpointy agenta (M13-B3/B5) ---
+    def get_checkpoints(self):
+        """Menedżer checkpointów dla AKTYWNEGO workspace (leniwy; reużywany dopóki
+        korzeń się nie zmieni). None, gdy brak workspace. Współdzielony przez WS
+        i REST — undo z UI (REST) cofa to, co zsnapshotował agent (WS)."""
+        from grok_core.agent.checkpoints import CheckpointManager
+
+        ws = self._workspace
+        if ws is None:
+            return None
+        if self._checkpoints is None or self._checkpoints.root != ws.root:
+            self._checkpoints = CheckpointManager(ws.root)
+        return self._checkpoints
 
     # --- ostatnie workspace (Faza 6, szybkie przełączanie folderów) ---
     def _record_recent(self, posix_path: str, limit: int = 10) -> None:

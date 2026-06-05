@@ -3,18 +3,24 @@
 Protokół (JSON):
   klient -> serwer:
     {"type":"workspace","path":"C:/..."}          # ustaw katalog roboczy
-    {"type":"message","text":"...","model":"..."} # nowa tura agenta
+    {"type":"message","text":"...","model":"...","mode":"ask"}  # nowa tura agenta
     {"type":"approval","id":"<call_id>","decision":"accept|reject|always"}
     {"type":"stop"}
   serwer -> klient:
     {"type":"workspace","path":"..."}
     {"type":"text","full":"..."}                  # strumień tekstu modelu
     {"type":"tool_call","id","name","args"}
-    {"type":"approval_request","id","name","detail":{kind,diff|command,...}}
+    {"type":"approval_request","id","name","detail":{kind,diff|command|binary,...}}
+    {"type":"checkpoint","id","label","created_at"}  # M13-B3: powstał checkpoint
     {"type":"output","id","chunk"}                # wyjście run_command
     {"type":"tool_result","id","ok","summary"}
     {"type":"assistant_done","content"} / {"type":"stopped"} / {"type":"error","error"}
     {"type":"done"}                               # koniec tury
+
+M13: ramka message niesie "mode" (ask/accept-edits/plan/bypass) — jak „Mode" w
+Claude Code: plan = tylko READONLY (mutacje blokowane), accept-edits = auto write/
+edit, bypass = auto wszystko. M13-B3: checkpointy tworzy menedżer współdzielony
+przez Backend (REST /agent/undo cofa to, co tu zsnapshotowano).
 
 Most: tura agenta biegnie w wątku (blokujące LLM + narzędzia). Zdarzenia trafiają
 do `WsStream` (ograniczona kolejka + backpressure — P0-9) i są wysyłane po WS.
@@ -87,7 +93,7 @@ async def agent_stream(ws: WebSocket) -> None:
                 log.warning("Approval for %s (%s) timed out → reject", name, call_id)
             return pending.pop(call_id, {}).get("decision", "reject")
 
-        def run_turn(text: str, model: str, images: list) -> None:
+        def run_turn(text: str, model: str, images: list, mode: str = "ask") -> None:
             state["busy"] = True
             state["last_assistant"] = ""  # M9-B2: reset przed turą
             try:
@@ -100,12 +106,14 @@ async def agent_stream(ws: WebSocket) -> None:
                     session = AgentSession(
                         ws_obj, gate, stream_chat_with_tools, backend.get_api_key,
                         config.API_BASE, emit=emit, request_approval=request_approval,
+                        checkpoints_provider=backend.get_checkpoints,  # M13-B3/B5
                     )
                     state["session"] = session
                 else:
                     session.ws = ws_obj  # workspace mógł się zmienić
                 stop_event.clear()
-                session.run_turn(text, model, stop_flag=stop_event.is_set, images=images)
+                session.run_turn(text, model, stop_flag=stop_event.is_set, images=images,
+                                 mode=mode)
             except Exception:  # noqa: BLE001
                 # P1-13: nie wysyłaj surowego str(exc) (może zawierać szczegóły xAI/
                 # ścieżki). Loguj pełny ślad, do klienta — ogólny komunikat.
@@ -147,12 +155,15 @@ async def agent_stream(ws: WebSocket) -> None:
                         continue
                     text = msg.get("text", "")
                     images = msg.get("images") or []
+                    # M13: tryb agenta (ask/accept-edits/plan/bypass); wstecznie „plan":true.
+                    mode = msg.get("mode") or ("plan" if msg.get("plan") else "ask")
                     model = (
                         msg.get("model")
                         or backend.read_settings().get("code_model")
                         or "grok-build-0.1"
                     )
-                    t = threading.Thread(target=run_turn, args=(text, model, images), daemon=True)
+                    t = threading.Thread(target=run_turn, args=(text, model, images, mode),
+                                         daemon=True)
                     stream.track(t)   # P0-9: dołączony przy zamykaniu
                     t.start()
                 elif mtype == "approval":

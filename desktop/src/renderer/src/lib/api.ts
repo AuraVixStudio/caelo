@@ -516,6 +516,54 @@ export const getPermissions = (c: Conn): Promise<{ rules: string[] }> => api(c, 
 export const clearPermissions = (c: Conn): Promise<{ ok: boolean; rules: string[] }> =>
   api(c, '/permissions', { method: 'DELETE' })
 
+// --- Agent checkpoints / undo (M13-B5) ---
+export interface CheckpointInfo {
+  id: string
+  label: string
+  created_at: number // epoch seconds
+  files: number // files snapshotted in this checkpoint
+  has_command: boolean // ran a command → undo is partial
+}
+
+export interface CheckpointsResp {
+  checkpoints: CheckpointInfo[]
+  session_id: string | null
+  partial: boolean
+  has_workspace: boolean
+}
+
+export interface UndoResp {
+  ok: boolean
+  restored: string[]
+  deleted: string[]
+  missing: string[]
+  partial: boolean
+  checkpoints_undone: number
+}
+
+export const listCheckpoints = (c: Conn): Promise<CheckpointsResp> => api(c, '/agent/checkpoints')
+
+/** Undo to a checkpoint (id), or the whole session when id is omitted. */
+export const agentUndo = (c: Conn, checkpointId?: string | null): Promise<UndoResp> =>
+  api(c, '/agent/undo', {
+    method: 'POST',
+    body: JSON.stringify({ checkpoint_id: checkpointId ?? null })
+  })
+
+// --- Agent project rules (GROK.md, M13-B4/F4) ---
+export interface GrokMdResp {
+  content: string
+  exists: boolean
+  global_exists: boolean
+  max_bytes: number
+  name: string
+}
+
+export const getGrokMd = (c: Conn): Promise<GrokMdResp> => api(c, '/agent/grok-md')
+
+export const putGrokMd = (c: Conn, content: string): Promise<{ ok: boolean; path: string }> =>
+  api(c, '/agent/grok-md', { method: 'PUT', body: JSON.stringify({ content }) })
+
 export interface ChatStreamHandle {
   stop: () => void
 }

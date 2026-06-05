@@ -173,3 +173,58 @@ B5 (spójne API)  ── spina B1/B3 z WS+REST
   „partial undo", czy chcesz później przechwytywać też zmiany plików robione przez komendy (trudne)?
 - **Retencja checkpointów:** limit liczby/rozmiaru `.grok/checkpoints` + czyszczenie; dodać `.grok/`
   do sugerowanego `.gitignore` usera.
+
+---
+
+## 6. Status realizacji (2026-06-05)
+
+**Backend B1–B5 + Frontend F1–F4 — ZROBIONE i zweryfikowane bez xAI.** `F5` (per-hunk) odłożone
+jako świadomy polish (wg §3 — „po działającym diffie per-plik").
+
+**Backend (`grok_core/agent`):**
+- **B1 diff** — `preview_change` (`tools.py`) świadome plików binarnych: nowy plik → diff jako
+  same dodania (`created:true`); plik binarny (sniff NUL) → `{kind:"binary",bytes}` zamiast
+  śmieciowego diffa; tekst → unified diff jak dotąd. Dodano `atomic_write_bytes` (restore binariów).
+- **B2 plan mode** — flaga `plan` w `AgentSession.run_turn`; w plan mode MUTATING (`write/edit/run`)
+  odrzucane z „Blocked in plan mode" (READONLY działa), dodatek do system promptu (`PLAN_MODE_PROMPT`),
+  **plan nie tworzy checkpointu** (leniwe otwieranie). Po `plan=false` mutacje wracają (bramka jak zwykle).
+- **B3 checkpointy/undo** — nowy `agent/checkpoints.py` (`CheckpointManager`): leniwy checkpoint per tura,
+  snapshot oryginału przed 1. mutacją ścieżki do `.grok/checkpoints/<sid>/` + manifest (atomowy),
+  `undo_to(id|None)` (restore kopii w kolejności odwrotnej, usunięcie utworzonych), sandbox przez
+  `resolve()`, `run_command` → „partial undo", retencja sesji. `.grok` dodane do `IGNORE_DIRS`.
+- **B4 GROK.md** — nowy `agent/grokmd.py` (`load_grok_md`/`build_system_prompt`): workspace + globalny
+  `DATA_DIR`, workspace nadpisuje (idzie po) global, cap 32 KB, brak pliku OK; wstrzykiwane per tura.
+- **B5 spójne API** — `Backend.get_checkpoints()` (współdzielony WS↔REST), nowy `routes/agent_api.py`:
+  `GET /agent/checkpoints`, `POST /agent/undo`, `GET|PUT /agent/grok-md` (fail-closed token, atomowy zapis).
+  WS niesie diff w `approval_request` (jak dotąd) + nowy event `checkpoint`. Ścieżka agenta dostaje
+  `checkpoints_provider`.
+- **Selfchecki:** `agent_selfcheck.py` **81 → 109** (28 nowych: B1/B2/B3/B4); `api_smoke.py`
+  **141 → 152** (`_unit_agent_routes` + bramka tokenu /agent/*). `handshake_check` OK. Zero regresji.
+
+**Frontend (`desktop/src/renderer`):**
+- **F1** — karta zatwierdzenia: render binarnego (`kind:"binary"`) + badge „new" dla nowego pliku;
+  `DiffView` (CodeMirror-styled) bez zmian. `agentClient.ts`: `ApprovalDetail` o `created/bytes/detail`.
+- **F2** — **selektor trybów** (jak „Mode" w Claude Code) w composerze zamiast binarnego przełącznika:
+  `ask` / `accept-edits` / `plan` / `bypass` (menu z opisami + checkmark), baner stanu per tryb
+  (warn dla bypass), przycisk **„Approve & run"** po planie (przechodzi w `accept-edits`); czysta
+  maszyna stanów `planReducer` + `AGENT_MODES`/`modeBanner`/`nextMode` w `lib/agentTrust.ts`.
+  Backend: `run_turn(mode=)` zamiast `plan` (`_auto_approves`: bypass=wszystko, accept-edits=write/edit),
+  WS frame `"mode"` (wstecznie `"plan":true`). Selektor jest aktywny też przy rozłączeniu (to
+  ustawienie, nie akcja). **Naprawiono przycinanie tekstu**: poprzedni tooltip „Plan first" wychodził
+  poza lewą krawędź panelu (`overflow:hidden`) — selektor pokazuje etykietę inline; do `Tooltip`
+  dodano warianty `top-start`/`bottom-start` (wyrównanie do lewej krawędzi) na przyszłość.
+- **F3** — popover „Checkpoints & undo" w nagłówku Agenta: oś checkpointów (najnowszy u góry),
+  „Undo to here" / „Undo all", baner „partial undo"; live event `checkpoint` + REST `listCheckpoints`/
+  `agentUndo`; po undo odświeżenie drzewa/edytora. Utile w `lib/agentTrust.ts`.
+- **F4** — przycisk „Project rules (GROK.md)" w nagłówku Code: tworzy plik z szablonu, gdy brak,
+  i otwiera w edytorze (zapis zwykłą ścieżką Ctrl+S → `/fs/write`; backend `GET|PUT /agent/grok-md`
+  istnieje równolegle).
+- **Testy/weryfikacja:** `desktop/test/agentTrust.test.ts` (planReducer / undoSummary / etykiety) —
+  napisany; `npm test` nie uruchamia się w tym środowisku (Vitest devDep niezainstalowany, jak w
+  CLAUDE.md). `npm run typecheck` ✅. Podgląd web (devMock): wszystkie kontrolki renderują, popover
+  checkpointów otwiera się, **zero błędów w konsoli** (pełna interakcja na żywo — diff approval, tury
+  planu, realne undo — wymaga backendu + xAI → maszyna usera).
+
+**Do zrobienia później:** `F5` (per-hunk — wymaga aplikowania częściowego patcha po stronie backendu);
+weryfikacja na żywo u usera; otwarte pytanie §5 (ujednolicenie ścieżki agenta z Responses API) wciąż
+osobno. Sugerowane: dodać `.grok/` do `.gitignore` usera.

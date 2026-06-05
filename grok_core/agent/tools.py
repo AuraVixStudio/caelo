@@ -31,9 +31,11 @@ except Exception:  # pragma: no cover - fallback gdy modułu brak
     _RX_TIMEOUT = False
 
 IGNORE_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "__pycache__",
+    ".git", ".grok", "node_modules", ".venv", "venv", "__pycache__",
     "out", "dist", ".vite", ".idea", ".vscode", "build",
 }
+# `.grok` = magazyn checkpointów agenta (M13-B3). Nie enumeruj/przeszukuj go —
+# inaczej agent czytałby własne kopie zapasowe (i widziałby je w glob/grep).
 
 # Limity grep (P0-3): chronią przed ReDoS i wczytaniem ogromnych/binarnych plików.
 GREP_MAX_FILE_BYTES = 8 * 1024 * 1024   # pomijaj pliki większe niż ~8 MB
@@ -295,6 +297,26 @@ def atomic_write_text(p: Path, content: str) -> None:
         raise
 
 
+def atomic_write_bytes(p: Path, data: bytes) -> None:
+    """Atomowy zapis bajtów (temp + os.replace). Wariant `atomic_write_text` dla
+    treści binarnej — używany przy przywracaniu checkpointów (M13-B3), gdzie kopia
+    zapasowa może być dowolnym plikiem (obraz, archiwum), nie tylko tekstem."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".grok-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, p)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_file(ws: Workspace, path: str, content: str = "", **_) -> str:
     p = ws.resolve(path)
     atomic_write_text(p, content)
@@ -491,18 +513,29 @@ def _udiff(old: str, new: str, path: str) -> str:
 
 
 def preview_change(ws: Workspace, name: str, args: dict) -> Optional[dict]:
-    """Buduje opis zmiany do zatwierdzenia (diff dla write/edit, komenda dla run)."""
+    """Buduje opis zmiany do zatwierdzenia (M13-B1): unified diff dla write/edit,
+    komenda dla run. Nowy plik → diff jako same dodania (`created`). Plik binarny
+    (bajt NUL) → znacznik „binary" + rozmiar zamiast nieczytelnego diffa."""
     try:
-        if name == "write_file":
+        if name in ("write_file", "edit_file"):
             p = ws.resolve(args["path"])
-            old = p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
-            return {"kind": "diff", "path": args["path"], "diff": _udiff(old, args.get("content", ""), args["path"])}
-        if name == "edit_file":
-            p = ws.resolve(args["path"])
-            old = p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
-            os_, ns = args.get("old_string", ""), args.get("new_string", "")
-            new = old.replace(os_, ns) if args.get("replace_all") else old.replace(os_, ns, 1)
-            return {"kind": "diff", "path": args["path"], "diff": _udiff(old, new, args["path"])}
+            exists = p.exists() and p.is_file()
+            # P0-7/B1: nadpisanie pliku binarnego — nie generuj śmieciowego diffa.
+            if exists and _is_binary(p):
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    size = 0
+                return {"kind": "binary", "path": args["path"], "bytes": size,
+                        "detail": f"binary file ({size} bytes) would be overwritten"}
+            old = p.read_text(encoding="utf-8", errors="replace") if exists else ""
+            if name == "write_file":
+                new = args.get("content", "")
+            else:
+                os_, ns = args.get("old_string", ""), args.get("new_string", "")
+                new = old.replace(os_, ns) if args.get("replace_all") else old.replace(os_, ns, 1)
+            return {"kind": "diff", "path": args["path"], "created": not exists,
+                    "diff": _udiff(old, new, args["path"])}
         if name == "run_command":
             return {"kind": "command", "command": args.get("command", ""), "cwd": args.get("cwd")}
     except Exception as exc:  # noqa: BLE001

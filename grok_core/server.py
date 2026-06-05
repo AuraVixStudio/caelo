@@ -33,6 +33,7 @@ import config  # type: ignore
 
 from grok_core.routes import (
     agent,
+    agent_api,
     auth,
     chat,
     collections,
@@ -157,6 +158,7 @@ def create_app(
     app.include_router(projects.router, dependencies=guard)
     app.include_router(collections.router, dependencies=guard)
     app.include_router(permissions.router, dependencies=guard)
+    app.include_router(agent_api.router, dependencies=guard)  # M13-B5: checkpoints/undo/GROK.md
     # WebSockety same weryfikują token z query (nagłówków nie da się ustawić w WS).
     app.include_router(chat.router)
     app.include_router(agent.router)

@@ -1,7 +1,15 @@
 import type { ReactNode } from 'react'
 import { cn } from '../../lib/cn'
 
-type Side = 'top' | 'bottom' | 'left' | 'right' | 'bottom-end' | 'top-end'
+type Side =
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'bottom-end'
+  | 'top-end'
+  | 'bottom-start'
+  | 'top-start'
 
 const SIDE: Record<Side, string> = {
   bottom: 'top-full left-1/2 mt-1.5 -translate-x-1/2',
@@ -11,7 +19,11 @@ const SIDE: Record<Side, string> = {
   // Wyrównane do prawej krawędzi przycisku — dla kontrolek przy prawej krawędzi
   // okna, gdzie wyśrodkowany tooltip zostałby ucięty.
   'bottom-end': 'top-full right-0 mt-1.5',
-  'top-end': 'bottom-full right-0 mb-1.5'
+  'top-end': 'bottom-full right-0 mb-1.5',
+  // Wyrównane do LEWEJ krawędzi przycisku — dla kontrolek przy lewej krawędzi
+  // wąskiego panelu (np. composer agenta), gdzie wyśrodkowany tooltip był ucinany.
+  'bottom-start': 'top-full left-0 mt-1.5',
+  'top-start': 'bottom-full left-0 mb-1.5'
 }
 
 /** Lekki tooltip CSS-only (group-hover), odwrócony kolorystycznie (bg-fg/text-bg). */

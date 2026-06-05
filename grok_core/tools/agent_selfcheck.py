@@ -452,6 +452,292 @@ def test_ws_stream() -> None:
     _aio.run(_run())
 
 
+def test_diff_binary() -> None:
+    """M13-B1: preview_change — diff dla write/edit, nowy plik (`created`), binarny."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+
+        # nowy plik → diff jako same dodania + flaga created
+        prev_new = T.preview_change(ws, "write_file", {"path": "new.txt", "content": "line1\nline2\n"})
+        check("B1: new file preview is created diff",
+              prev_new and prev_new["kind"] == "diff" and prev_new.get("created") is True
+              and "+line1" in prev_new["diff"])
+
+        # nadpisanie istniejącego pliku tekstowego → diff z usunięciem i dodaniem
+        T.write_file(ws, "a.txt", "old line\n")
+        prev_ov = T.preview_change(ws, "write_file", {"path": "a.txt", "content": "new line\n"})
+        check("B1: overwrite text preview is diff (not created)",
+              prev_ov and prev_ov["kind"] == "diff" and prev_ov.get("created") is False
+              and "-old line" in prev_ov["diff"] and "+new line" in prev_ov["diff"])
+
+        # plik binarny → znacznik „binary", BEZ diffa
+        (ws.root / "blob.bin").write_bytes(b"\x00\x01\x02BINARY\x00data")
+        prev_bin = T.preview_change(ws, "write_file", {"path": "blob.bin", "content": "x"})
+        check("B1: binary file preview is 'binary' marker with size",
+              prev_bin and prev_bin["kind"] == "binary" and prev_bin.get("bytes", 0) > 0
+              and "diff" not in prev_bin)
+
+        # edit_file na istniejącym → diff
+        prev_edit = T.preview_change(ws, "edit_file",
+                                     {"path": "a.txt", "old_string": "old line", "new_string": "z"})
+        check("B1: edit preview is diff", prev_edit and prev_edit["kind"] == "diff")
+
+
+def test_plan_mode() -> None:
+    """M13-B2: w trybie planowania mutacje są blokowane, READONLY działa, plan nie
+    tworzy checkpointu."""
+    from grok_core.agent.checkpoints import CheckpointManager
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        (ws.root / "a.txt").write_text("orig\n", encoding="utf-8")
+        gate = PermissionGate()
+        cpm = CheckpointManager(ws.root)
+        events: list[dict] = []
+        approvals = {"n": 0}
+
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            calls["n"] += 1
+            if calls["n"] == 1:  # READONLY — dozwolone w plan mode
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "r1", "type": "function",
+                     "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}}]}
+            if calls["n"] == 2:  # MUTATING — blokowane w plan mode
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "w1", "type": "function",
+                     "function": {"name": "write_file",
+                                  "arguments": '{"path": "blocked.txt", "content": "nope"}'}}]}
+            return {"role": "assistant", "content": "Plan: 1) do X 2) do Y"}
+
+        def request_approval(call_id, name, detail):
+            approvals["n"] += 1  # w plan mode NIE powinno paść żadne pytanie o mutację
+            return "accept"
+
+        session = AgentSession(
+            ws, gate, mock_llm, lambda: "k", "http://unused",
+            emit=events.append, request_approval=request_approval,
+            checkpoints_provider=lambda: cpm,
+        )
+        session.run_turn("change something", model="mock", mode="plan")
+
+        results = [e for e in events if e.get("type") == "tool_result"]
+        read_ok = any(e["id"] == "r1" and e["ok"] for e in results)
+        write_blocked = any(e["id"] == "w1" and not e["ok"]
+                            and "plan mode" in (e.get("summary") or "").lower() for e in results)
+        check("B2: READONLY tool runs in plan mode", read_ok)
+        check("B2: MUTATING tool blocked in plan mode", write_blocked)
+        check("B2: no approval prompt in plan mode", approvals["n"] == 0)
+        check("B2: blocked write did not create file", not (ws.root / "blocked.txt").exists())
+        check("B2: plan mode creates no checkpoint", cpm.list()["checkpoints"] == [])
+
+        # po przełączeniu (plan=False) mutacja przechodzi (te same narzędzia, bramka jak zwykle)
+        calls["n"] = 0
+        events.clear()
+
+        def mock_exec(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "w2", "type": "function",
+                     "function": {"name": "write_file",
+                                  "arguments": '{"path": "done.txt", "content": "ok"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        session.llm_fn = mock_exec
+        session.run_turn("now do it", model="mock", mode="ask")
+        check("B2: MUTATING allowed after switching to execute",
+              (ws.root / "done.txt").read_text(encoding="utf-8") == "ok")
+
+
+def test_agent_modes() -> None:
+    """M13: tryby agenta — accept-edits auto-akceptuje write/edit (ale pyta o komendę),
+    bypass auto-akceptuje wszystko; zmiany nadal trafiają do checkpointów."""
+    from grok_core.agent.checkpoints import CheckpointManager
+
+    def build(mode: str):
+        d = tempfile.mkdtemp()
+        ws = Workspace(d)
+        gate = PermissionGate()
+        cpm = CheckpointManager(ws.root)
+        asked: list[str] = []
+
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            i = calls["n"]
+            calls["n"] += 1
+            if i == 0:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "w", "type": "function",
+                     "function": {"name": "write_file",
+                                  "arguments": '{"path": "f.txt", "content": "hi"}'}}]}
+            if i == 1:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "c", "type": "function",
+                     "function": {"name": "run_command",
+                                  "arguments": '{"command": "echo hi-mode"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        def request_approval(call_id, name, detail):
+            asked.append(name)
+            return "accept"
+
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda ev: None, request_approval=request_approval,
+                               checkpoints_provider=lambda: cpm)
+        session.run_turn("go", model="mock", mode=mode)
+        return ws, cpm, asked
+
+    # accept-edits: write auto-zaakceptowany, ale komenda PYTANA
+    ws, cpm, asked = build("accept-edits")
+    check("modes: accept-edits auto-accepts write (no prompt for write)",
+          "write_file" not in asked and (ws.root / "f.txt").read_text(encoding="utf-8") == "hi")
+    check("modes: accept-edits still asks for run_command", "run_command" in asked)
+    check("modes: accept-edits still snapshots edits (undo works)",
+          cpm.list()["checkpoints"] and cpm.list()["checkpoints"][0]["files"] >= 1)
+
+    # bypass: nic nie pytane (ani write, ani komenda)
+    ws, cpm, asked = build("bypass")
+    check("modes: bypass auto-accepts everything (no prompts)", asked == [])
+    check("modes: bypass applied the write", (ws.root / "f.txt").read_text(encoding="utf-8") == "hi")
+
+
+def test_checkpoints() -> None:
+    """M13-B3: snapshot przed zapisem, undo (restore + usunięcie utworzonych),
+    sandbox, oznaczenie „partial" przy run_command, undo do wskazanego checkpointu."""
+    from grok_core.agent.checkpoints import CheckpointManager
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        for n in ("a.txt", "b.txt", "e.txt"):
+            (ws.root / n).write_text(f"orig {n}\n", encoding="utf-8")
+        gate = PermissionGate()
+        cpm = CheckpointManager(ws.root)
+        events: list[dict] = []
+
+        # Tura: edytuj 3 pliki + utwórz 1 (write c.txt) — wszystko auto-accept.
+        steps = [
+            ("edit_file", '{"path": "a.txt", "old_string": "orig a.txt", "new_string": "EDIT a"}'),
+            ("edit_file", '{"path": "b.txt", "old_string": "orig b.txt", "new_string": "EDIT b"}'),
+            ("write_file", '{"path": "e.txt", "content": "OVERWRITTEN e"}'),
+            ("write_file", '{"path": "c.txt", "content": "NEW c"}'),
+        ]
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            i = calls["n"]
+            calls["n"] += 1
+            if i < len(steps):
+                nm, ar = steps[i]
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": f"c{i}", "type": "function",
+                     "function": {"name": nm, "arguments": ar}}]}
+            return {"role": "assistant", "content": "edited 4 files"}
+
+        session = AgentSession(
+            ws, gate, mock_llm, lambda: "k", "http://unused",
+            emit=events.append, request_approval=lambda *a: "accept",
+            checkpoints_provider=lambda: cpm,
+        )
+        session.run_turn("edit files", model="mock")
+
+        check("B3: checkpoint created on first mutation", len(cpm.list()["checkpoints"]) == 1)
+        check("B3: checkpoint event emitted", any(e.get("type") == "checkpoint" for e in events))
+        check("B3: edits + create applied",
+              (ws.root / "a.txt").read_text(encoding="utf-8") == "EDIT a\n"
+              and (ws.root / "c.txt").exists()
+              and (ws.root / "e.txt").read_text(encoding="utf-8") == "OVERWRITTEN e")
+
+        res = cpm.undo_to()  # cofnij całą sesję
+        check("B3: undo restores edited files",
+              (ws.root / "a.txt").read_text(encoding="utf-8") == "orig a.txt\n"
+              and (ws.root / "b.txt").read_text(encoding="utf-8") == "orig b.txt\n"
+              and (ws.root / "e.txt").read_text(encoding="utf-8") == "orig e.txt\n")
+        check("B3: undo deletes created file", not (ws.root / "c.txt").exists())
+        check("B3: undo summary lists restored + deleted",
+              "a.txt" in res["restored"] and "c.txt" in res["deleted"])
+        check("B3: checkpoints cleared after full undo", cpm.list()["checkpoints"] == [])
+
+    # run_command oznacza turę jako „partial undo"
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        cpm = CheckpointManager(ws.root)
+        cpm.begin_turn(label="t")
+        cpm.snapshot("x.txt")          # otwiera checkpoint
+        cpm.mark_command()
+        check("B3: run_command marks session partial", cpm.list()["partial"] is True)
+        check("B3: run_command marks checkpoint partial",
+              cpm.list()["checkpoints"][0]["has_command"] is True)
+
+    # sandbox: snapshot ścieżki spoza workspace jest ignorowany (nie kopiuje)
+    with tempfile.TemporaryDirectory() as parent:
+        wsdir = Path(parent) / "ws"
+        wsdir.mkdir()
+        ws = Workspace(str(wsdir))
+        cpm = CheckpointManager(ws.root)
+        cpm.begin_turn()
+        cpm.snapshot("../../etc/passwd")
+        cps = cpm.list()["checkpoints"]
+        check("B3: out-of-sandbox snapshot ignored",
+              cps == [] or all(c["files"] == 0 for c in cps))
+
+    # undo do KONKRETNEGO checkpointu (dwie tury, cofnij tylko drugą)
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(str(d))
+        (ws.root / "f.txt").write_text("v0\n", encoding="utf-8")
+        cpm = CheckpointManager(ws.root)
+        cpm.begin_turn(label="turn1")
+        cpm.snapshot("f.txt")
+        T.write_file(ws, "f.txt", "v1\n")
+        cpm.begin_turn(label="turn2")
+        cpm.snapshot("f.txt")
+        T.write_file(ws, "f.txt", "v2\n")
+        cp2 = cpm.list()["checkpoints"][1]["id"]
+        cpm.undo_to(cp2)  # cofnij tylko drugą turę → stan po turze 1
+        check("B3: undo to checkpoint restores that point",
+              (ws.root / "f.txt").read_text(encoding="utf-8") == "v1\n")
+        check("B3: earlier checkpoint remains after partial undo",
+              len(cpm.list()["checkpoints"]) == 1)
+
+
+def test_grok_md() -> None:
+    """M13-B4: GROK.md wczytany i wstrzyknięty, cap rozmiaru, brak pliku OK,
+    workspace nadpisuje (idzie po) global."""
+    from grok_core.agent.grokmd import (
+        MAX_GROK_MD_BYTES, build_system_prompt, load_grok_md,
+    )
+
+    with tempfile.TemporaryDirectory() as wsd, tempfile.TemporaryDirectory() as gd:
+        ws_root, global_dir = Path(wsd), Path(gd)
+
+        check("B4: no GROK.md -> empty", load_grok_md(ws_root, global_dir) == "")
+
+        (global_dir / "GROK.md").write_text("GLOBAL_RULE_X", encoding="utf-8")
+        (ws_root / "GROK.md").write_text("WS_RULE_Y", encoding="utf-8")
+        loaded = load_grok_md(ws_root, global_dir)
+        check("B4: both global + workspace loaded",
+              "GLOBAL_RULE_X" in loaded and "WS_RULE_Y" in loaded)
+        check("B4: workspace placed after global (override)",
+              loaded.index("WS_RULE_Y") > loaded.index("GLOBAL_RULE_X"))
+
+        base = "BASE_PROMPT"
+        prompt = build_system_prompt(base, ws_root, global_dir)
+        check("B4: injected into system prompt",
+              prompt.startswith(base) and "WS_RULE_Y" in prompt and "GROK.md" in prompt)
+
+        # brak reguł → bazowy prompt bez zmian
+        check("B4: empty rules keep base prompt unchanged",
+              build_system_prompt(base, Path(wsd) / "nope", Path(gd) / "nope") == base)
+
+        # cap rozmiaru
+        (ws_root / "GROK.md").write_text("Z" * (MAX_GROK_MD_BYTES + 5000), encoding="utf-8")
+        capped = load_grok_md(ws_root, None)
+        check("B4: oversize GROK.md capped",
+              len(capped) <= MAX_GROK_MD_BYTES + 200 and "truncated" in capped)
+
+
 def main() -> int:
     test_tools()
     test_sandbox()
@@ -468,6 +754,12 @@ def main() -> int:
     test_symlink_sandbox()
     test_command_security()
     test_ws_stream()
+    # M13 — agent: zaufanie (diff / plan / checkpoint / GROK.md / tryby)
+    test_diff_binary()
+    test_plan_mode()
+    test_agent_modes()
+    test_checkpoints()
+    test_grok_md()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

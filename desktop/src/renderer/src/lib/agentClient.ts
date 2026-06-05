@@ -3,12 +3,15 @@
 
 import type { Conn } from './api'
 
-/** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda do uruchomienia). */
+/** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda / plik binarny). */
 export interface ApprovalDetail {
-  kind?: string
+  kind?: string // 'diff' | 'command' | 'binary' | 'error'
   diff?: string
   command?: string
   cwd?: string
+  created?: boolean // M13-B1: diff dla NOWEGO pliku (same dodania)
+  bytes?: number // M13-B1: rozmiar dla kind === 'binary'
+  detail?: string // komunikat dla 'binary'/'error'
 }
 
 /**
@@ -20,6 +23,7 @@ export type AgentEvent =
   | { type: 'text'; full: string }
   | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }
   | { type: 'approval_request'; id: string; name: string; detail?: ApprovalDetail }
+  | { type: 'checkpoint'; id: string; label: string; created_at: number }
   | { type: 'output'; id: string; chunk: string }
   | { type: 'tool_result'; id: string; ok: boolean; summary: string }
   | { type: 'assistant_done'; content: string }
@@ -45,6 +49,9 @@ function parseDetail(v: unknown): ApprovalDetail | undefined {
   if (typeof d.diff === 'string') out.diff = d.diff
   if (typeof d.command === 'string') out.command = d.command
   if (typeof d.cwd === 'string') out.cwd = d.cwd
+  if (typeof d.created === 'boolean') out.created = d.created
+  if (typeof d.bytes === 'number') out.bytes = d.bytes
+  if (typeof d.detail === 'string') out.detail = d.detail
   return out
 }
 
@@ -68,6 +75,13 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
         id: asString(o.id),
         name: asString(o.name),
         detail: parseDetail(o.detail)
+      }
+    case 'checkpoint':
+      return {
+        type: 'checkpoint',
+        id: asString(o.id),
+        label: asString(o.label),
+        created_at: typeof o.created_at === 'number' ? o.created_at : 0
       }
     case 'output':
       return { type: 'output', id: asString(o.id), chunk: asString(o.chunk) }
@@ -170,8 +184,9 @@ export class AgentConnection {
     this.send({ type: 'workspace', path })
   }
 
-  sendMessage(text: string, model: string, images: string[] = []): void {
-    this.send({ type: 'message', text, model, images })
+  sendMessage(text: string, model: string, images: string[] = [], mode = 'ask'): void {
+    // M13: mode = ask | accept-edits | plan | bypass (jak „Mode" w Claude Code).
+    this.send({ type: 'message', text, model, images, mode })
   }
 
   approve(id: string, decision: 'accept' | 'reject' | 'always'): void {

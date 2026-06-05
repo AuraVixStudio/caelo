@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Group, Panel, useDefaultLayout } from 'react-resizable-panels'
-import { ChevronDown, Clock, FolderOpen, GitBranch, RotateCw, Shield, SquareTerminal, X } from 'lucide-react'
-import { clearPermissions, fsRecent, getPermissions, type Conn } from '../lib/api'
+import { BookText, ChevronDown, Clock, FolderOpen, GitBranch, RotateCw, Shield, SquareTerminal, X } from 'lucide-react'
+import { clearPermissions, fsRecent, getGrokMd, getPermissions, putGrokMd, type Conn } from '../lib/api'
 import { saveSettings, useModels } from '../lib/serverState'
 import { useWorkspace } from '../lib/useWorkspace'
 import { cn } from '../lib/cn'
@@ -17,6 +17,17 @@ import { ResizeHandle } from './ui/ResizeHandle'
 
 const norm = (p: string): string => p.replace(/\\/g, '/')
 const baseName = (p: string): string => norm(p).split('/').filter(Boolean).pop() || p
+
+// M13-F4: szablon startowy dla nowego GROK.md (auto-pamięć projektu agenta).
+const GROK_MD_TEMPLATE = `# Project rules (GROK.md)
+
+These rules are always sent to the Grok coding agent for this workspace.
+Edit them to steer the agent — changes apply to the next agent run.
+
+## Examples
+- Never modify files under vendor/ or dist/.
+- Keep changes minimal and run the test suite before finishing.
+`
 
 export function CodeView({ conn }: { conn: Conn }) {
   const [showTerminal, setShowTerminal] = useState(false)
@@ -61,6 +72,22 @@ export function CodeView({ conn }: { conn: Conn }) {
   function onModelChange(m: string): void {
     setModel(m)
     void saveSettings(conn, { code_model: m }).catch(() => undefined)
+  }
+
+  // M13-F4: otwórz GROK.md (reguły projektu) w edytorze; utwórz z szablonu, gdy brak.
+  // Zapis idzie zwykłą ścieżką edytora (Ctrl+S → /fs/write); agent czyta je z korzenia.
+  async function openProjectRules(): Promise<void> {
+    if (!ws.workspacePath) return
+    try {
+      const g = await getGrokMd(conn)
+      if (!g.exists) {
+        await putGrokMd(conn, GROK_MD_TEMPLATE)
+        await ws.onFilesChanged() // GROK.md pojawia się w drzewie
+      }
+      await ws.openFile('GROK.md')
+    } catch {
+      /* ignore */
+    }
   }
 
   const editorPane = (
@@ -154,6 +181,13 @@ export function CodeView({ conn }: { conn: Conn }) {
           </span>
         ) : null}
 
+        <IconButton
+          label="Project rules (GROK.md) — applies to the next agent run"
+          icon={<BookText size={18} />}
+          disabled={!ws.workspacePath}
+          tooltipSide="bottom-end"
+          onClick={() => void openProjectRules()}
+        />
         <IconButton
           label="Git panel (Ctrl+Shift+G)"
           icon={<GitBranch size={18} />}
