@@ -40,6 +40,14 @@ export const VOICES = [
 ]
 export const DEFAULT_VOICE = 'eve'
 
+// M12-B5/F5: stawki kosztu audio — MIRROR grok_core/config.py (BYO-key). STT batch
+// liczy backend z `duration`; STT-stream koszt liczy renderer z sekund mikrofonu.
+export const AUDIO_COST = {
+  sttPerHourBatch: 0.1,
+  sttPerHourStream: 0.2,
+  ttsPer1kChars: 0.015
+}
+
 export const VOICE_LANGUAGES = [
   { code: 'en', label: 'English' },
   { code: 'pl', label: 'Polish' },

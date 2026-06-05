@@ -69,6 +69,13 @@ class Backend:
         self.permissions = PermissionGate(config.PERMISSIONS_FILE)
         # M11-B1: silnik zadań generacji (obraz/wideo) — leniwy (per proces).
         self._genjobs = None
+        # M14-B1: menedżer serwerów MCP — leniwy (per proces).
+        self._mcp = None
+        # M14-B5: menedżer hooków cyklu życia narzędzi — leniwy (per proces).
+        self._hooks = None
+        # M14-B4/B6: rejestr komend slash + biblioteka skilli — leniwe (per proces).
+        self._commands = None
+        self._skills = None
         # M9-B5: ostatnio wybrany projekt (przeżywa restart przez grok_settings.json).
         self.current_project_id = self.read_settings().get("current_project_id")
 
@@ -183,6 +190,57 @@ class Backend:
         if getattr(self, "_genjobs", None) is None:
             self._genjobs = GenJobManager(self._gen_executor, store=self.history_store)
         return self._genjobs
+
+    # --- M14-B1: menedżer serwerów MCP (rozszerzalność) ----------------------
+    @property
+    def mcp(self):
+        """Leniwy `McpManager` (per proces): skonfigurowane serwery MCP + ich narzędzia.
+        Współdzielony przez REST (/mcp), czat (responses) i agenta (session)."""
+        from grok_core.mcp.manager import McpManager
+
+        if getattr(self, "_mcp", None) is None:
+            self._mcp = McpManager(config.MCP_FILE)
+        return self._mcp
+
+    # --- M14-B5: hooki cyklu życia narzędzi (uogólniony PermissionGate) ----------
+    @property
+    def hooks(self):
+        """Leniwy `HookManager` (per proces): pre/post-tool + pre-session + audyt.
+        Współdzielony przez agenta (session) i REST (/hooks)."""
+        from grok_core.hooks import HookManager
+
+        if getattr(self, "_hooks", None) is None:
+            self._hooks = HookManager(config.HOOKS_FILE, config.AUDIT_LOG_FILE)
+        return self._hooks
+
+    # --- M14-B4: rejestr komend slash --------------------------------------------
+    @property
+    def commands(self):
+        """Leniwy `CommandRegistry`: wbudowane + użytkownika (`grok_commands.json`)."""
+        from grok_core.commands import CommandRegistry
+
+        if getattr(self, "_commands", None) is None:
+            self._commands = CommandRegistry(config.COMMANDS_FILE)
+        return self._commands
+
+    # --- M14-B6: biblioteka skilli -----------------------------------------------
+    @property
+    def skills(self):
+        """Leniwy `SkillManager`: lokalne pakiety skilli (`SKILLS_DIR/<name>/SKILL.md`)."""
+        from grok_core.skills import SkillManager
+
+        if getattr(self, "_skills", None) is None:
+            self._skills = SkillManager(config.SKILLS_DIR)
+        return self._skills
+
+    def shutdown(self) -> None:
+        """Sprzątanie na zamknięciu sidecara: ubij podprocesy serwerów MCP (tree-kill)."""
+        mgr = getattr(self, "_mcp", None)
+        if mgr is not None:
+            try:
+                mgr.shutdown()
+            except Exception:  # noqa: BLE001
+                log.warning("MCP shutdown failed", exc_info=True)
 
     def _gen_executor(self, job, cancel) -> list:
         """Wykonaj zadanie generacji → lista artifact_id (M9). Rzuca przy błędzie."""

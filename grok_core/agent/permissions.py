@@ -152,6 +152,19 @@ class PermissionGate:
         self._allowed.add(key)
         self._save()
 
+    # --- klucze dowolne (M14-B2: narzędzia MCP „Always allow" per-narzędzie) ---
+    # Narzędzia MCP nie mają ścieżki/komendy do kluczowania jak edycje plików; ich
+    # allowlistę trzymamy per nazwa narzędzia (klucz `mcp:<qualified_name>`), w tym
+    # samym magazynie `grok_permissions.json` (panel Permissions pokazuje/czyści je tak samo).
+    def needs_approval_key(self, key: str) -> bool:
+        return key not in self._allowed
+
+    def allow_key(self, key: str) -> None:
+        if not key:
+            return
+        self._allowed.add(key)
+        self._save()
+
     # --- przegląd / zarządzanie (panel Permissions) ---
     def rules(self) -> list[str]:
         return sorted(self._allowed)

@@ -8,6 +8,7 @@ import {
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   Settings as SettingsIcon,
   Sparkles,
   Video as VideoIcon
@@ -17,8 +18,7 @@ import { HubProvider } from './lib/hub'
 import { cn } from './lib/cn'
 import { Placeholder } from './components/Placeholder'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { CommandPalette } from './components/CommandPalette'
-import type { Command } from './lib/commands'
+import { AppCommandPalette } from './components/AppCommandPalette'
 import { IconButton } from './components/ui/IconButton'
 import { Tooltip } from './components/ui/Tooltip'
 import { ThemeToggle } from './components/ui/ThemeToggle'
@@ -36,6 +36,9 @@ const Gallery = lazy(() => import('./components/Gallery').then((m) => ({ default
 const Voice = lazy(() => import('./components/Voice').then((m) => ({ default: m.Voice })))
 const History = lazy(() => import('./components/History').then((m) => ({ default: m.History })))
 const Settings = lazy(() => import('./components/Settings').then((m) => ({ default: m.Settings })))
+const Extensions = lazy(() =>
+  import('./components/Extensions').then((m) => ({ default: m.Extensions }))
+)
 
 const MODULES = [
   { id: 'Chat', label: 'Chat', icon: MessageSquare },
@@ -45,6 +48,7 @@ const MODULES = [
   { id: 'Gallery', label: 'Gallery', icon: GalleryIcon },
   { id: 'Voice', label: 'Voice', icon: Mic },
   { id: 'History', label: 'History', icon: HistoryIcon },
+  { id: 'Extensions', label: 'Extensions', icon: Puzzle },
   { id: 'Settings', label: 'Settings', icon: SettingsIcon }
 ] as const
 
@@ -84,6 +88,8 @@ function moduleFor(active: Module, c: Conn, conn: CoreConnection) {
       return <Voice conn={c} />
     case 'History':
       return <History conn={c} />
+    case 'Extensions':
+      return <Extensions conn={c} />
     case 'Settings':
       return <Settings conn={c} />
     default:
@@ -129,18 +135,6 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  const commands = useMemo<Command[]>(
-    () =>
-      MODULES.map((m) => ({
-        id: `goto-${m.id}`,
-        title: m.label,
-        hint: 'Go to',
-        keywords: m.id,
-        run: () => setActive(m.id)
-      })),
-    []
-  )
 
   function renderModule() {
     if (!ready || !c) {
@@ -249,10 +243,10 @@ export default function App() {
       </aside>
 
       {renderModule()}
-      <CommandPalette
+      <AppCommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        commands={commands}
+        modules={MODULES}
       />
     </div>
     </HubProvider>

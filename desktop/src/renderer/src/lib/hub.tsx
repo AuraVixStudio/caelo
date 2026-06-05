@@ -15,13 +15,16 @@ import {
 } from 'react'
 import {
   createProject as apiCreateProject,
+  listCommands,
   listProjects,
   selectProject as apiSelectProject,
   type Conn,
   type HubProject,
-  type InputBlock
+  type InputBlock,
+  type SlashCommand
 } from './api'
 import type { HubModule } from './hubQuery'
+import { expandTemplate } from './slashCommands'
 
 export interface PendingSend {
   /** Moduł docelowy, który ma podnieść `block` jako wejście. */
@@ -75,6 +78,15 @@ interface HubState {
   selectProject: (id: string | null) => Promise<void>
   createProject: (name: string, root?: string) => Promise<void>
   reloadProjects: () => void
+
+  // --- Komendy slash (M14-F3): wspólne dla palety i composera ---
+  slashCommands: SlashCommand[]
+  reloadCommands: () => void
+  /** Tekst do wstrzyknięcia w composer czatu (z palety/komendy). Czyszczony po użyciu. */
+  composerDraft: string | null
+  setComposerDraft: (text: string | null) => void
+  /** Wykonaj komendę: akcja klienta (np. open_mcp) albo rozwiń szablon → composer czatu. */
+  runSlashCommand: (cmd: SlashCommand, input?: string) => void
 }
 
 const HubContext = createContext<HubState | null>(null)
@@ -97,6 +109,8 @@ export function HubProvider({
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([])
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
   const [projectsLoading, setProjectsLoading] = useState(false)
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([])
+  const [composerDraft, setComposerDraft] = useState<string | null>(null)
 
   const reloadProjects = useCallback(() => {
     if (!conn) return
@@ -114,6 +128,30 @@ export function HubProvider({
   useEffect(() => {
     reloadProjects()
   }, [reloadProjects])
+
+  const reloadCommands = useCallback(() => {
+    if (!conn) return
+    listCommands(conn)
+      .then((r) => setSlashCommands(r.commands))
+      .catch(() => undefined)
+  }, [conn])
+
+  useEffect(() => {
+    reloadCommands()
+  }, [reloadCommands])
+
+  const runSlashCommand = useCallback(
+    (cmd: SlashCommand, input = '') => {
+      if (cmd.action === 'open_mcp') {
+        navigate('Extensions')
+        return
+      }
+      // Rozwiń szablon i wstaw do composera czatu (chat uruchomi dowolny prompt).
+      setComposerDraft(expandTemplate(cmd.template, input))
+      navigate('Chat')
+    },
+    [navigate]
+  )
 
   const selectProject = useCallback(
     async (id: string | null) => {
@@ -162,7 +200,12 @@ export function HubProvider({
       projectsLoading,
       selectProject,
       createProject,
-      reloadProjects
+      reloadProjects,
+      slashCommands,
+      reloadCommands,
+      composerDraft,
+      setComposerDraft,
+      runSlashCommand
     }),
     [
       navigate,
@@ -177,7 +220,11 @@ export function HubProvider({
       projectsLoading,
       selectProject,
       createProject,
-      reloadProjects
+      reloadProjects,
+      slashCommands,
+      reloadCommands,
+      composerDraft,
+      runSlashCommand
     ]
   )
 

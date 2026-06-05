@@ -107,6 +107,9 @@ async def agent_stream(ws: WebSocket) -> None:
                         ws_obj, gate, stream_chat_with_tools, backend.get_api_key,
                         config.API_BASE, emit=emit, request_approval=request_approval,
                         checkpoints_provider=backend.get_checkpoints,  # M13-B3/B5
+                        mcp=backend.mcp,        # M14-B2: narzędzia MCP w agencie
+                        hooks=backend.hooks,    # M14-B5: hooki cyklu życia narzędzi
+                        skills=backend.skills,  # M14-B6: wstrzykiwanie skilli do promptu
                     )
                     state["session"] = session
                 else:

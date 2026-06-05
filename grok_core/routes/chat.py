@@ -104,6 +104,26 @@ async def chat_stream(ws: WebSocket) -> None:
             # ma — 404). Dokumenty projektu user dołącza do wiadomości na żądanie
             # („Attach all"), więc trafiają tu już jako bloki `document` w `messages`.
             tools = responses_client.build_search_tools(search_mode, sources)
+            # M14-B2: narzędzia MCP (lokalne) jako function-calling + (B3) native remote
+            # MCP. Czat NIE ma interaktywnego modala zatwierdzeń (to ma agent — F2), więc
+            # polityka czatu: READONLY działa; MUTUJĄCE tylko gdy WCZEŚNIEJ dopuszczone na
+            # współdzielonej allowliście („Always allow" z agenta), inaczej odmowa z
+            # czytelnym komunikatem. Dane lokalne nie wychodzą poza sidecar.
+            mcp_fn_tools = backend.mcp.tool_defs_for_responses()
+            remote_tools = backend.mcp.remote_tool_blocks()
+            has_tools = bool(tools or mcp_fn_tools or remote_tools)
+
+            def mcp_tool_handler(name: str, args: dict) -> str:
+                mgr = backend.mcp
+                if not mgr.is_mcp_tool(name):
+                    return f"Error: unknown tool {name}"
+                if mgr.is_mutating(name) and backend.permissions.needs_approval_key(f"mcp:{name}"):
+                    return (f"Error: '{name}' changes state and is not approved for chat. "
+                            "Approve it in the Code agent (\"Always allow\") or MCP settings, then retry.")
+                try:
+                    return mgr.call_tool(name, args)
+                except Exception as exc:  # noqa: BLE001
+                    return f"Error: MCP tool failed: {exc}"
 
             def on_delta(delta: str, _full: str) -> None:
                 got["any"] = True
@@ -126,12 +146,16 @@ async def chat_stream(ws: WebSocket) -> None:
                             # "on" wymusza search; "auto" zostawia decyzję modelowi.
                             tool_choice="required" if search_mode == "on" else None,
                             on_delta=on_delta, on_tool=on_tool, stop_flag=stop.is_set,
+                            # M14-B2/B3: narzędzia MCP lokalne (function) + remote (xAI).
+                            function_tools=mcp_fn_tools or None,
+                            tool_handler=mcp_tool_handler if mcp_fn_tools else None,
+                            remote_tools=remote_tools or None,
                         )
                         full = result["text"]
                     except Exception:
-                        if got["any"] or tools:
-                            # Już streamowaliśmy ALBO to tura z narzędziami (search
-                            # nie istnieje w legacy chat/completions) → bez cichego
+                        if got["any"] or has_tools:
+                            # Już streamowaliśmy ALBO to tura z narzędziami (search/MCP
+                            # nie istnieją w legacy chat/completions) → bez cichego
                             # fallbacku; zgłoś błąd.
                             raise
                         # Czysty czat: Responses zawiodło przed pierwszą deltą →

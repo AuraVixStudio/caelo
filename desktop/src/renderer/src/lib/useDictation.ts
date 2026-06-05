@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { speechToText, type Conn } from './api'
 import { blobToBase64, MicRecorder } from './audio'
 
+/** Wstrzyknij dyktowany tekst do istniejącego pola (M12-F1): dokleja po spacji,
+ *  bez wiodącej spacji dla pustego pola. Czysta funkcja — wspólna dla czatu/agenta. */
+export function appendDictation(prev: string, text: string): string {
+  const t = text.trim()
+  if (!t) return prev
+  return (prev ? prev.trimEnd() + ' ' : '') + t
+}
+
 /**
  * Dyktowanie promptu przez mikrofon (P2-3, STT). Toggle: start nagrywania →
  * kolejny toggle zatrzymuje, transkrybuje (speechToText) i oddaje tekst przez

@@ -10,6 +10,7 @@ import {
   type Conn
 } from '../lib/api'
 import { saveSettings, useModels, useSettings } from '../lib/serverState'
+import { DEFAULT_VOICE, VOICE_LANGUAGES, VOICES } from '../lib/constants'
 import { useTheme, type ThemeMode } from '../lib/theme'
 import { cn } from '../lib/cn'
 import { Button } from './ui/Button'
@@ -37,6 +38,10 @@ export function Settings({ conn }: { conn: Conn }) {
   const [chatModels, setChatModels] = useState<string[]>([])
   const [chatModel, setChatModel] = useState('')
   const [codeModel, setCodeModel] = useState('')
+  // M12-F4: domyślny głos/język audio (TTS, read-aloud, Talk).
+  const [voice, setVoice] = useState(DEFAULT_VOICE)
+  const [voiceLanguage, setVoiceLanguage] = useState('en')
+  const [voiceList, setVoiceList] = useState<string[]>(VOICES.map((v) => v.id))
   const [signingIn, setSigningIn] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,7 +66,9 @@ export function Settings({ conn }: { conn: Conn }) {
 
   // P2-2: modele ze współdzielonego cache.
   useEffect(() => {
-    if (modelsResp) setChatModels(modelsResp.chat)
+    if (!modelsResp) return
+    setChatModels(modelsResp.chat)
+    if (modelsResp.voices?.length) setVoiceList(modelsResp.voices)
   }, [modelsResp])
 
   // Ustawienia: zaaplikuj RAZ (selecty modeli są edytowalne — kolejne odświeżenia
@@ -72,6 +79,8 @@ export function Settings({ conn }: { conn: Conn }) {
     setHasKey(settings.has_api_key)
     setChatModel(settings.chat_model)
     setCodeModel(settings.code_model)
+    if (settings.voice) setVoice(settings.voice)
+    if (settings.voice_language) setVoiceLanguage(settings.voice_language)
   }, [settings])
 
   async function signIn(): Promise<void> {
@@ -135,6 +144,18 @@ export function Settings({ conn }: { conn: Conn }) {
       .catch((e) => {
         setMsg(null)
         setError(`Could not save model preferences: ${String((e as Error).message || e)}`)
+      })
+  }
+
+  function saveVoice(): void {
+    saveSettings(conn, { voice, voice_language: voiceLanguage })
+      .then(() => {
+        setError(null)
+        setMsg('Voice preferences saved.')
+      })
+      .catch((e) => {
+        setMsg(null)
+        setError(`Could not save voice preferences: ${String((e as Error).message || e)}`)
       })
   }
 
@@ -222,6 +243,34 @@ export function Settings({ conn }: { conn: Conn }) {
               </Select>
             </Field>
             <Button onClick={saveModels}>Save</Button>
+          </div>
+        </Card>
+
+        {/* Voice (M12-F4) */}
+        <Card
+          title="Voice"
+          subtitle="Default voice and language for read-aloud, speech and the Talk pipeline."
+        >
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Voice" className="w-52">
+              <Select value={voice} onChange={(e) => setVoice(e.target.value)}>
+                {(voiceList.length ? voiceList : [voice]).map((id) => (
+                  <option key={id} value={id}>
+                    {VOICES.find((v) => v.id === id)?.label || id}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Language" className="w-44">
+              <Select value={voiceLanguage} onChange={(e) => setVoiceLanguage(e.target.value)}>
+                {VOICE_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Button onClick={saveVoice}>Save</Button>
           </div>
         </Card>
 

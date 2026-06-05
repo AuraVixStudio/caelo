@@ -214,6 +214,38 @@ def _collect_citations(obj, citations: dict) -> None:
             _collect_citations(v, citations)
 
 
+# --- narzędzia function-calling (M14-B2: MCP w czacie) ---------------------------
+
+def _to_responses_function(defn: dict) -> dict:
+    """Znormalizuj definicję narzędzia function-calling do FLAT formatu Responses API
+    (`{"type":"function","name","description","parameters"}`). Przyjmuje też format
+    chat/completions (zagnieżdżony pod `function`) — różnica między /responses a
+    /chat/completions, którą tu domykamy, by `McpManager.tool_defs_for_responses`
+    (format chat) działał w obu ścieżkach."""
+    fn = defn.get("function") if isinstance(defn.get("function"), dict) else defn
+    return {
+        "type": "function",
+        "name": fn.get("name"),
+        "description": fn.get("description") or "",
+        "parameters": fn.get("parameters") or {"type": "object"},
+    }
+
+
+def _function_calls_from_output(output) -> List[dict]:
+    """Wyłuskaj item-y `function_call` z `response.output` (klient-side function calling).
+    Każdy: {call_id, name, arguments(JSON-string)}. Tolerancyjny na warianty pól."""
+    calls: List[dict] = []
+    if isinstance(output, list):
+        for item in output:
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                calls.append({
+                    "call_id": item.get("call_id") or item.get("id") or "",
+                    "name": item.get("name") or "",
+                    "arguments": item.get("arguments") or "{}",
+                })
+    return calls
+
+
 def stream_response(
     messages: list,
     *,
@@ -226,8 +258,12 @@ def stream_response(
     on_tool: Optional[Callable[[dict], None]] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
     base: Optional[str] = None,
+    function_tools: Optional[List[dict]] = None,
+    tool_handler: Optional[Callable[[str, dict], str]] = None,
+    remote_tools: Optional[List[dict]] = None,
+    max_tool_iters: int = 8,
 ) -> dict:
-    """Strumieniuj odpowiedź xAI Responses API.
+    """Strumieniuj odpowiedź xAI Responses API (z opcjonalną pętlą narzędzi MCP).
 
     Args:
         messages: historia w formacie chat (role + content str|parts). Stateless —
@@ -238,120 +274,170 @@ def stream_response(
         on_delta(delta, full): callback przyrostu tekstu (jak `chat_completion_stream`).
         on_tool(ev): callback aktywności narzędzia, ev = {"tool","status","query"}.
         stop_flag(): True przerywa odbiór (Stop z UI).
+        function_tools: M14-B2 — definicje narzędzi MCP (function-calling). Gdy model
+            je wywoła, wykonuje je `tool_handler` (klient-side), a wynik wraca jako
+            `function_call_output` w kolejnej turze (pętla do `max_tool_iters`).
+        tool_handler(name, args) -> str: egzekutor narzędzia MCP (z bramką po stronie
+            wołającego). None → narzędzia function nieobsługiwane (pętla się nie kręci).
+        remote_tools: M14-B3 — bloki native remote MCP (`{type:'mcp',...}`) doklejane
+            do `tools` (wykonanie po stronie xAI, bez lokalnej bramki).
 
     Returns:
-        {"text": <pełna odpowiedź>, "citations": [{"url","title"}...],
-         "usage": {...}, "tool_calls": <liczba wywołań narzędzi>}.
+        {"text", "citations":[{"url","title"}...], "usage":{...},
+         "tool_calls": <serwerowe wywołania>, "function_tool_calls": <MCP wywołania>}.
     """
     api_key = api_key_provider()
-    payload: dict = {
-        "model": model,
-        "input": to_input(messages),
-        "stream": True,
-    }
-    if temperature is not None:
-        payload["temperature"] = temperature
-    if tools:
-        payload["tools"] = tools
-        if tool_choice:
-            payload["tool_choice"] = tool_choice
+    base = base or config.API_BASE
+
+    server_tools = list(tools or []) + list(remote_tools or [])
+    flat_fns = [_to_responses_function(d) for d in (function_tools or [])]
+    all_tools = server_tools + flat_fns
+
+    input_items = to_input(messages)
 
     parts: List[str] = []
     citations: dict = {}
     usage: dict = {}
     tool_call_count = 0
+    fn_call_count = 0
     seen_tool_keys: set = set()
 
-    base = base or config.API_BASE
-    with requests.post(
-        f"{base}/responses", headers=_headers(api_key), json=payload,
-        stream=True, timeout=TIMEOUT_RESPONSES,
-    ) as r:
-        r.raise_for_status()
-        for raw in r.iter_lines(decode_unicode=False):
-            if stop_flag and stop_flag():
-                break
-            if not raw:
-                continue
-            line = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else raw
-            # SSE: linia `event: <typ>` jest redundantna (typ jest też w data.type) —
-            # pomijamy ją; właściwy ładunek jest w `data: {...}`.
-            if line.startswith("event:"):
-                continue
-            if line.startswith("data:"):
-                line = line[5:].strip()
-            if not line:
-                continue
-            if line == "[DONE]":
-                break
-            try:
-                obj = json.loads(line)
-            except Exception:
-                continue
-            if not isinstance(obj, dict):
-                continue
+    def _run_turn(turn_input: list, *, with_tool_choice: bool) -> List[dict]:
+        """Jedna runda streamingu. Zwraca surowe `output` (do dołączenia w pętli
+        narzędzi). Aktualizuje akumulatory tekstu/cytowań/usage/liczników (domknięcie)."""
+        nonlocal tool_call_count, usage
+        payload: dict = {"model": model, "input": turn_input, "stream": True}
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if all_tools:
+            payload["tools"] = all_tools
+            if tool_choice and with_tool_choice:
+                payload["tool_choice"] = tool_choice
+        output_items: List[dict] = []
+        with requests.post(
+            f"{base}/responses", headers=_headers(api_key), json=payload,
+            stream=True, timeout=TIMEOUT_RESPONSES,
+        ) as r:
+            r.raise_for_status()
+            for raw in r.iter_lines(decode_unicode=False):
+                if stop_flag and stop_flag():
+                    break
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else raw
+                # SSE: linia `event: <typ>` jest redundantna (typ jest też w data.type).
+                if line.startswith("event:"):
+                    continue
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                if not line:
+                    continue
+                if line == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
 
-            etype = obj.get("type") or ""
+                etype = obj.get("type") or ""
 
-            # 1) przyrost tekstu
-            if etype.endswith("output_text.delta") or etype == "response.output_text.delta":
-                delta = obj.get("delta")
-                if isinstance(delta, dict):  # niektóre warianty pakują w {"text": ...}
-                    delta = delta.get("text")
-                if delta:
-                    parts.append(delta)
-                    if on_delta:
-                        on_delta(delta, "".join(parts))
-                continue
-
-            # 2) adnotacja-cytowanie dorzucana w trakcie
-            if "annotation" in etype:
-                _collect_citations(obj.get("annotation") or obj, citations)
-                continue
-
-            # 3) aktywność narzędzia serwerowego (live search)
-            tool = _classify_tool(etype)
-            if tool is not None:
-                status = _tool_status(etype)
-                # licz UNIKALNE wywołania (po id item-u) — strumień wysyła kilka
-                # faz na jedno wywołanie (in_progress→searching→completed).
-                base_key = obj.get("item_id") or obj.get("id") or tool
-                if base_key not in seen_tool_keys:
-                    seen_tool_keys.add(base_key)
-                    tool_call_count += 1
-                if on_tool:
-                    on_tool({"tool": tool, "status": status, "query": _event_query(obj)})
-                # wyniki narzędzia mogą nieść URL-e (cytowania)
-                _collect_citations(obj, citations)
-                continue
-
-            # 4) zakończenie — pełna odpowiedź: usage + adnotacje (cytowania) + tekst
-            if etype.endswith("completed") or etype.endswith("response.done") \
-                    or etype == "response.completed":
-                resp = obj.get("response") or obj
-                u = resp.get("usage")
-                if isinstance(u, dict):
-                    usage = u
-                _collect_citations(resp.get("output"), citations)
-                # fallback: gdyby deltas nie przyszły, weź zebrany tekst z output
-                if not parts:
-                    txt = _text_from_output(resp.get("output"))
-                    if txt:
-                        parts.append(txt)
+                # 1) przyrost tekstu
+                if etype.endswith("output_text.delta") or etype == "response.output_text.delta":
+                    delta = obj.get("delta")
+                    if isinstance(delta, dict):  # niektóre warianty pakują w {"text": ...}
+                        delta = delta.get("text")
+                    if delta:
+                        parts.append(delta)
                         if on_delta:
-                            on_delta(txt, txt)
-                continue
+                            on_delta(delta, "".join(parts))
+                    continue
 
-            # 5) błąd zgłoszony w strumieniu
-            if etype.endswith("error") or obj.get("error"):
-                err = obj.get("error") or obj.get("message") or "stream error"
-                raise RuntimeError(str(err)[:500])
+                # 2) adnotacja-cytowanie dorzucana w trakcie
+                if "annotation" in etype:
+                    _collect_citations(obj.get("annotation") or obj, citations)
+                    continue
+
+                # 3) aktywność narzędzia serwerowego (live search)
+                tool = _classify_tool(etype)
+                if tool is not None:
+                    status = _tool_status(etype)
+                    base_key = obj.get("item_id") or obj.get("id") or tool
+                    if base_key not in seen_tool_keys:
+                        seen_tool_keys.add(base_key)
+                        tool_call_count += 1
+                    if on_tool:
+                        on_tool({"tool": tool, "status": status, "query": _event_query(obj)})
+                    _collect_citations(obj, citations)
+                    continue
+
+                # 4) zakończenie — pełna odpowiedź: usage + cytowania + tekst + output
+                if etype.endswith("completed") or etype.endswith("response.done") \
+                        or etype == "response.completed":
+                    resp = obj.get("response") or obj
+                    u = resp.get("usage")
+                    if isinstance(u, dict):
+                        usage = u
+                    out = resp.get("output")
+                    if isinstance(out, list):
+                        output_items = out
+                    _collect_citations(out, citations)
+                    if not parts:
+                        txt = _text_from_output(out)
+                        if txt:
+                            parts.append(txt)
+                            if on_delta:
+                                on_delta(txt, txt)
+                    continue
+
+                # 5) błąd zgłoszony w strumieniu
+                if etype.endswith("error") or obj.get("error"):
+                    err = obj.get("error") or obj.get("message") or "stream error"
+                    raise RuntimeError(str(err)[:500])
+        return output_items
+
+    # Pętla narzędzi MCP (klient-side function calling). Bez `function_tools`/`tool_handler`
+    # wykonuje się DOKŁADNIE raz — zachowanie identyczne jak przed M14 (czysty czat/search).
+    for _iter in range(max(1, max_tool_iters)):
+        output_items = _run_turn(input_items, with_tool_choice=(_iter == 0))
+        calls = _function_calls_from_output(output_items) if (function_tools and tool_handler) else []
+        if not calls:
+            break
+        if stop_flag and stop_flag():
+            break
+        # Dołącz output modelu (item-y function_call) + nasze wyniki — kontrakt Responses
+        # (stateless): kolejne żądanie niesie pełen kontekst tury narzędziowej.
+        input_items = list(input_items) + list(output_items)
+        for call in calls:
+            name = call["name"]
+            try:
+                args = json.loads(call["arguments"]) if call["arguments"] else {}
+                if not isinstance(args, dict):
+                    args = {}
+            except Exception:
+                args = {}
+            if on_tool:
+                on_tool({"tool": name, "status": "calling", "query": None})
+            try:
+                result = tool_handler(name, args)
+            except Exception as exc:  # noqa: BLE001
+                result = f"Error: tool failed: {exc}"
+            fn_call_count += 1
+            if on_tool:
+                on_tool({"tool": name, "status": "completed", "query": None})
+            input_items.append({
+                "type": "function_call_output",
+                "call_id": call["call_id"],
+                "output": str(result),
+            })
 
     return {
         "text": "".join(parts),
         "citations": list(citations.values()),
         "usage": usage,
         "tool_calls": tool_call_count,
+        "function_tool_calls": fn_call_count,
     }
 
 

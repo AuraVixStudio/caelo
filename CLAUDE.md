@@ -118,6 +118,63 @@ queue-limit asserts) + `/genjobs` guards in `api_smoke.py`. Renderer staged inpu
 frame/source) live in the **Hub context** (`lib/hub.tsx`) — panels are lazy and unmount on tab switch,
 so per-panel `useState` would lose them.
 
+**Voice = bridges + conversation pipeline (M12, see [`docs/PLAN_M12_GLOS.md`](docs/PLAN_M12_GLOS.md)):**
+all voice routes live in [`routes/voice.py`](grok_core/routes/voice.py); audio flows
+**renderer → sidecar → xAI** and the key NEVER reaches the renderer (the sidecar injects
+`Authorization`). REST: `POST /voice/tts` (5 voices, language; returns audio + `chars`/`cost`) and
+`POST /voice/stt` (batch; `cost` from `duration`). WS: `/voice/realtime` (B4 stretch — Voice Agent
+`/v1/realtime`, the **Live** UI mode) and `/voice/stt/stream` (B1 — live STT) are **transparent
+proxies** sharing `_bridge_upstream` (raw frame passthrough, UTF-8 — NOT `WsStream`, which is only
+for blocking workers). The **conversation pipeline** `/voice/converse` (B3, the **Talk** UI mode)
+IS on `WsStream`: it takes a final transcript → `responses_client.stream_response` (M10 tools +
+M9 history) → `text_to_speech` → `audio` frame; single-flight, `{"type":"stop"}` = barge-in (skips
+TTS), records the turn to M9. **Design choice:** the STT(stream) half is **client-side**
+([`lib/converse.ts`](desktop/src/renderer/src/lib/converse.ts) drives `/voice/stt/stream` for
+partials + final, then hands the transcript to `/voice/converse`) so one route never juggles two
+upstream sockets. Renderer audio capture is the shared `MicCapture`
+([`lib/audioStream.ts`](desktop/src/renderer/src/lib/audioStream.ts), PCM16 worklet) used by both
+`realtime.ts` and `converse.ts`. Cost (B5): `stt_cost`/`tts_cost` (rates in `config.py`; TTS
+per-char is a **tunable estimate**) → response fields + M9 meta; renderer accumulates per session
+([`lib/audioCost.ts`](desktop/src/renderer/src/lib/audioCost.ts)). There is **no `/usage` route**
+(like M11). Voice defaults (`voice`/`voice_language`) live in `grok_settings.json`. Dictation
+(`useDictation` in chat + agent) uses **batch** STT; live partials are the **Talk** mode. Selfcheck:
+`api_smoke.py` `_unit_voice_converse` (pipeline + barge-in + cost) + WS bad-token rejection for the
+new routes. **xAI streaming-STT protocol/sample-rate is unconfirmed** — `parseStt` handles variants
+defensively; verify live.
+
+**Extensibility = MCP + commands + hooks + skills (M14, see [`docs/PLAN_M14_ROZSZERZALNOSC.md`](docs/PLAN_M14_ROZSZERZALNOSC.md)):**
+the hub became a **programmable platform** — tools serve chat AND the agent. The **MCP client** is a
+**custom thin SYNCHRONOUS layer** (`grok_core/mcp/`), NOT the official SDK (deliberate hybrid, like
+`responses_client` vs the OpenAI SDK — zero new deps, fits the worker-thread model; `client.py` does
+stdio newline-delimited JSON-RPC 2.0, transport is abstract (`McpTransport`) so HTTP/native-remote can
+adopt the SDK later). Server subprocesses are hardened like `run_command` (**`tools.scrubbed_env()`** +
+**`_tree_kill`**; Windows wraps `.cmd`/`npx` in `cmd /c`); starting a stdio server is an explicit,
+gated user action. `McpManager` namespaces tools (`mcp__<server>__<tool>`), routes calls, classifies
+gating by `annotations.readOnlyHint` (READONLY → no gate; else → `PermissionGate`, key `mcp:<name>`),
+and masks secrets (`authorization`/`env` never returned to the renderer). **Agent**: `session.py`
+merges MCP tool defs into `TOOLS`; mutating MCP calls go through the gate + approval card
+(`detail.kind="mcp_tool_call"`). **Chat**: `responses_client.stream_response` gained a **client-side
+function-call loop** (stream → `function_call` → `tool_handler` → `function_call_output` → next turn,
+to `max_tool_iters`; FLAT Responses tool format) — chat has NO interactive approval, so mutating MCP
+tools run only if pre-approved on the shared allowlist, else refused with a message. **Native remote
+MCP (B3)**: `tools=[{type:'mcp',server_url,…}]` passed through to xAI (`remote_tools=`), xAI-side
+execution, no local gate. **Hooks** (`grok_core/hooks.py`, generalized `PermissionGate`):
+`pre_tool`/`post_tool`/`pre_session`, deterministic, run in `session.py` BEFORE the gate; built-in
+`block-dangerous-commands` (intent regex above P0-1) + `audit-all` (JSONL `grok_audit.log`); user
+`run_script` hooks (opt-in; auto-format after write). **Commands** (`grok_core/commands/`): prompt
+templates + optional `mode`/`action`, built-ins `/plan /review /commit /test /mcp` + user; surfaced in
+the chat composer (`/`) and Ctrl-K palette (`lib/slashCommands.ts`, `lib/hub.tsx`). **Skills**
+(`grok_core/skills/`): `<id>/SKILL.md` packages (bundled `builtin/` Ren'Py+DAZ via spec
+`collect_data_files`, + user `SKILLS_DIR`); enabled skills inject into the agent system prompt (like
+GROK.md). New state files (all via `load_json_or_backup` + atomic writes, gitignored): `grok_mcp.json`,
+`grok_commands.json`, `grok_hooks.json`, `grok_audit.log`, `skills/`. REST: `routes/mcp.py`,
+`routes/hooks.py`, `routes/commands.py`, `routes/skills.py`; lazy `backend.mcp`/`.hooks`/`.commands`/
+`.skills`; `backend.shutdown()` tree-kills MCP subprocesses in the server lifespan. Renderer module
+**Extensions** (4 tabs). Selfchecks: `grok_core/tools/mcp_check.py` (24, mock stdio server),
+`agent_selfcheck.py` (MCP-in-agent + hooks → 139), `api_smoke.py` (`_unit_responses_mcp_loop`,
+`_unit_mcp_routes`, `_unit_commands_skills`). **Real MCP servers / live chat verified on the user's
+machine** (sandbox blocks them); don't regress P0-1…P0-8 / M5–M6.
+
 ## Commands
 
 All paths below are relative to the repo root. The frontend npm scripts run from `desktop/`.
@@ -195,6 +252,12 @@ run external copy would use its own `config.py`, hence its own data dir.)
   Own file; **never** touch `grok_config.json`. Corrupt → `.corrupt` backup (like the JSON readers).
 - `project_docs/<project_id>/` (M10-B5) — local "project knowledge" documents (xAI has no vector
   stores); served sandboxed via `/collections/files/{id}/content`, attached on demand ("Attach all").
+- `grok_mcp.json` / `grok_commands.json` / `grok_hooks.json` (M14) — MCP servers / user slash commands /
+  hooks config. Own files; atomic writes + `load_json_or_backup`. `grok_mcp.json` may hold server
+  secrets (`authorization`/`env`) → gitignored (the `grok_*.json` net covers them).
+- `grok_audit.log` (M14-B5) — JSONL audit of tool calls/blocks/hook scripts (soft-rotated, gitignored).
+- `skills/<id>/SKILL.md` (M14-B6) — user skill packages + `_state.json` (enabled set). Bundled examples
+  live in `grok_core/skills/builtin/` (packaged via the spec, read-only), NOT here.
 
 All five JSON readers go through **`config.load_json_or_backup`** (P1-11): a corrupt file is moved to
 `<name>.corrupt` and logged, not silently wiped. The API key is **stored but never returned** by

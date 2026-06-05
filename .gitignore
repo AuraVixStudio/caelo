@@ -52,3 +52,8 @@ generated_history/
 # M10-B5: lokalne dokumenty „wiedzy projektu" (config.PROJECT_DOCS_DIR). W dev
 # DATA_DIR = korzeń repo, więc bez tego wgrane PDF-y wyciekłyby do commita.
 project_docs/
+# M14: log audytu wywołań narzędzi (B5) i katalog skilli użytkownika (B6). W dev
+# DATA_DIR = korzeń repo. grok_mcp/commands/hooks.json łapie już siatka grok_*.json.
+grok_audit.log
+grok_audit.log.*
+/skills/

@@ -37,15 +37,19 @@ from grok_core.routes import (
     auth,
     chat,
     collections,
+    commands,
     fs,
     genjobs,
     git,
     history,
+    hooks,
+    mcp,
     media,
     models,
     permissions,
     projects,
     settings,
+    skills,
     system,
     terminal,
     voice,
@@ -115,6 +119,13 @@ def create_app(
         if on_startup is not None:
             on_startup()
         yield
+        # Sprzątanie na zamknięciu: ubij podprocesy MCP (tree-kill), itp.
+        backend = getattr(app.state, "backend", None)
+        if backend is not None:
+            try:
+                backend.shutdown()
+            except Exception:  # noqa: BLE001
+                log.warning("Backend shutdown failed", exc_info=True)
 
     app = FastAPI(title=SERVICE_NAME, version=APP_VERSION, lifespan=lifespan)
 
@@ -161,6 +172,10 @@ def create_app(
     app.include_router(collections.router, dependencies=guard)
     app.include_router(permissions.router, dependencies=guard)
     app.include_router(agent_api.router, dependencies=guard)  # M13-B5: checkpoints/undo/GROK.md
+    app.include_router(mcp.router, dependencies=guard)  # M14-B1: serwery MCP
+    app.include_router(hooks.router, dependencies=guard)  # M14-B5: hooki + audyt
+    app.include_router(commands.router, dependencies=guard)  # M14-B4: komendy slash
+    app.include_router(skills.router, dependencies=guard)  # M14-B6: biblioteka skilli
     # WebSockety same weryfikują token z query (nagłówków nie da się ustawić w WS).
     app.include_router(chat.router)
     app.include_router(agent.router)

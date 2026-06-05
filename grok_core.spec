@@ -11,7 +11,7 @@ i uruchamia grok-core.exe zamiast `python -m grok_core` (patrz desktop/src/main/
 ONEDIR (nie ONEFILE) celowo: brak rozpakowywania do tempa przy każdym starcie =
 szybszy start i brak migotania, co ma znaczenie dla nadzorowanego sidecara.
 """
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
 
@@ -41,6 +41,10 @@ hiddenimports += [
 
 # Pakiet sidecara + jego podmoduły (trasy importowane są dynamicznie w server.py).
 hiddenimports += collect_submodules("grok_core")
+
+# M14-B6: wbudowane skille (SKILL.md) to pliki DANYCH — collect_submodules ich nie
+# bierze. BUILTIN_DIR rozwiązuje się względem __file__ (→ <bundle>/grok_core/skills/builtin).
+datas += collect_data_files("grok_core", includes=["skills/builtin/**/*.md"])
 
 # Legacy moduły z korzenia repo: grok_core/__init__.py dokłada korzeń do sys.path
 # DOPIERO w czasie działania, więc statyczna analiza PyInstallera ich nie widzi —

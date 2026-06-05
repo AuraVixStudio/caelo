@@ -35,11 +35,12 @@ import {
   searchActivityLabel
 } from '../lib/searchState'
 import { inputBlockToAttachment } from '../lib/sendTo'
+import { expandTemplate, filterSlashCommands, matchSlash, slashQuery } from '../lib/slashCommands'
 import { useHub } from '../lib/hub'
 import { useAttachments } from '../lib/useAttachments'
 import { useChatStream } from '../lib/useChatStream'
 import { useConversations } from '../lib/useConversations'
-import { useDictation } from '../lib/useDictation'
+import { appendDictation, useDictation } from '../lib/useDictation'
 import { useTts } from '../lib/useTts'
 import { AttachButton, AttachmentChips } from './Attachments'
 import { KnowledgePopover } from './KnowledgePopover'
@@ -198,6 +199,7 @@ export function ChatView({ conn }: { conn: Conn }) {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false) // M9-F4: drop plików do composera
+  const [slashIdx, setSlashIdx] = useState(0) // M14-F3: aktywny element listy komend
 
   const [models, setModels] = useState<string[]>([])
   const [model, setModel] = useState<string>('')
@@ -229,7 +231,7 @@ export function ChatView({ conn }: { conn: Conn }) {
   const stream = useChatStream(conn)
   const tts = useTts(conn, defaultVoice)
   const dictation = useDictation(conn, (t) => {
-    setInput((prev) => (prev ? prev + ' ' : '') + t)
+    setInput((prev) => appendDictation(prev, t))
     taRef.current?.focus()
   })
 
@@ -262,6 +264,8 @@ export function ChatView({ conn }: { conn: Conn }) {
     setModel((prev) => prev || settings.chat_model)
     if (settings.chat_search_mode) setSearchMode(settings.chat_search_mode)
     if (settings.chat_search_sources?.length) setSources(settings.chat_search_sources)
+    // M12-F4: read-aloud używa domyślnego głosu z ustawień (fallback: /models).
+    if (settings.voice) setDefaultVoice(settings.voice)
   }, [settings])
 
   // Auto-scroll na dół przy zmianie treści.
@@ -284,6 +288,15 @@ export function ChatView({ conn }: { conn: Conn }) {
     hub.setPendingSend(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hub.pendingSend])
+
+  // M14-F3: komenda slash z palety/huba → wstaw rozwinięty szablon do composera.
+  useEffect(() => {
+    if (hub.composerDraft == null) return
+    setInput(hub.composerDraft)
+    hub.setComposerDraft(null)
+    taRef.current?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hub.composerDraft])
 
   /** Uruchamia turę dla danej historii (wspólne dla send i retry). Dba o pusty
    *  bąbel asystenta do streamowania i NIE utrwala błędu jako treści (P2-11). */
@@ -345,8 +358,32 @@ export function ChatView({ conn }: { conn: Conn }) {
     )
   }
 
+  // M14-F3: lista komend slash, gdy w composerze jest „/<partial>" (bez spacji).
+  const slashQ = slashQuery(input)
+  const slashMatches = slashQ !== null ? filterSlashCommands(hub.slashCommands, slashQ).slice(0, 8) : []
+  const showSlash = slashQ !== null && slashMatches.length > 0
+
+  function pickSlash(cmd: { name: string }): void {
+    setInput(`/${cmd.name} `) // dokończ nazwę + spacja; argumenty dopisuje użytkownik
+    setSlashIdx(0)
+    taRef.current?.focus()
+  }
+
   function send(): void {
-    const text = input.trim()
+    let text = input.trim()
+    // M14-F3: jeśli to komenda slash — rozwiń szablon (lub odpal akcję klienta).
+    const matched = matchSlash(text)
+    if (matched) {
+      const cmd = hub.slashCommands.find((c) => c.name === matched.name)
+      if (cmd) {
+        if (cmd.action === 'open_mcp') {
+          hub.navigate('Extensions')
+          setInput('')
+          return
+        }
+        text = expandTemplate(cmd.template, matched.rest)
+      }
+    }
     if ((!text && att.attachments.length === 0) || stream.streaming) return
 
     const userMsg: ChatMessage = {
@@ -408,6 +445,29 @@ export function ChatView({ conn }: { conn: Conn }) {
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    // M14-F3: gdy widoczna lista komend, strzałki/Enter sterują nią (nie wysyłają).
+    if (showSlash) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashIdx((i) => Math.min(i + 1, slashMatches.length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashIdx((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        pickSlash(slashMatches[Math.min(slashIdx, slashMatches.length - 1)])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setInput('')
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
@@ -709,6 +769,27 @@ export function ChatView({ conn }: { conn: Conn }) {
 
         <div className="shrink-0 px-4 pb-5 pt-2">
           <div className="mx-auto max-w-3xl">
+            {showSlash ? (
+              <div className="mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow)]">
+                <div className="border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted">
+                  Commands
+                </div>
+                {slashMatches.map((c, i) => (
+                  <button
+                    key={c.name}
+                    onMouseEnter={() => setSlashIdx(i)}
+                    onClick={() => pickSlash(c)}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-3 px-3 py-2 text-left outline-none transition-colors',
+                      i === slashIdx ? 'bg-surface-2 text-fg' : 'text-muted'
+                    )}
+                  >
+                    <span className="shrink-0 font-mono text-sm">/{c.name}</span>
+                    <span className="truncate text-xs text-muted">{c.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />
             <div
               onDragOver={(e) => {

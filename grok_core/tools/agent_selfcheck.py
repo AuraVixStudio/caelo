@@ -738,6 +738,219 @@ def test_grok_md() -> None:
               len(capped) <= MAX_GROK_MD_BYTES + 200 and "truncated" in capped)
 
 
+class _FakeMcp:
+    """Stub menedżera MCP (duck-typed kontrakt z grok_core/mcp/manager.py) — bez sieci.
+    Dwa narzędzia: lookup (readonly) i write (mutating)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def tool_defs_for_responses(self) -> list:
+        return [
+            {"type": "function", "function": {
+                "name": "mcp__t__lookup", "description": "readonly lookup",
+                "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}}},
+            {"type": "function", "function": {
+                "name": "mcp__t__write", "description": "mutating write",
+                "parameters": {"type": "object", "properties": {"v": {"type": "string"}}}}},
+        ]
+
+    def is_mcp_tool(self, name: str) -> bool:
+        return name in ("mcp__t__lookup", "mcp__t__write")
+
+    def is_mutating(self, name: str) -> bool:
+        return name == "mcp__t__write"
+
+    def describe_tool(self, name: str) -> dict:
+        return {"qualified_name": name, "name": name.split("__")[-1], "server_id": "t",
+                "description": "desc", "readonly": name == "mcp__t__lookup"}
+
+    def call_tool(self, name: str, args: dict) -> str:
+        self.calls.append((name, dict(args or {})))
+        return f"mcp-result:{name}"
+
+
+def test_mcp_in_agent() -> None:
+    """M14-B2: narzędzia MCP w pętli agenta — odkryte, readonly bez zgody, mutujące
+    przez bramkę (klucz `mcp:` „Always allow"), wynik wraca do historii, plan mode
+    blokuje mutujące."""
+    # 1) tryb ask: advertise + gate + route + persist
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        store = Path(d) / "perm.json"
+        gate = PermissionGate(store)
+        mcp = _FakeMcp()
+        events: list[dict] = []
+        asked: list[tuple] = []
+        seen: dict = {}
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            i = calls["n"]
+            calls["n"] += 1
+            seen["names"] = {t["function"]["name"] for t in tools if t.get("type") == "function"}
+            if i == 0:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "m1", "type": "function",
+                     "function": {"name": "mcp__t__lookup", "arguments": '{"q": "hi"}'}}]}
+            if i == 1:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "m2", "type": "function",
+                     "function": {"name": "mcp__t__write", "arguments": '{"v": "x"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        def request_approval(call_id, name, detail):
+            asked.append((name, detail))
+            return "always"
+
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=events.append, request_approval=request_approval, mcp=mcp)
+        session.run_turn("use mcp", model="mock", mode="ask")
+
+        check("B2-mcp: MCP tools advertised to model",
+              {"mcp__t__lookup", "mcp__t__write"} <= seen.get("names", set()))
+        check("B2-mcp: file tools still advertised", "read_file" in seen.get("names", set()))
+        asked_names = [a[0] for a in asked]
+        check("B2-mcp: readonly MCP tool runs without approval", "mcp__t__lookup" not in asked_names)
+        check("B2-mcp: mutating MCP tool requests approval", "mcp__t__write" in asked_names)
+        detail = next((a[1] for a in asked if a[0] == "mcp__t__write"), {})
+        check("B2-mcp: approval detail is mcp_tool_call",
+              detail.get("kind") == "mcp_tool_call" and detail.get("server") == "t")
+        check("B2-mcp: both MCP tools executed", {c[0] for c in mcp.calls} == {"mcp__t__lookup", "mcp__t__write"})
+        tool_msgs = [m for m in session.history if m.get("role") == "tool"]
+        check("B2-mcp: MCP result returned to history",
+              any("mcp-result:mcp__t__write" in (m.get("content") or "") for m in tool_msgs))
+        check("B2-mcp: always-allow persists mcp key", "mcp:mcp__t__write" in gate.rules())
+        check("B2-mcp: persisted approval survives reload",
+              not PermissionGate(store).needs_approval_key("mcp:mcp__t__write"))
+
+    # 2) plan mode: mutujące MCP zablokowane, readonly MCP działa
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        mcp = _FakeMcp()
+        events = []
+        approvals = {"n": 0}
+        calls = {"n": 0}
+
+        def mock_llm2(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            i = calls["n"]
+            calls["n"] += 1
+            if i == 0:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "p1", "type": "function",
+                     "function": {"name": "mcp__t__lookup", "arguments": '{"q": "a"}'}}]}
+            if i == 1:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "p2", "type": "function",
+                     "function": {"name": "mcp__t__write", "arguments": '{"v": "b"}'}}]}
+            return {"role": "assistant", "content": "plan ready"}
+
+        session = AgentSession(ws, gate, mock_llm2, lambda: "k", "http://unused",
+                               emit=events.append,
+                               request_approval=lambda *a: (approvals.__setitem__("n", approvals["n"] + 1), "accept")[1],
+                               mcp=mcp)
+        session.run_turn("plan it", model="mock", mode="plan")
+        results = [e for e in events if e.get("type") == "tool_result"]
+        check("B2-mcp: readonly MCP runs in plan mode",
+              any(e["id"] == "p1" and e["ok"] for e in results))
+        check("B2-mcp: mutating MCP blocked in plan mode",
+              any(e["id"] == "p2" and not e["ok"] and "plan mode" in (e.get("summary") or "").lower()
+                  for e in results))
+        check("B2-mcp: blocked MCP tool not executed", "mcp__t__write" not in {c[0] for c in mcp.calls})
+        check("B2-mcp: no approval prompt in plan mode", approvals["n"] == 0)
+
+
+def test_hooks() -> None:
+    """M14-B5: hooki (uogólniony PermissionGate) — pre_tool blokuje groźną komendę
+    PRZED bramką, post_tool audytuje, run_script odpala po pasującym narzędziu;
+    allowlista nienaruszona (P0 bez regresji)."""
+    from grok_core.hooks import HookManager
+
+    # 1) unit: dopasowanie wzorca + domyślne hooki
+    with tempfile.TemporaryDirectory() as d:
+        hm = HookManager(Path(d) / "grok_hooks.json", Path(d) / "audit.log")
+        ids = {h["id"] for h in hm.list_hooks()}
+        check("B5: default hooks present (block + audit)",
+              "block-dangerous-commands" in ids and "audit-all" in ids)
+        check("B5: pre_tool blocks rm -rf",
+              hm.run_pre_tool("run_command", {"command": "rm -rf important"}) is not None)
+        check("B5: pre_tool allows safe command",
+              hm.run_pre_tool("run_command", {"command": "git status"}) is None)
+        check("B5: pre_tool blocks force push",
+              hm.run_pre_tool("run_command", {"command": "git push origin main --force"}) is not None)
+        # disable → przepuszcza
+        hm.set_enabled("block-dangerous-commands", False)
+        check("B5: disabled block hook no longer blocks",
+              hm.run_pre_tool("run_command", {"command": "rm -rf important"}) is None)
+        hm.set_enabled("block-dangerous-commands", True)
+        # audyt zapisuje wpisy (post_tool)
+        hm.run_post_tool("write_file", {"path": "x.py"}, ok=True, result="Wrote")
+        tail = hm.audit_tail()
+        check("B5: audit logs tool call", any(e.get("action") == "tool" and e.get("tool") == "write_file"
+                                              for e in tail))
+
+    # 2) integracja: hook blokuje w pętli agenta PRZED bramką (no approval, not executed)
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        hm = HookManager(Path(d) / "h.json", Path(d) / "a.log")
+        events: list[dict] = []
+        asked: list[str] = []
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            i = calls["n"]
+            calls["n"] += 1
+            if i == 0:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "c1", "type": "function",
+                     "function": {"name": "run_command", "arguments": '{"command": "rm -rf important"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=events.append,
+                               request_approval=lambda cid, n, det: (asked.append(n), "accept")[1],
+                               hooks=hm)
+        session.run_turn("danger", model="mock", mode="ask")
+        results = [e for e in events if e.get("type") == "tool_result"]
+        check("B5: hook-blocked command reported not-ok",
+              any(e["id"] == "c1" and not e["ok"] for e in results))
+        check("B5: hook blocks BEFORE gate (no approval asked)", "run_command" not in asked)
+        check("B5: hook event emitted", any(e.get("type") == "hook" and e.get("action") == "blocked"
+                                            for e in events))
+        check("B5: block leaves allowlist untouched (no P0 regression)", gate.rules() == [])
+        check("B5: blocked command logged to audit",
+              any(e.get("action") == "blocked" for e in hm.audit_tail()))
+
+    # 3) run_script post hook odpala po write_file
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        hm = HookManager(Path(d) / "h2.json", Path(d) / "a2.log")
+        # skrypt: utwórz marker w workspace (cwd = root)
+        hm.add_hook({"id": "marker", "event": "post_tool", "type": "run_script",
+                     "enabled": True, "match_tools": ["write_file"],
+                     "command": [sys.executable, "-c", "open('hook_ran.txt','w').write('x')"]})
+        calls = {"n": 0}
+
+        def mock_llm2(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+            i = calls["n"]
+            calls["n"] += 1
+            if i == 0:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "w", "type": "function",
+                     "function": {"name": "write_file", "arguments": '{"path": "f.txt", "content": "hi"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        session = AgentSession(ws, gate, mock_llm2, lambda: "k", "http://unused",
+                               emit=lambda ev: None, request_approval=lambda *a: "accept",
+                               hooks=hm)
+        session.run_turn("write it", model="mock", mode="bypass")
+        check("B5: run_script post hook executed (marker created)",
+              (ws.root / "hook_ran.txt").exists())
+
+
 def main() -> int:
     test_tools()
     test_sandbox()
@@ -760,6 +973,9 @@ def main() -> int:
     test_agent_modes()
     test_checkpoints()
     test_grok_md()
+    # M14 — rozszerzalność: narzędzia MCP w pętli agenta (B2) + hooki (B5)
+    test_mcp_in_agent()
+    test_hooks()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

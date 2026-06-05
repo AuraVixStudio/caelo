@@ -3,15 +3,22 @@
 
 import type { Conn } from './api'
 
-/** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda / plik binarny). */
+/** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda / plik binarny /
+ *  wywołanie narzędzia MCP — M14-F2). */
 export interface ApprovalDetail {
-  kind?: string // 'diff' | 'command' | 'binary' | 'error'
+  kind?: string // 'diff' | 'command' | 'binary' | 'error' | 'mcp_tool_call'
   diff?: string
   command?: string
   cwd?: string
   created?: boolean // M13-B1: diff dla NOWEGO pliku (same dodania)
   bytes?: number // M13-B1: rozmiar dla kind === 'binary'
   detail?: string // komunikat dla 'binary'/'error'
+  // M14-F2: kind === 'mcp_tool_call'
+  server?: string // id serwera MCP
+  tool?: string // nazwa narzędzia (bez namespace)
+  qualified_name?: string // mcp__<server>__<tool>
+  description?: string // opis narzędzia z serwera
+  args?: Record<string, unknown> // proponowane argumenty wywołania
 }
 
 /**
@@ -52,6 +59,14 @@ function parseDetail(v: unknown): ApprovalDetail | undefined {
   if (typeof d.created === 'boolean') out.created = d.created
   if (typeof d.bytes === 'number') out.bytes = d.bytes
   if (typeof d.detail === 'string') out.detail = d.detail
+  // M14-F2: szczegóły wywołania narzędzia MCP.
+  if (typeof d.server === 'string') out.server = d.server
+  if (typeof d.tool === 'string') out.tool = d.tool
+  if (typeof d.qualified_name === 'string') out.qualified_name = d.qualified_name
+  if (typeof d.description === 'string') out.description = d.description
+  if (d.args !== null && typeof d.args === 'object' && !Array.isArray(d.args)) {
+    out.args = d.args as Record<string, unknown>
+  }
   return out
 }
 

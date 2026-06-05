@@ -51,6 +51,13 @@ HISTORY_DB_FILE = DATA_DIR / "grok_history.db"   # artifacts + history (grok_cor
 # M10-B5: lokalne dokumenty „wiedzy projektu" (xAI nie ma vector stores). Per projekt
 # podkatalog; dołączane do wiadomości jako input_file na żądanie ("Attach all").
 PROJECT_DOCS_DIR = DATA_DIR / "project_docs"
+# M14 (rozszerzalność) — własne pliki stanu, wszystkie przez load_json_or_backup +
+# atomic_write_text (jak pozostałe). Nie dotykają grok_config.json (HistoryManager).
+MCP_FILE = DATA_DIR / "grok_mcp.json"            # M14-B1: skonfigurowane serwery MCP
+COMMANDS_FILE = DATA_DIR / "grok_commands.json"  # M14-B4: komendy użytkownika (slash)
+HOOKS_FILE = DATA_DIR / "grok_hooks.json"        # M14-B5: konfiguracja hooków cyklu życia narzędzi
+AUDIT_LOG_FILE = DATA_DIR / "grok_audit.log"     # M14-B5: log audytu wywołań narzędzi (JSONL)
+SKILLS_DIR = DATA_DIR / "skills"                 # M14-B6: lokalne pakiety skilli (<name>/SKILL.md)
 
 
 def atomic_write_text(path, text: str) -> None:
@@ -151,6 +158,18 @@ DEFAULT_VOICE = "eve"
 VOICE_REALTIME_MODEL = "grok-voice-latest"
 # URL WebSocket realtime wyprowadzony z API_BASE ("https://…/v1" -> "wss://…/v1/realtime").
 REALTIME_URL = API_BASE.replace("http", "ws") + "/realtime"
+# M12-B1: strumieniowe STT na żywo (wss://api.x.ai/v1/stt). Most sidecara dokłada
+# nagłówek Authorization (przeglądarka nie może ustawiać nagłówków WS); partiale +
+# finalny transkrypt wracają tą samą ścieżką. Batch idzie przez POST /v1/stt.
+STT_STREAM_URL = API_BASE.replace("http", "ws") + "/stt"
+
+# M12-B5: stawki kosztu audio (BYO-key; widoczne dla usera, jak licznik czatu/genjobs).
+# STT rozliczane za czas (xAI: batch $0.10/h, stream na żywo $0.20/h). TTS za znaki —
+# cena znakowa nie jest publicznie podana, więc TTS_COST_PER_1K_CHARS to STROJALNY
+# szacunek (jak placeholdery kosztów w genjobs.py); licznik znaków jest dokładny.
+STT_COST_PER_HOUR_BATCH = 0.10
+STT_COST_PER_HOUR_STREAM = 0.20
+TTS_COST_PER_1K_CHARS = 0.015
 
 # --- Design Tokens (AI Studio Pro) ---
 COLORS = {

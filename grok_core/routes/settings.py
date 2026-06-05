@@ -31,6 +31,9 @@ class SettingsPatch(BaseModel):
     # M10-F3: domyślny tryb live-searcha czatu + wybrane źródła (per aplikacja).
     chat_search_mode: Optional[str] = None
     chat_search_sources: Optional[List[str]] = None
+    # M12-F4: domyślny głos TTS/rozmowy + język (per aplikacja).
+    voice: Optional[str] = None
+    voice_language: Optional[str] = None
 
 
 @router.get("/settings")
@@ -40,6 +43,9 @@ def get_settings(b: Backend = Depends(get_backend)) -> dict:
     if mode not in _SEARCH_MODES:
         mode = "off"
     sources = [x for x in (s.get("chat_search_sources") or ["web", "x"]) if x in _SEARCH_SOURCES]
+    voice = s.get("voice") or config.DEFAULT_VOICE
+    if voice not in config.VOICE_VOICES:
+        voice = config.DEFAULT_VOICE
     return {
         "chat_model": s.get("chat_model", config.DEFAULT_CHAT_MODEL),
         "code_model": s.get("code_model", "grok-build-0.1"),
@@ -47,6 +53,9 @@ def get_settings(b: Backend = Depends(get_backend)) -> dict:
         "chat_temperature": s.get("chat_temperature", 0.7),
         "chat_search_mode": mode,
         "chat_search_sources": sources or ["web", "x"],
+        # M12-F4: domyślny głos/język audio (TTS, read-aloud, Talk).
+        "voice": voice,
+        "voice_language": s.get("voice_language") or "en",
         "has_api_key": b.has_api_key(),
     }
 

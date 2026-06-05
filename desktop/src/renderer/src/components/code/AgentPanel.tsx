@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Check, ChevronDown, History, ListChecks, Pencil, Play, ShieldCheck, Undo2, Zap } from 'lucide-react'
-import { AgentConnection, type AgentEvent } from '../../lib/agentClient'
+import { Check, ChevronDown, History, ListChecks, Mic, Pencil, Play, ShieldCheck, Square, Undo2, Zap } from 'lucide-react'
+import { AgentConnection, type AgentEvent, type ApprovalDetail } from '../../lib/agentClient'
 import {
   agentUndo,
   listCheckpoints,
@@ -25,6 +25,7 @@ import { imageUris, inlineTextFiles } from '../../lib/attachments'
 import { useHub } from '../../lib/hub'
 import { inputBlockToAttachment } from '../../lib/sendTo'
 import { useAttachments } from '../../lib/useAttachments'
+import { appendDictation, useDictation } from '../../lib/useDictation'
 import { cn } from '../../lib/cn'
 import { Markdown } from '../Markdown'
 import { AttachButton, AttachmentChips } from '../Attachments'
@@ -61,15 +62,7 @@ type Entry =
       status: 'pending' | 'awaiting' | 'done' | 'error'
       output: string
       summary: string
-      detail?: {
-        kind?: string
-        diff?: string
-        command?: string
-        cwd?: string
-        created?: boolean
-        bytes?: number
-        detail?: string
-      }
+      detail?: ApprovalDetail
     }
 
 export function AgentPanel({
@@ -89,6 +82,8 @@ export function AgentPanel({
 }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const [input, setInput] = useState('')
+  // M12-F1: dyktowanie promptu agenta (2. tryb po czacie) — wspólny hook STT.
+  const dictation = useDictation(conn, (t) => setInput((prev) => appendDictation(prev, t)))
   const att = useAttachments() // P2-3: wspólny hook załączników
   const hub = useHub()
   const [busy, setBusy] = useState(false)
@@ -456,6 +451,33 @@ export function AgentPanel({
             disabled={!connected}
             className="flex-1 text-[13px]"
           />
+          <button
+            type="button"
+            onClick={dictation.toggle}
+            disabled={!connected || dictation.busy}
+            aria-label={
+              dictation.recording
+                ? 'Stop dictation and transcribe'
+                : dictation.busy
+                  ? 'Transcribing'
+                  : 'Dictate'
+            }
+            title={
+              dictation.recording
+                ? 'Stop & transcribe'
+                : dictation.busy
+                  ? 'Transcribing…'
+                  : 'Dictate'
+            }
+            className={cn(
+              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50',
+              dictation.recording
+                ? 'bg-error text-white hover:opacity-90'
+                : 'text-muted hover:bg-surface-2 hover:text-fg'
+            )}
+          >
+            {dictation.recording ? <Square size={14} /> : <Mic size={16} />}
+          </button>
           {busy ? (
             <Button variant="danger" size="sm" onClick={() => agentRef.current?.stop()}>
               Stop
@@ -696,6 +718,22 @@ function EntryView({
               $ {entry.detail.command}
               {entry.detail.cwd ? `   (cwd: ${entry.detail.cwd})` : ''}
             </pre>
+          ) : entry.detail.kind === 'mcp_tool_call' ? (
+            <div className="rounded-md bg-surface-2 px-2.5 py-2">
+              <div className="mb-1 flex items-center gap-2 text-xs">
+                <span className="rounded bg-accent/15 px-1.5 py-0.5 font-medium text-accent">MCP</span>
+                <span className="font-mono text-fg/90">{entry.detail.tool}</span>
+                {entry.detail.server ? (
+                  <span className="text-muted">on {entry.detail.server}</span>
+                ) : null}
+              </div>
+              {entry.detail.description ? (
+                <p className="mb-1.5 text-[11.5px] text-muted">{entry.detail.description}</p>
+              ) : null}
+              <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11.5px] text-fg/80">
+                {JSON.stringify(entry.detail.args ?? {}, null, 2)}
+              </pre>
+            </div>
           ) : null}
           <div className="flex gap-2">
             <Button size="sm" onClick={() => onApprove(entry.id, 'accept')}>

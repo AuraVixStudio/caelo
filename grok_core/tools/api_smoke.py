@@ -301,6 +301,113 @@ def _unit_responses_client(checks: list) -> None:
     checks.append(("responses: oversize document skipped (cap, no crash)", over == []))
 
 
+def _unit_responses_mcp_loop(checks: list) -> None:
+    """M14-B2: klient-side function calling w Responses — model woła narzędzie MCP,
+    `tool_handler` je wykonuje, wynik wraca jako `function_call_output` w kolejnej
+    turze, finalny tekst jest zwracany. Bez sieci (atrapa SSE per-tura)."""
+    import types
+
+    sys.path.insert(0, REPO_DIR)
+    from grok_core import responses_client as rc  # noqa: E402
+
+    def _frame(d) -> bytes:
+        return b"data: " + json.dumps(d, ensure_ascii=False).encode("utf-8")
+
+    turn1 = [
+        _frame({"type": "response.completed", "response": {
+            "usage": {"input_tokens": 5, "output_tokens": 5},
+            "output": [{"type": "function_call", "call_id": "c1",
+                        "name": "mcp__t__lookup", "arguments": "{\"q\": \"hi\"}"}]}}),
+        b"data: [DONE]",
+    ]
+    turn2 = [
+        _frame({"type": "response.output_text.delta", "delta": "final answer"}),
+        _frame({"type": "response.completed", "response": {
+            "usage": {"output_tokens": 3}, "output": [{"type": "message", "content": [
+                {"type": "output_text", "text": "final answer"}]}]}}),
+        b"data: [DONE]",
+    ]
+    captured: dict = {"payloads": []}
+
+    class _Resp:
+        def __init__(self, frames):
+            self._frames = frames
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_lines(self, decode_unicode=False):
+            for f in self._frames:
+                yield f
+
+    def _post(url, **kw):
+        i = len(captured["payloads"])
+        captured["payloads"].append(kw.get("json"))
+        return _Resp(turn1 if i == 0 else turn2)
+
+    handled: list = []
+
+    def handler(name, args):
+        handled.append((name, args))
+        return "RESULT:" + name
+
+    original = rc.requests
+    rc.requests = types.SimpleNamespace(post=_post, get=getattr(original, "get", None))
+    try:
+        res = rc.stream_response(
+            [{"role": "user", "content": "do it"}],
+            model="grok-4.3", api_key_provider=lambda: "K",
+            function_tools=[{"type": "function", "function": {
+                "name": "mcp__t__lookup", "description": "lookup",
+                "parameters": {"type": "object", "properties": {"q": {"type": "string"}}}}}],
+            tool_handler=handler,
+            on_delta=lambda d, f: None,
+        )
+    finally:
+        rc.requests = original
+
+    checks.append(("mcp-loop: tool handler invoked once",
+                   handled == [("mcp__t__lookup", {"q": "hi"})]))
+    checks.append(("mcp-loop: final text returned after tool", res["text"] == "final answer"))
+    checks.append(("mcp-loop: function_tool_calls counted", res.get("function_tool_calls") == 1))
+    checks.append(("mcp-loop: two requests made (loop)", len(captured["payloads"]) == 2))
+    # 1. żądanie: narzędzie function w FLAT formacie Responses (name na górze, nie pod 'function')
+    t0 = (captured["payloads"][0] or {}).get("tools") or []
+    checks.append(("mcp-loop: function tool flattened to Responses format",
+                   any(t.get("type") == "function" and t.get("name") == "mcp__t__lookup"
+                       and "function" not in t for t in t0)))
+    # 2. żądanie: wejście niesie function_call_output z wynikiem handlera
+    in2 = (captured["payloads"][1] or {}).get("input") or []
+    checks.append(("mcp-loop: function_call_output fed back",
+                   any(isinstance(it, dict) and it.get("type") == "function_call_output"
+                       and it.get("call_id") == "c1" and it.get("output") == "RESULT:mcp__t__lookup"
+                       for it in in2)))
+
+    # Bez function_tools/handler zachowanie = JEDNA tura (brak regresji czystego czatu).
+    # Przy okazji B3: native remote MCP — blok {type:'mcp',...} ma trafić do payload.tools.
+    captured["payloads"].clear()
+    rc.requests = types.SimpleNamespace(post=_post, get=getattr(original, "get", None))
+    try:
+        res2 = rc.stream_response([{"role": "user", "content": "hi"}], model="grok-4.3",
+                                  api_key_provider=lambda: "K", on_delta=lambda d, f: None,
+                                  remote_tools=[{"type": "mcp", "server_label": "rmt",
+                                                 "server_url": "https://ex.com/mcp"}])
+    finally:
+        rc.requests = original
+    checks.append(("mcp-loop: no function tools -> single turn (no regression)",
+                   len(captured["payloads"]) == 1 and res2.get("function_tool_calls") == 0))
+    rt_tools = (captured["payloads"][0] or {}).get("tools") or []
+    checks.append(("mcp-loop: native remote MCP block in Responses payload (B3)",
+                   any(t.get("type") == "mcp" and t.get("server_url") == "https://ex.com/mcp"
+                       for t in rt_tools)))
+
+
 def _unit_collections(checks: list) -> None:
     """M10-B5 (wiedza projektu LOKALNA — xAI nie ma vector stores, 404): upload
     zapisuje plik pod PROJECT_DOCS_DIR + rekord (path/mime), list/content/remove,
@@ -457,9 +564,17 @@ def _unit_chat_bridge(checks: list) -> None:
         api = _types.SimpleNamespace(
             chat_completion_stream=legacy_fn or (lambda *a, **k: ""),
             chat_completion=lambda *a, **k: "")
+        # M14-B2: czat czyta backend.mcp (narzędzia) i backend.permissions (gate). Tu
+        # bez serwerów MCP — atrapy zwracają puste listy (zachowanie jak przed M14).
+        mcp = _types.SimpleNamespace(
+            tool_defs_for_responses=lambda: [], remote_tool_blocks=lambda: [],
+            is_mcp_tool=lambda n: False, is_mutating=lambda n: True,
+            call_tool=lambda n, a: "")
+        permissions = _types.SimpleNamespace(needs_approval_key=lambda k: True)
         return _types.SimpleNamespace(
             api=api, read_settings=lambda: {},
-            get_api_key=lambda: "k", record_event=lambda **k: None)
+            get_api_key=lambda: "k", record_event=lambda **k: None,
+            mcp=mcp, permissions=permissions)
 
     async def _run(frames, backend, *, terminal=("done", "error")):
         sent: list = []
@@ -606,6 +721,146 @@ def _unit_chat_bridge(checks: list) -> None:
         checks.append(("chat bridge: single-flight rejects 2nd chat", bool(busy)))
     except Exception as exc:  # noqa: BLE001
         checks.append((f"chat bridge: single-flight scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+
+def _unit_voice_converse(checks: list) -> None:
+    """M12-B3/B5: pipeline rozmowy głosowej — transkrypt -> Responses -> TTS -> audio,
+    barge-in (stop przerywa, bez TTS), licznik kosztu. Bez xAI: podmieniamy
+    `responses_client.stream_response` i `api.text_to_speech` atrapami; handler z
+    atrapą WS (jak _unit_chat_bridge). Plus czyste funkcje kosztu."""
+    import threading as _th
+    import time as _time
+    import types as _types
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import WebSocketDisconnect  # noqa: E402
+    from grok_core import responses_client as rc  # noqa: E402
+    from grok_core.routes import voice as voice_route  # noqa: E402
+
+    # --- czyste funkcje kosztu (B5) ---
+    checks.append(("voice cost: STT stream rate ($0.20/h)", voice_route.stt_cost(3600, streaming=True) == 0.20))
+    checks.append(("voice cost: STT batch rate ($0.10/h)", voice_route.stt_cost(3600) == 0.10))
+    checks.append(("voice cost: TTS per-char monotone", voice_route.tts_cost(2000) > voice_route.tts_cost(1000) > 0))
+    checks.append(("voice cost: zero/negative clamps to 0", voice_route.stt_cost(-5) == 0.0 and voice_route.tts_cost(-5) == 0.0))
+
+    class _FakeWS:
+        def __init__(self, backend, frames, on_send):
+            self.app = _types.SimpleNamespace(
+                state=_types.SimpleNamespace(session_token="t", backend=backend))
+            self.headers = {}
+            self.query_params = {"token": "t"}
+            self._frames = list(frames)
+            self._i = 0
+            self._on_send = on_send
+
+        async def accept(self):
+            pass
+
+        async def close(self, code=1000):
+            pass
+
+        async def send_json(self, item):
+            await self._on_send(item)
+
+        async def receive_text(self):
+            if self._i < len(self._frames):
+                f = self._frames[self._i]
+                self._i += 1
+                return f
+            await self._wait_then_disconnect()
+            raise WebSocketDisconnect(code=1000)
+
+    def _backend(tts_fn=None):
+        api = _types.SimpleNamespace(
+            text_to_speech=tts_fn or (lambda text, voice, lang: (b"AUDIO", "audio/mpeg")))
+        return _types.SimpleNamespace(
+            api=api, read_settings=lambda: {},
+            get_api_key=lambda: "k", record_event=lambda **k: None)
+
+    async def _run(frames, backend, wait):
+        sent: list = []
+        async def on_send(item):
+            sent.append(item)
+            if item.get("type") in ("done", "error"):
+                if hasattr(wait, "on_done"):
+                    wait.on_done()
+        ws = _FakeWS(backend, frames, on_send)
+        ws._wait_then_disconnect = wait
+        await asyncio.wait_for(voice_route.voice_converse(ws), timeout=10)
+        return sent
+
+    orig_stream = rc.stream_response
+
+    # --- scenariusz 1: pełny pipeline transkrypt -> tekst -> audio -> done + koszt ---
+    def stub_ok(messages, **kw):
+        # ostatnia wiadomość = transkrypt usera (pipeline dokleja {role:user}).
+        kw["on_delta"]("Hi", "Hi")
+        kw["on_delta"](" there", "Hi there")
+        return {"text": "Hi there", "citations": [{"url": "https://a", "title": "A"}],
+                "usage": {"output_tokens": 3}, "tool_calls": 0}
+
+    try:
+        rc.stream_response = stub_ok
+        done_evt = asyncio.Event()
+        async def wait1():
+            await done_evt.wait()
+        wait1.on_done = done_evt.set
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "converse", "transcript": "hello", "model": "grok-4.3",
+                         "voice_id": "eve", "language": "en"})],
+            _backend(), wait1))
+        deltas = [m for m in sent if m.get("type") == "delta"]
+        audio = [m for m in sent if m.get("type") == "audio"]
+        cost = [m for m in sent if m.get("type") == "cost"]
+        done = [m for m in sent if m.get("type") == "done"]
+        cits = [m for m in sent if m.get("type") == "citations"]
+        import base64 as _b64
+        checks.append(("voice converse: deltas accumulate to full",
+                       "".join(d.get("delta", "") for d in deltas) == "Hi there"))
+        checks.append(("voice converse: TTS audio frame (base64 of synthesized bytes)",
+                       bool(audio) and audio[0].get("audio_b64") == _b64.b64encode(b"AUDIO").decode("ascii")))
+        checks.append(("voice converse: cost frame counts TTS chars",
+                       bool(cost) and cost[0].get("tts_chars") == len("Hi there") and cost[0].get("tts_cost") > 0))
+        checks.append(("voice converse: done carries full", bool(done) and done[0].get("full") == "Hi there"))
+        checks.append(("voice converse: citations forwarded",
+                       bool(cits) and cits[0]["citations"][0]["url"] == "https://a"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"voice converse: pipeline scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 2: barge-in (stop) przerywa turę PRZED TTS ---
+    def stub_bargein(messages, **kw):
+        kw["on_delta"]("A", "A")
+        for _ in range(500):  # czekaj aż handler ustawi stop (z ramki 'stop')
+            if kw["stop_flag"]():
+                break
+            _time.sleep(0.01)
+        return {"text": "A", "citations": [], "usage": {}, "tool_calls": 0}
+
+    def stub_tts_should_not_run(text, voice, lang):
+        raise AssertionError("TTS must not run after barge-in")
+
+    try:
+        rc.stream_response = stub_bargein
+        done_evt2 = asyncio.Event()
+        async def wait2():
+            await done_evt2.wait()
+        wait2.on_done = done_evt2.set
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "converse", "transcript": "hello", "model": "grok-4.3"}),
+             json.dumps({"type": "stop"})],
+            _backend(tts_fn=stub_tts_should_not_run), wait2))
+        audio = [m for m in sent if m.get("type") == "audio"]
+        cost = [m for m in sent if m.get("type") == "cost"]
+        done = [m for m in sent if m.get("type") == "done"]
+        checks.append(("voice converse: barge-in stop skips TTS (no audio frame)", not audio))
+        checks.append(("voice converse: barge-in still reports zero TTS cost + done",
+                       bool(done) and bool(cost) and cost[0].get("tts_chars") == 0))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"voice converse: barge-in scenario ran ({exc})", False))
     finally:
         rc.stream_response = orig_stream
 
@@ -1430,6 +1685,140 @@ def _unit_agent_routes(checks: list) -> None:
                        gm2["exists"] is True and "never touch /vendor" in gm2["content"]))
 
 
+def _unit_mcp_routes(checks: list) -> None:
+    """M14-B1/F1: trasy /mcp — add/list/enable/start/stop/remove in-process. Remote
+    bez podprocesu (maskowanie sekretu); stdio startuje mock-serwer (pełna ścieżka
+    route→manager→client). Backend bez __init__ (manager na temp configu)."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core.mcp.manager import McpManager  # noqa: E402
+    from grok_core.routes import mcp as mr  # noqa: E402
+    from grok_core.state import Backend  # noqa: E402
+
+    mock = os.path.join(PKG_DIR, "tools", "_mcp_mock_server.py")
+    with tempfile.TemporaryDirectory() as d:
+        b = Backend.__new__(Backend)
+        b._mcp = McpManager(Path(d) / "grok_mcp.json")
+        try:
+            mr.add_server(mr.McpServerReq(id="rmt", name="Remote", transport="remote",
+                                          url="https://ex.com/mcp", authorization="Bearer S"), b=b)
+            lst = mr.list_servers(b=b)["servers"]
+            rmt = next((s for s in lst if s["id"] == "rmt"), {})
+            checks.append(("/mcp add remote + masks secret",
+                           rmt.get("has_authorization") is True and "authorization" not in rmt))
+
+            mr.set_enabled("rmt", mr.EnabledReq(enabled=False), b=b)
+            checks.append(("/mcp set enabled toggles",
+                           mr.server_status("rmt", b=b)["server"]["enabled"] is False))
+
+            mr.add_server(mr.McpServerReq(id="mock", name="Mock", transport="stdio",
+                                          command=[sys.executable, mock]), b=b)
+            st = mr.start_server("mock", b=b)["server"]
+            checks.append(("/mcp start stdio -> ready + tools",
+                           st["status"] == "ready" and st["tool_count"] == 2))
+            mr.stop_server("mock", b=b)
+
+            mr.remove_server("rmt", b=b)
+            gone404 = False
+            try:
+                mr.server_status("rmt", b=b)
+            except HTTPException as e:
+                gone404 = e.status_code == 404
+            checks.append(("/mcp remove + 404 after", gone404))
+
+            bad400 = False
+            try:
+                mr.add_server(mr.McpServerReq(id="x", transport="stdio", command=[]), b=b)
+            except HTTPException as e:
+                bad400 = e.status_code == 400
+            checks.append(("/mcp add stdio without command -> 400", bad400))
+        except Exception as exc:  # noqa: BLE001
+            checks.append((f"mcp routes: scenario ran ({exc})", False))
+        finally:
+            b._mcp.shutdown()
+
+
+def _unit_commands_skills(checks: list) -> None:
+    """M14-B4/B6: rejestr komend (wbudowane + użytkownika, expand, override, mode) i
+    biblioteka skilli (wbudowane Ren'Py/DAZ odkryte, get/enable/inject/create/delete,
+    sandbox)."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from grok_core.commands import CommandRegistry  # noqa: E402
+    from grok_core.markdown_meta import parse_frontmatter  # noqa: E402
+    from grok_core.skills import SkillManager  # noqa: E402
+
+    # --- frontmatter ---
+    meta, body = parse_frontmatter("---\nname: X\ntriggers: [a, b]\nenabled: true\n---\nBODY\n")
+    checks.append(("B4: frontmatter parses list/bool/body",
+                   meta.get("name") == "X" and meta.get("triggers") == ["a", "b"]
+                   and meta.get("enabled") is True and body.strip() == "BODY"))
+    checks.append(("B4: no frontmatter -> body intact",
+                   parse_frontmatter("just text")[1] == "just text"))
+
+    # --- komendy ---
+    with tempfile.TemporaryDirectory() as d:
+        reg = CommandRegistry(Path(d) / "grok_commands.json", Path(d) / "commands")
+        names = {c["name"] for c in reg.list_commands()}
+        checks.append(("B4: builtins present",
+                       {"plan", "review", "commit", "test", "mcp"} <= names))
+        plan = reg.get("plan")
+        checks.append(("B4: /plan carries plan mode (drives gate)",
+                       plan and plan.get("mode") == "plan" and plan.get("target") == "agent"))
+        checks.append(("B4: expand substitutes {input}",
+                       "refactor X" in reg.expand("plan", "refactor X")))
+        checks.append(("B4: expand unknown -> raw input", reg.expand("nope", "hello") == "hello"))
+        # komenda użytkownika: dodanie, trwałość, override builtina
+        reg.add_command({"name": "review", "template": "MY REVIEW {input}", "target": "chat"})
+        reg.add_command({"name": "deploy", "template": "Deploy to {input}"})
+        reg2 = CommandRegistry(Path(d) / "grok_commands.json", Path(d) / "commands")
+        rv = reg2.get("review")
+        checks.append(("B4: user command persists + overrides builtin",
+                       rv and rv["template"] == "MY REVIEW {input}" and rv["builtin"] is False))
+        checks.append(("B4: user command added", reg2.get("deploy") is not None))
+        checks.append(("B4: remove builtin-shadow falls back to builtin",
+                       reg2.remove_command("review") and reg2.get("review")["builtin"] is True))
+        bad = False
+        try:
+            reg2.add_command({"name": "bad name!", "template": "x"})
+        except ValueError:
+            bad = True
+        checks.append(("B4: invalid command name rejected", bad))
+
+    # --- skille ---
+    with tempfile.TemporaryDirectory() as d:
+        sm = SkillManager(Path(d))
+        ids = {s["id"] for s in sm.list_skills()}
+        checks.append(("B6: builtin skills discovered (Ren'Py/DAZ)",
+                       {"renpy-new-scene", "daz-export-webm"} <= ids))
+        sk = sm.get_skill("renpy-new-scene")
+        checks.append(("B6: get_skill returns body + builtin flag",
+                       sk and "Ren'Py" in sk["body"] and sk["builtin"] is True))
+        checks.append(("B6: disabled skill not injected", sm.injected_text() == ""))
+        sm.set_enabled("renpy-new-scene", True)
+        inj = sm.injected_text()
+        checks.append(("B6: enabled skill injected into context",
+                       "Ren'Py" in inj and "Active skills" in inj))
+        # tworzenie skilla użytkownika z szablonu + odkrycie
+        sm.create_skill("my-flow", template="renpy", name="My Flow")
+        checks.append(("B6: created skill discovered",
+                       any(s["id"] == "my-flow" and s["builtin"] is False for s in sm.list_skills())))
+        checks.append(("B6: builtin skill not deletable", sm.delete_skill("renpy-new-scene") is False))
+        checks.append(("B6: user skill deletable", sm.delete_skill("my-flow") is True
+                       and all(s["id"] != "my-flow" for s in sm.list_skills())))
+        bad = False
+        try:
+            sm.create_skill("../escape")
+        except ValueError:
+            bad = True
+        checks.append(("B6: skill id traversal rejected", bad))
+
+
 def main() -> int:
     token = secrets.token_urlsafe(16)
     env = dict(os.environ, GROK_CORE_TOKEN=token)
@@ -1570,8 +1959,10 @@ def main() -> int:
             checks.append(("WS /chat/stream (token) accepted", ok_acc))
             checks.append(("WS /chat/stream (bad token) rejected", bad_rej))
 
-            # P0-8: dangerous WS endpoints must reject a bad token too.
-            for path in ("/agent/stream", "/terminal", "/voice/realtime"):
+            # P0-8: dangerous WS endpoints must reject a bad token too (M12: + voice
+            # stt/stream + converse bridges).
+            for path in ("/agent/stream", "/terminal", "/voice/realtime",
+                         "/voice/stt/stream", "/voice/converse"):
                 rej = asyncio.run(_ws_bad_token_rejected(port, path))
                 checks.append((f"WS {path} (bad token) rejected", rej))
         else:
@@ -1586,12 +1977,19 @@ def main() -> int:
         # M10-B1/B2/B3: Responses API client — UTF-8, live-search events, citations.
         _unit_responses_client(checks)
 
+        # M14-B2: klient-side function calling w Responses (pętla narzędzi MCP).
+        _unit_responses_mcp_loop(checks)
+
         # M10-B5: collections (file_search) — vector-store client + Backend + routes.
         _unit_collections(checks)
 
         # P1-3/M10: chat streaming bridge on Responses — deltas, tool_call, citations,
         # legacy fallback, vision gating, file_search attach, single-flight.
         _unit_chat_bridge(checks)
+
+        # M12-B3/B5: voice conversation pipeline — transcript -> Responses -> TTS -> audio,
+        # barge-in skips TTS, cost counters.
+        _unit_voice_converse(checks)
 
         # P1-8: route input validation (Pydantic constraints / data-URI checks).
         _unit_input_validation(checks)
@@ -1620,6 +2018,12 @@ def main() -> int:
 
         # M13-B5: trasy agenta (checkpoints/undo/grok-md) — in-process.
         _unit_agent_routes(checks)
+
+        # M14-B1/F1: trasy /mcp (serwery MCP) — in-process (remote + stdio mock).
+        _unit_mcp_routes(checks)
+
+        # M14-B4/B6: rejestr komend slash + biblioteka skilli (in-process).
+        _unit_commands_skills(checks)
 
         ok = True
         for name, passed in checks:

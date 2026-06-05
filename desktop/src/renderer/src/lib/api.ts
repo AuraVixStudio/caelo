@@ -74,6 +74,8 @@ export interface SettingsResp {
   chat_temperature: number
   chat_search_mode: SearchMode
   chat_search_sources: string[]
+  voice: string
+  voice_language: string
   has_api_key: boolean
 }
 
@@ -92,6 +94,8 @@ export type SettingsPatch = Partial<{
   chat_temperature: number
   chat_search_mode: SearchMode
   chat_search_sources: string[]
+  voice: string
+  voice_language: string
 }>
 
 /** Błąd HTTP z kodem statusu — pozwala wywołującym rozróżnić auth (401/403),
@@ -347,6 +351,8 @@ export interface TTSResp {
   audio_b64: string
   mime: string
   path: string | null
+  chars?: number // M12-B5: characters synthesized (exact)
+  cost?: number // M12-B5: estimated TTS cost (BYO-key)
 }
 
 export interface STTBody {
@@ -359,6 +365,7 @@ export interface STTResp {
   text?: string
   language?: string
   duration?: number
+  cost?: number // M12-B5: estimated STT cost from duration (BYO-key)
   words?: { text: string; start: number; end: number }[]
   [k: string]: unknown
 }
@@ -374,6 +381,18 @@ export function voiceRealtimeUrl(c: Conn, model?: string): string {
   const base =
     c.baseUrl.replace(/^http/, 'ws') + '/voice/realtime?token=' + encodeURIComponent(c.token)
   return model ? base + '&model=' + encodeURIComponent(model) : base
+}
+
+/** WebSocket URL for the streaming STT bridge (M12-B1; token + optional language). */
+export function voiceSttStreamUrl(c: Conn, language?: string): string {
+  const base =
+    c.baseUrl.replace(/^http/, 'ws') + '/voice/stt/stream?token=' + encodeURIComponent(c.token)
+  return language ? base + '&language=' + encodeURIComponent(language) : base
+}
+
+/** WebSocket URL for the voice-conversation pipeline (M12-B3; token in query). */
+export function voiceConverseUrl(c: Conn): string {
+  return c.baseUrl.replace(/^http/, 'ws') + '/voice/converse?token=' + encodeURIComponent(c.token)
 }
 
 // --- History / config ---
@@ -665,6 +684,137 @@ export const getGrokMd = (c: Conn): Promise<GrokMdResp> => api(c, '/agent/grok-m
 
 export const putGrokMd = (c: Conn, content: string): Promise<{ ok: boolean; path: string }> =>
   api(c, '/agent/grok-md', { method: 'PUT', body: JSON.stringify({ content }) })
+
+// --- M14: Extensibility (MCP servers / hooks / skills / slash commands) ---------
+
+export interface McpTool {
+  name: string
+  description: string
+  readonly: boolean
+}
+
+export interface McpServerInfo {
+  id: string
+  name: string
+  transport: 'stdio' | 'remote'
+  enabled: boolean
+  status?: string // stopped | starting | ready | error | remote
+  error?: string
+  command?: string[]
+  cwd?: string | null
+  env_keys?: string[]
+  url?: string
+  server_label?: string
+  has_authorization?: boolean
+  tools?: McpTool[]
+  tool_count?: number
+  resource_count?: number
+  prompt_count?: number
+  server_info?: Record<string, unknown>
+}
+
+export interface McpServerInput {
+  id?: string
+  name?: string
+  transport: 'stdio' | 'remote'
+  command?: string[]
+  cwd?: string | null
+  env?: Record<string, string>
+  url?: string
+  authorization?: string
+  server_label?: string
+  enabled?: boolean
+}
+
+export const listMcpServers = (c: Conn): Promise<{ servers: McpServerInfo[] }> => api(c, '/mcp')
+export const addMcpServer = (c: Conn, body: McpServerInput): Promise<{ server: McpServerInfo }> =>
+  api(c, '/mcp', { method: 'POST', body: JSON.stringify(body) })
+export const removeMcpServer = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/mcp/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const setMcpEnabled = (c: Conn, id: string, enabled: boolean): Promise<{ server: McpServerInfo }> =>
+  api(c, `/mcp/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) })
+// Starting a stdio server runs an arbitrary command — gated by an explicit user click.
+export const startMcpServer = (c: Conn, id: string): Promise<{ server: McpServerInfo }> =>
+  api(c, `/mcp/${encodeURIComponent(id)}/start`, { method: 'POST', timeoutMs: 60_000 })
+export const stopMcpServer = (c: Conn, id: string): Promise<{ server: McpServerInfo }> =>
+  api(c, `/mcp/${encodeURIComponent(id)}/stop`, { method: 'POST' })
+
+export interface HookInfo {
+  id: string
+  event: 'pre_tool' | 'post_tool' | 'pre_session'
+  type: 'block_command' | 'block_path' | 'audit' | 'run_script'
+  enabled: boolean
+  description?: string
+  pattern?: string
+  command?: string[]
+  match_tools?: string[]
+}
+
+export interface AuditEntry {
+  ts: string
+  action: string // tool | blocked | hook_script | session
+  tool?: string
+  ok?: boolean
+  hook?: string
+  detail?: string
+  cmd?: string
+  args?: Record<string, unknown>
+  [k: string]: unknown
+}
+
+export const listHooks = (c: Conn): Promise<{ hooks: HookInfo[] }> => api(c, '/hooks')
+export const addHook = (c: Conn, body: Partial<HookInfo>): Promise<{ hook: HookInfo }> =>
+  api(c, '/hooks', { method: 'POST', body: JSON.stringify(body) })
+export const setHookEnabled = (c: Conn, id: string, enabled: boolean): Promise<{ hook: HookInfo }> =>
+  api(c, `/hooks/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) })
+export const removeHook = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/hooks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const getAuditLog = (c: Conn, limit = 200): Promise<{ entries: AuditEntry[] }> =>
+  api(c, `/hooks/audit?limit=${limit}`)
+export const clearAuditLog = (c: Conn): Promise<{ ok: boolean }> =>
+  api(c, '/hooks/audit', { method: 'DELETE' })
+
+export interface SkillInfo {
+  id: string
+  name: string
+  description: string
+  triggers: string[]
+  builtin: boolean
+  enabled: boolean
+  has_resources: boolean
+  bytes: number
+  body?: string
+}
+
+export const listSkills = (c: Conn): Promise<{ skills: SkillInfo[] }> => api(c, '/skills')
+export const getSkill = (c: Conn, id: string): Promise<{ skill: SkillInfo }> =>
+  api(c, `/skills/${encodeURIComponent(id)}`)
+export const createSkill = (
+  c: Conn,
+  body: { id: string; template?: string; name?: string; description?: string }
+): Promise<{ skill: SkillInfo }> => api(c, '/skills', { method: 'POST', body: JSON.stringify(body) })
+export const setSkillEnabled = (c: Conn, id: string, enabled: boolean): Promise<{ skill: SkillInfo }> =>
+  api(c, `/skills/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) })
+export const deleteSkill = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+export interface SlashCommand {
+  name: string
+  description: string
+  template: string
+  target: 'chat' | 'agent' | 'both'
+  mode?: string
+  action?: string
+  builtin: boolean
+}
+
+export const listCommands = (c: Conn): Promise<{ commands: SlashCommand[] }> => api(c, '/commands')
+export const addCommand = (
+  c: Conn,
+  body: { name: string; template: string; description?: string; target?: string; mode?: string; action?: string }
+): Promise<{ command: SlashCommand }> => api(c, '/commands', { method: 'POST', body: JSON.stringify(body) })
+export const removeCommand = (c: Conn, name: string): Promise<{ ok: boolean }> =>
+  api(c, `/commands/${encodeURIComponent(name)}`, { method: 'DELETE' })
 
 export interface ChatStreamHandle {
   stop: () => void
