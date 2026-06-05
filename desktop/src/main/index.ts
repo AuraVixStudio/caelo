@@ -392,11 +392,12 @@ function createWindow(): void {
     }
   })
 
-  // P2-10: ogranicz uprawnienia renderera do mikrofonu (Voice/dyktowanie). Inne
-  // (geolokalizacja, powiadomienia, MIDI…) — odmowa zamiast domyślnego auto-grantu
-  // dla treści na pętli zwrotnej.
+  // P2-10: ogranicz uprawnienia renderera do mikrofonu (Voice/dyktowanie) oraz
+  // pełnego ekranu (przycisk fullscreen w odtwarzaczu wideo wymaga 'fullscreen' —
+  // bez niego nic nie robi). Inne (geolokalizacja, powiadomienia, MIDI…) — odmowa
+  // zamiast domyślnego auto-grantu dla treści na pętli zwrotnej.
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media')
+    callback(permission === 'media' || permission === 'fullscreen')
   })
 
   if (rendererUrl) {

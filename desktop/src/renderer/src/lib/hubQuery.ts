@@ -4,7 +4,15 @@
 import type { HistoryQuery } from './api'
 
 /** Moduły huba (zgodne z nawigacją w App.tsx). */
-export type HubModule = 'Chat' | 'Code' | 'Image' | 'Video' | 'Voice' | 'History' | 'Settings'
+export type HubModule =
+  | 'Chat'
+  | 'Code'
+  | 'Image'
+  | 'Video'
+  | 'Voice'
+  | 'Gallery'
+  | 'History'
+  | 'Settings'
 
 /** Tryb zdarzenia/artefaktu → moduł UJŚCIA (do skoku z History / Send-to). */
 export const MODE_TO_MODULE: Record<string, HubModule> = {

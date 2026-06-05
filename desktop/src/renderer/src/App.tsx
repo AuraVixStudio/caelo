@@ -3,6 +3,7 @@ import {
   Code2,
   History as HistoryIcon,
   Image as ImageIcon,
+  Images as GalleryIcon,
   MessageSquare,
   Mic,
   PanelLeftClose,
@@ -31,6 +32,7 @@ const ChatView = lazy(() => import('./components/ChatView').then((m) => ({ defau
 const CodeView = lazy(() => import('./components/CodeView').then((m) => ({ default: m.CodeView })))
 const Image = lazy(() => import('./components/Image').then((m) => ({ default: m.Image })))
 const Video = lazy(() => import('./components/Video').then((m) => ({ default: m.Video })))
+const Gallery = lazy(() => import('./components/Gallery').then((m) => ({ default: m.Gallery })))
 const Voice = lazy(() => import('./components/Voice').then((m) => ({ default: m.Voice })))
 const History = lazy(() => import('./components/History').then((m) => ({ default: m.History })))
 const Settings = lazy(() => import('./components/Settings').then((m) => ({ default: m.Settings })))
@@ -40,6 +42,7 @@ const MODULES = [
   { id: 'Code', label: 'Code', icon: Code2 },
   { id: 'Image', label: 'Image', icon: ImageIcon },
   { id: 'Video', label: 'Video', icon: VideoIcon },
+  { id: 'Gallery', label: 'Gallery', icon: GalleryIcon },
   { id: 'Voice', label: 'Voice', icon: Mic },
   { id: 'History', label: 'History', icon: HistoryIcon },
   { id: 'Settings', label: 'Settings', icon: SettingsIcon }
@@ -75,6 +78,8 @@ function moduleFor(active: Module, c: Conn, conn: CoreConnection) {
       return <Image conn={c} />
     case 'Video':
       return <Video conn={c} />
+    case 'Gallery':
+      return <Gallery conn={c} />
     case 'Voice':
       return <Voice conn={c} />
     case 'History':

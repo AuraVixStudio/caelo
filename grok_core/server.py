@@ -38,6 +38,7 @@ from grok_core.routes import (
     chat,
     collections,
     fs,
+    genjobs,
     git,
     history,
     media,
@@ -150,6 +151,7 @@ def create_app(
     app.include_router(models.router, dependencies=guard)
     app.include_router(settings.router, dependencies=guard)
     app.include_router(media.router, dependencies=guard)
+    app.include_router(genjobs.router, dependencies=guard)  # M11: jednolita kolejka obrazu/wideo
     app.include_router(voice.router, dependencies=guard)
     app.include_router(system.router, dependencies=guard)
     app.include_router(fs.router, dependencies=guard)

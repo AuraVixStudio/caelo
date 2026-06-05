@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import secrets
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -34,6 +35,11 @@ except Exception:  # pragma: no cover
 
 # P1-14: twardy limit pobieranych mediów (anty-OOM / miękki DoS przy spoofie URL).
 MAX_MEDIA_BYTES = 256 * 1024 * 1024  # 256 MB (wideo bywa duże, ale nie nieograniczone)
+
+# M11-B3: polling zadań wideo po stronie workera (sekundy). Deadline chroni przed
+# zadaniem zaciętym w stanie nieterminalnym (analogicznie do POLL_DEADLINE w UI).
+VIDEO_POLL_INTERVAL_S = 5
+VIDEO_JOB_DEADLINE_S = 12 * 60
 
 
 class Backend:
@@ -61,6 +67,8 @@ class Backend:
         self._checkpoints = None
         # Trwała allowlista agenta ("Always allow") współdzielona przez WS i REST.
         self.permissions = PermissionGate(config.PERMISSIONS_FILE)
+        # M11-B1: silnik zadań generacji (obraz/wideo) — leniwy (per proces).
+        self._genjobs = None
         # M9-B5: ostatnio wybrany projekt (przeżywa restart przez grok_settings.json).
         self.current_project_id = self.read_settings().get("current_project_id")
 
@@ -164,6 +172,85 @@ class Backend:
         legacy `self.history`/`grok_config.json` — kręgosłup huba (PLAN_M9)."""
         from grok_core.history_store import get_store
         return get_store()
+
+    # --- M11-B1: zadania generacji (jednolita kolejka obrazu/wideo) ----------
+    @property
+    def genjobs(self):
+        """Leniwy `GenJobManager` (per proces) z egzekutorem związanym z tym Backendem.
+        Egzekutor reużywa `api`/`save_media_urls` (zero drugiego magazynu media)."""
+        from grok_core.genjobs import GenJobManager
+
+        if getattr(self, "_genjobs", None) is None:
+            self._genjobs = GenJobManager(self._gen_executor, store=self.history_store)
+        return self._genjobs
+
+    def _gen_executor(self, job, cancel) -> list:
+        """Wykonaj zadanie generacji → lista artifact_id (M9). Rzuca przy błędzie."""
+        if job.kind == "image":
+            return self._run_image_job(job, cancel)
+        if job.kind == "video":
+            return self._run_video_job(job, cancel)
+        raise ValueError(f"unknown gen job kind: {job.kind}")
+
+    def _run_image_job(self, job, cancel) -> list:
+        p = job.params
+        prompt = p.get("prompt", "")
+        n = int(p.get("n", 1) or 1)
+        ratio = p.get("aspect_ratio", "auto")
+        resolution = p.get("resolution", "1k")
+        model = p.get("model") or None
+        if job.op == "text2img":
+            urls = self.api.generate_image(prompt, n, ratio, resolution, model=model)
+            legacy_mode = "generate"
+        else:  # edit / variation — oba przez /images/edits (referencja + prompt)
+            images = list(p.get("images") or [])
+            if not images:
+                raise ValueError("edit/variation requires at least one reference image")
+            urls = self.api.edit_image_b64(prompt, images, n, ratio, resolution, model=model)
+            legacy_mode = "edit"
+        results = self.save_media_urls(urls, prompt, legacy_mode, ".png",
+                                       project_id=job.project_id,
+                                       meta_extra={"gen_op": job.op, "model": model or ""})
+        return [r["artifact_id"] for r in results if r.get("artifact_id")]
+
+    def _run_video_job(self, job, cancel) -> list:
+        from grok_core.genjobs import GenJobCancelled
+
+        p = job.params
+        prompt = p.get("prompt", "")
+        model = p.get("model") or None
+        # Wybór wywołania xAI po operacji; dalej wspólna pętla pollingu.
+        if job.op == "edit":
+            request_id = self.api.edit_video_job(prompt, p["video"], model=model)
+        elif job.op == "extend":
+            request_id = self.api.extend_video_job(
+                prompt, p["video"], duration=int(p.get("duration") or 0) or None, model=model)
+        else:  # text2video / img2video
+            request_id = self.api.create_video_job(
+                prompt, int(p.get("duration", 6) or 6), p.get("resolution", "480p"),
+                p.get("aspect_ratio", "Original"), None, model=model,
+                image_data_uri=p.get("image"),
+            )
+        deadline = time.time() + VIDEO_JOB_DEADLINE_S
+        while True:
+            if cancel.is_set():
+                raise GenJobCancelled()
+            st = self.api.poll_video_status(request_id)
+            status = (st or {}).get("status")
+            if status == "done":
+                url = (st.get("video") or {}).get("url")
+                if not url:
+                    raise RuntimeError("video job finished without a URL")
+                results = self.save_media_urls([url], prompt, "video", ".mp4",
+                                               project_id=job.project_id,
+                                               meta_extra={"gen_op": job.op, "model": model or ""})
+                return [r["artifact_id"] for r in results if r.get("artifact_id")]
+            if status in ("failed", "expired"):
+                raise RuntimeError(f"video job {status}")
+            if time.time() > deadline:
+                raise RuntimeError("video job timed out (still rendering)")
+            # Czekaj, ale pozostań przerywalny: wait() wraca natychmiast po cancel.
+            cancel.wait(VIDEO_POLL_INTERVAL_S)
 
     def record_event(self, *, mode: str, text: str = "", artifact_id=None,
                      project_id=None, meta=None):
@@ -297,21 +384,27 @@ class Backend:
         return "image", "image", image_mime.get(e, "image/png")
 
     def _record_media_artifact(self, *, legacy_mode: str, ext: str, prompt: str,
-                               path, url) -> None:
+                               path, url, project_id=None, meta_extra=None):
         """M9-B2: zapisz wygenerowane medium jako artefakt + zdarzenie historii.
-        Wołane z `save_media_urls`/`save_media_bytes` (poza gorącą pętlą; błędy połykane)."""
+        Wołane z `save_media_urls`/`save_media_bytes` (poza gorącą pętlą; błędy połykane).
+        `project_id` (M11): jawny scope (np. z `GenJob`) — None stempluje aktywnym.
+        Zwraca utworzony Artifact (albo None przy błędzie magazynu)."""
         a_type, a_mode, mime = self._media_kind(legacy_mode, ext)
         meta = {"prompt": prompt or "", "op": legacy_mode}
         if url:
             meta["url"] = url
+        if meta_extra:
+            meta.update(meta_extra)
         art = self.add_artifact(type=a_type, mode=a_mode, mime=mime,
-                                path=path or "", meta=meta)
+                                path=path or "", meta=meta, project_id=project_id)
         self.record_event(mode=a_mode, text=prompt or "",
-                          artifact_id=(art.id if art else None))
+                          artifact_id=(art.id if art else None), project_id=project_id)
+        return art
 
     # --- zapis mediów (auto-save jak ResultCard/_auto_save_video) ---
     def save_media_urls(self, urls, prompt: str, mode: str, ext: str,
-                        download: bool = True) -> list:
+                        download: bool = True, project_id=None,
+                        meta_extra=None) -> list:
         out = []
         save_dir = Path(self.history.get_save_path())
         try:
@@ -331,9 +424,12 @@ class Backend:
             except Exception:
                 log.warning("Failed to record media in history", exc_info=True)
             # M9-B2: artefakt + zdarzenie we wspólnej, przeszukiwalnej historii huba.
-            self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
-                                        path=path, url=url)
-            out.append({"url": url, "path": path})
+            # M11: zwracamy też artifact_id, by GenJob zarejestrował swoje wyjścia.
+            art = self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
+                                              path=path, url=url, project_id=project_id,
+                                              meta_extra=meta_extra)
+            out.append({"url": url, "path": path,
+                        "artifact_id": (art.id if art else None)})
         return out
 
     def _download_media(self, url: str, save_dir: Path, mode: str, ext: str) -> str:

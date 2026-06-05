@@ -242,6 +242,22 @@ class HistoryStore:
                     created_at      REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_collfiles_project ON collection_files(project_id);
+                CREATE TABLE IF NOT EXISTS gen_jobs (
+                    id           TEXT PRIMARY KEY,
+                    kind         TEXT NOT NULL,
+                    op           TEXT NOT NULL,
+                    params       TEXT NOT NULL DEFAULT '{}',
+                    status       TEXT NOT NULL,
+                    artifact_ids TEXT NOT NULL DEFAULT '[]',
+                    error        TEXT NOT NULL DEFAULT '',
+                    cost         REAL NOT NULL DEFAULT 0,
+                    project_id   TEXT,
+                    created_at   REAL NOT NULL,
+                    updated_at   REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_genjobs_created ON gen_jobs(created_at);
+                CREATE INDEX IF NOT EXISTS idx_genjobs_status  ON gen_jobs(status);
+                CREATE INDEX IF NOT EXISTS idx_genjobs_project ON gen_jobs(project_id);
                 CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
                     text,
                     meta,
@@ -292,6 +308,13 @@ class HistoryStore:
                 "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
             ).fetchone()
         return self._row_to_artifact(row) if row else None
+
+    def delete_artifact(self, artifact_id: str) -> int:
+        """Usuń rekord artefaktu (plik na dysku kasuje warstwa wyżej — sandbox).
+        Zdarzenia historii z `artifact_id` zostają (nieszkodliwy dangling ref)."""
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
+        return cur.rowcount
 
     def list_artifacts(
         self, *, mode: Optional[str] = None, project_id: Optional[str] = None,
@@ -457,6 +480,105 @@ class HistoryStore:
     def remove_collection_file(self, file_row_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM collection_files WHERE id = ?", (file_row_id,))
+
+    # --- zadania generacji (M11-B1: jednolita kolejka obrazu/wideo) -----------
+    # Persistencja rekordów `GenJob` (silnik w `grok_core.genjobs`). Tu trzymamy
+    # tylko I/O — by uniknąć cyklicznego importu (genjobs → history_store),
+    # operujemy na polach prymitywnych i zwracamy `dict` (genjobs mapuje go na
+    # własną dataklasę). `params`/`artifact_ids` serializowane jako JSON.
+    _GEN_ACTIVE = ("queued", "running")
+
+    def upsert_gen_job(self, *, id: str, kind: str, op: str, params: dict,
+                       status: str, artifact_ids: Optional[list] = None,
+                       error: str = "", cost: float = 0.0,
+                       project_id: Optional[str] = None,
+                       created_at: float, updated_at: float) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO gen_jobs "
+                "(id, kind, op, params, status, artifact_ids, error, cost, "
+                " project_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (id, kind, op, json.dumps(params or {}, ensure_ascii=False), status,
+                 json.dumps(list(artifact_ids or []), ensure_ascii=False), error or "",
+                 float(cost or 0.0), project_id, float(created_at), float(updated_at)),
+            )
+
+    def get_gen_job(self, job_id: str) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM gen_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return self._row_to_gen_job(row) if row else None
+
+    def list_gen_jobs(self, *, active: Optional[bool] = None,
+                      project_id: Optional[str] = None,
+                      limit: int = 50, offset: int = 0) -> list[dict]:
+        sql = "SELECT * FROM gen_jobs"
+        where: list[str] = []
+        params: list[Any] = []
+        if active is True:
+            where.append("status IN (?, ?)")
+            params += list(self._GEN_ACTIVE)
+        elif active is False:
+            where.append("status NOT IN (?, ?)")
+            params += list(self._GEN_ACTIVE)
+        if project_id:
+            where.append("project_id = ?")
+            params.append(project_id)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params += [int(limit), int(offset)]
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [self._row_to_gen_job(r) for r in rows]
+
+    def count_active_gen_jobs(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM gen_jobs WHERE status IN (?, ?)", self._GEN_ACTIVE
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def delete_gen_job(self, job_id: str) -> int:
+        """Usuń rekord zadania (NIE rusza artefaktów — wygenerowane media zostają)."""
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM gen_jobs WHERE id = ?", (job_id,))
+        return cur.rowcount
+
+    def delete_terminal_gen_jobs(self, *, kind: Optional[str] = None,
+                                 project_id: Optional[str] = None) -> int:
+        """Wyczyść ZAKOŃCZONE zadania (done/failed/cancelled) — opcjonalnie po `kind`/
+        projekcie. Aktywne (queued/running) zostają. Artefakty NIE są usuwane."""
+        sql = "DELETE FROM gen_jobs WHERE status NOT IN (?, ?)"
+        params: list[Any] = list(self._GEN_ACTIVE)
+        if kind:
+            sql += " AND kind = ?"
+            params.append(kind)
+        if project_id:
+            sql += " AND project_id = ?"
+            params.append(project_id)
+        with self._lock, self._conn:
+            cur = self._conn.execute(sql, params)
+        return cur.rowcount
+
+    @staticmethod
+    def _row_to_gen_job(row: sqlite3.Row) -> dict:
+        try:
+            params = json.loads(row["params"]) if row["params"] else {}
+        except (ValueError, TypeError):
+            params = {}
+        try:
+            artifact_ids = json.loads(row["artifact_ids"]) if row["artifact_ids"] else []
+        except (ValueError, TypeError):
+            artifact_ids = []
+        return {
+            "id": row["id"], "kind": row["kind"], "op": row["op"], "params": params,
+            "status": row["status"], "artifact_ids": artifact_ids, "error": row["error"],
+            "cost": row["cost"], "project_id": row["project_id"],
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
 
     # --- helpery --------------------------------------------------------------
 

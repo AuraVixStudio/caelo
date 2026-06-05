@@ -250,6 +250,92 @@ export const extendVideoJob = (c: Conn, body: VideoExtendBody): Promise<{ reques
 export const pollVideoJob = (c: Conn, id: string): Promise<VideoStatus> =>
   api<VideoStatus>(c, `/video/jobs/${encodeURIComponent(id)}`)
 
+// --- Generation jobs (M11): one async queue for image + video ---
+export type GenJobKind = 'image' | 'video'
+export type GenJobOp = 'text2img' | 'edit' | 'variation' | 'text2video' | 'img2video'
+export type GenJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+
+export interface GenJob {
+  id: string
+  kind: GenJobKind
+  op: GenJobOp
+  params: Record<string, unknown>
+  status: GenJobStatus
+  artifact_ids: string[]
+  error: string
+  cost: number
+  project_id: string | null
+  created_at: number
+  updated_at: number
+}
+
+export interface ImageJobBody {
+  op: 'text2img' | 'edit' | 'variation'
+  prompt: string
+  n: number
+  aspect_ratio: string
+  resolution: string
+  model?: string
+  images?: string[] // data-URI (edit/variation, up to 3)
+}
+
+export interface VideoGenJobBody {
+  op: 'text2video' | 'img2video' | 'edit' | 'extend'
+  prompt: string
+  duration: number
+  resolution: string
+  aspect_ratio: string
+  model?: string
+  image?: string // data-URI: first frame for img2video
+  video?: string // https URL or data:video — source for edit/extend
+}
+
+// Submit returns immediately with the queued job; the worker runs it server-side.
+export const submitImageJob = (c: Conn, body: ImageJobBody): Promise<{ job: GenJob }> =>
+  api(c, '/genjobs/image', { method: 'POST', body: JSON.stringify(body) })
+
+export const submitVideoGenJob = (c: Conn, body: VideoGenJobBody): Promise<{ job: GenJob }> =>
+  api(c, '/genjobs/video', { method: 'POST', body: JSON.stringify(body) })
+
+export interface GenJobsQuery {
+  active?: boolean
+  project_id?: string
+  limit?: number
+  offset?: number
+}
+
+export const listGenJobs = (
+  c: Conn,
+  query: GenJobsQuery = {}
+): Promise<{ jobs: GenJob[]; total_cost: number; count: number }> => {
+  // active is a boolean → serialize explicitly (queryString takes string|number).
+  const params: Record<string, string | number | undefined> = {
+    project_id: query.project_id,
+    limit: query.limit,
+    offset: query.offset
+  }
+  if (query.active !== undefined) params.active = query.active ? 'true' : 'false'
+  return api(c, '/genjobs' + queryString(params))
+}
+
+export const getGenJob = (c: Conn, id: string): Promise<{ job: GenJob }> =>
+  api(c, `/genjobs/${encodeURIComponent(id)}`)
+
+export const cancelGenJob = (c: Conn, id: string): Promise<{ job: GenJob }> =>
+  api(c, `/genjobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' })
+
+export const retryGenJob = (c: Conn, id: string): Promise<{ job: GenJob }> =>
+  api(c, `/genjobs/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+
+/** Clear finished jobs (done/failed/cancelled) from the list. Media artifacts are
+ *  kept — only the job log rows are removed. Optionally scoped by kind. */
+export const clearGenJobs = (c: Conn, kind?: GenJobKind): Promise<{ cleared: number }> =>
+  api(c, '/genjobs' + queryString({ kind }), { method: 'DELETE' })
+
+/** Remove one finished job from the list (artifact kept). Active jobs → 409. */
+export const deleteGenJob = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/genjobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
 // --- Voice (TTS / STT / realtime) ---
 export interface TTSBody {
   text: string
@@ -386,6 +472,11 @@ export const listArtifacts = (
 export const getArtifact = (c: Conn, id: string): Promise<HubArtifact> =>
   api(c, `/artifacts/${encodeURIComponent(id)}`)
 
+/** Delete an artifact: its record + the file on disk (if under an allowed media dir).
+ *  Used to clear accumulated media from Recent / Gallery. Irreversible. */
+export const deleteArtifact = (c: Conn, id: string): Promise<{ ok: boolean; deleted_file: boolean }> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
 export const getArtifactInputBlock = (c: Conn, id: string): Promise<InputBlock> =>
   api(c, `/artifacts/${encodeURIComponent(id)}/input-block`)
 
@@ -399,6 +490,17 @@ export async function getArtifactContentUrl(c: Conn, id: string): Promise<string
   })
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
   return URL.createObjectURL(await res.blob())
+}
+
+/** Fetch an artifact's bytes as a data-URI — e.g. to reuse a generated video as the
+ *  source for edit/extend (which take a data:video/* or https URL, not a local path). */
+export async function getArtifactDataUri(c: Conn, id: string): Promise<string> {
+  const res = await fetch(c.baseUrl + `/artifacts/${encodeURIComponent(id)}/content`, {
+    headers: { Authorization: `Bearer ${c.token}` },
+    signal: AbortSignal.timeout(120_000)
+  })
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  return blobToDataUri(await res.blob())
 }
 
 export interface ProjectsResp {

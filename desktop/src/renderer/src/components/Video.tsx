@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Film, ImagePlus, Wand2, X } from 'lucide-react'
-import {
-  createVideoJob,
-  editVideoJob,
-  extendVideoJob,
-  pollVideoJob,
-  type Conn,
-  type VideoStatus
-} from '../lib/api'
+import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent } from 'react'
+import { Film, ImagePlus, X } from 'lucide-react'
+import { listArtifacts, type Conn, type HubArtifact } from '../lib/api'
+import { useGenJobs } from '../lib/useGenJobs'
+import { useHub } from '../lib/hub'
 import { useModels } from '../lib/serverState'
 import {
   EXTEND_DURATION_DEFAULT,
@@ -21,6 +16,8 @@ import {
 } from '../lib/constants'
 import { cn } from '../lib/cn'
 import { fileToDataUri } from '../lib/files'
+import { ArtifactCard } from './ArtifactCard'
+import { GenQueue } from './GenQueue'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { Page, Field } from './ui/Page'
@@ -36,37 +33,41 @@ const MODES: { id: Mode; label: string }[] = [
   { id: 'extend', label: 'Extend' }
 ]
 
-interface MediaRef {
-  name: string
-  value: string // data-URI (upload) lub https URL (ponowne użycie wyniku)
-}
-
+/**
+ * Zakładka wideo (M11-F3). Wszystkie operacje (text→video, image→video, edit, extend)
+ * to asynchroniczne zadania `GenJob` — jedna kolejka z postępem/anulowaniem/kosztem,
+ * a wyniki lądują jako artefakty M9 w „Recent videos" i galerii. Kadr startowy i
+ * źródłowe wideo trzymane w Hub (przeżywają zmianę zakładki + „Send video to…").
+ */
 export function Video({ conn }: { conn: Conn }) {
   const [mode, setMode] = useState<Mode>('generate')
   const [prompt, setPrompt] = useState('')
-  const [image, setImage] = useState<MediaRef | null>(null) // kadr startowy (generate)
-  const [source, setSource] = useState<MediaRef | null>(null) // źródłowe wideo (edit/extend)
-  const [duration, setDuration] = useState(VIDEO_DURATION_DEFAULT) // generate 1-15
-  const [extDuration, setExtDuration] = useState(EXTEND_DURATION_DEFAULT) // extend 1-10
+  const [duration, setDuration] = useState(VIDEO_DURATION_DEFAULT)
+  const [extDuration, setExtDuration] = useState(EXTEND_DURATION_DEFAULT)
   const [resolution, setResolution] = useState('480p')
   const [ratio, setRatio] = useState('Original')
   const [models, setModels] = useState<string[]>([])
   const [model, setModel] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [video, setVideo] = useState<VideoStatus | null>(null)
-  const aliveRef = useRef(true)
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null) // P2-9: do anulowania
-  const { models: modelsResp } = useModels(conn) // P2-2: współdzielony cache /models
+  const [results, setResults] = useState<HubArtifact[]>([])
+  const { models: modelsResp } = useModels(conn) // P2-2
+  const { jobs, submitVideo, cancel, retry, clearFinished, dismiss, error: jobsError } =
+    useGenJobs(conn)
+  // Kadr startowy i źródłowe wideo trzymane w Hub (przeżywają zmianę zakładki —
+  // panel jest leniwy; „Send video to…" z galerii też ładuje je tędy).
+  const {
+    currentProjectId,
+    pendingSend,
+    setPendingSend,
+    videoFrame: image,
+    setVideoFrame: setImage,
+    videoSource: source,
+    setVideoSource: setSource,
+    videoCommandMode,
+    setVideoCommandMode
+  } = useHub()
 
-  useEffect(() => {
-    aliveRef.current = true
-    return () => {
-      aliveRef.current = false
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current) // P2-9: nie pollu po unmount
-    }
-  }, [])
+  const videoJobs = jobs.filter((j) => j.kind === 'video')
+  const doneCount = videoJobs.filter((j) => j.status === 'done').length
 
   useEffect(() => {
     if (!modelsResp) return
@@ -78,8 +79,7 @@ export function Video({ conn }: { conn: Conn }) {
 
   // Edit/Extend nie działają na modelu "preview" (np. grok-imagine-video-1.5-preview
   // zwraca 400 na /videos/extensions). Po wejściu w te tryby wybieramy pierwszy
-  // model bez "preview" (zwykle grok-imagine-video). Ręczny wybór użytkownika
-  // (zmiana modelu w tym samym trybie) nie jest nadpisywany.
+  // model bez "preview". Ręczny wybór użytkownika nie jest nadpisywany.
   useEffect(() => {
     if (needsSource && model.includes('preview')) {
       const base = models.find((m) => !m.includes('preview'))
@@ -88,14 +88,44 @@ export function Video({ conn }: { conn: Conn }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, models])
 
+  const refreshResults = useCallback(() => {
+    listArtifacts(conn, { mode: 'video', project_id: currentProjectId ?? undefined, limit: 24 })
+      .then((r) => setResults(r.artifacts))
+      .catch(() => undefined)
+  }, [conn, currentProjectId])
+
+  // Odśwież galerię wideo, gdy przybędzie ukończonych zadań (job → artefakt M9).
+  useEffect(() => {
+    refreshResults()
+  }, [refreshResults, doneCount])
+
+  // M11: „Send to → Animate (Video)" — podnieś obraz jako kadr startowy (image→video).
+  useEffect(() => {
+    if (!pendingSend || pendingSend.target !== 'Video') return
+    const block = pendingSend.block.block
+    if (block.type === 'image_url') {
+      setImage({ name: pendingSend.label || 'frame', uri: block.image_url.url })
+      setMode('generate')
+    }
+    setPendingSend(null)
+  }, [pendingSend, setPendingSend])
+
+  // M11: „Send video to → Edit/Extend" z galerii — Hub załadował źródło (videoSource)
+  // i komendę trybu; tu ją konsumujemy i czyścimy.
+  useEffect(() => {
+    if (!videoCommandMode) return
+    setMode(videoCommandMode)
+    setVideoCommandMode(null)
+  }, [videoCommandMode, setVideoCommandMode])
+
   async function addFile(files: FileList | null): Promise<void> {
     const list = files ? Array.from(files) : []
     if (needsSource) {
       const f = list.find((x) => x.type.startsWith('video/'))
-      if (f) setSource({ name: f.name, value: await fileToDataUri(f) })
+      if (f) setSource({ name: f.name, uri: await fileToDataUri(f) })
     } else {
       const f = list.find((x) => x.type.startsWith('image/'))
-      if (f) setImage({ name: f.name, value: await fileToDataUri(f) })
+      if (f) setImage({ name: f.name, uri: await fileToDataUri(f) })
     }
   }
 
@@ -109,109 +139,40 @@ export function Video({ conn }: { conn: Conn }) {
     void addFile(e.dataTransfer.files)
   }
 
-  // P2-9: górny limit czasu pollingu — zadanie zacięte w stanie nieterminalnym nie
-  // poll-uje w nieskończoność (mimo deklaracji „~2 min").
-  const POLL_DEADLINE_MS = 10 * 60 * 1000
-
-  function poll(id: string): void {
-    const deadline = Date.now() + POLL_DEADLINE_MS
-    const tick = async (): Promise<void> => {
-      if (!aliveRef.current) return
-      if (Date.now() > deadline) {
-        setError('Video job timed out (still rendering after 10 minutes). Try again later.')
-        setStatus('')
-        setBusy(false)
-        return
-      }
-      try {
-        const st = await pollVideoJob(conn, id)
-        if (st.status === 'done') {
-          setVideo(st)
-          setStatus('Done')
-          setBusy(false)
-          return
-        }
-        if (st.status === 'failed' || st.status === 'expired') {
-          setError('Video job failed or expired.')
-          setBusy(false)
-          return
-        }
-        pollTimerRef.current = setTimeout(tick, 5000)
-      } catch (e) {
-        setError(String((e as Error).message || e))
-        setBusy(false)
-      }
-    }
-    pollTimerRef.current = setTimeout(tick, 4000)
-  }
-
-  /** P2-9: przerwij polling i zwolnij UI (przycisk Cancel). */
-  function cancel(): void {
-    if (pollTimerRef.current) {
-      clearTimeout(pollTimerRef.current)
-      pollTimerRef.current = null
-    }
-    setBusy(false)
-    setStatus('')
-  }
-
   async function run(): Promise<void> {
-    if (!prompt.trim() || busy) return
+    if (!prompt.trim()) return
     if (needsSource && !source) return
-    setBusy(true)
-    setError(null)
-    setVideo(null)
-    setStatus('Submitting job…')
-    try {
-      let requestId: string
-      if (mode === 'edit') {
-        requestId = (
-          await editVideoJob(conn, {
-            prompt: prompt.trim(),
-            video: source!.value,
-            model: model || undefined
-          })
-        ).request_id
-      } else if (mode === 'extend') {
-        requestId = (
-          await extendVideoJob(conn, {
-            prompt: prompt.trim(),
-            video: source!.value,
-            duration: extDuration,
-            model: model || undefined
-          })
-        ).request_id
-      } else {
-        requestId = (
-          await createVideoJob(conn, {
-            prompt: prompt.trim(),
-            duration,
-            resolution,
-            aspect_ratio: ratio,
-            model: model || undefined,
-            image: image?.value
-          })
-        ).request_id
-      }
-      setStatus('Rendering… (can take up to ~2 min)')
-      poll(requestId)
-    } catch (e) {
-      setError(String((e as Error).message || e))
-      setBusy(false)
+    if (mode === 'edit') {
+      await submitVideo({
+        op: 'edit',
+        prompt: prompt.trim(),
+        duration,
+        resolution,
+        aspect_ratio: ratio,
+        model: model || undefined,
+        video: source!.uri
+      })
+    } else if (mode === 'extend') {
+      await submitVideo({
+        op: 'extend',
+        prompt: prompt.trim(),
+        duration: extDuration,
+        resolution,
+        aspect_ratio: ratio,
+        model: model || undefined,
+        video: source!.uri
+      })
+    } else {
+      await submitVideo({
+        op: image ? 'img2video' : 'text2video',
+        prompt: prompt.trim(),
+        duration,
+        resolution,
+        aspect_ratio: ratio,
+        model: model || undefined,
+        image: image?.uri
+      })
     }
-  }
-
-  const videoUrl = video?.video?.url
-  const localPath = video?.local_path
-
-  // Wczytaj gotowy wynik jako źródło do edycji/przedłużenia (zdalny URL xAI).
-  function reuse(nextMode: Mode): void {
-    if (!videoUrl) return
-    setSource({ name: 'Generated video', value: videoUrl })
-    setMode(nextMode)
-    setVideo(null)
-    setStatus('')
-    setError(null)
   }
 
   const submitLabel =
@@ -226,7 +187,10 @@ export function Video({ conn }: { conn: Conn }) {
           : 'A drone shot flying over a neon city at night…'
 
   return (
-    <Page title="Video" subtitle="Generate, edit, or extend short videos with Grok.">
+    <Page
+      title="Video"
+      subtitle="Generate, edit, or extend short videos with Grok. Every job queues and lands in your gallery."
+    >
       {/* Mode toggle */}
       <div className="mb-4 inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
         {MODES.map((m) => (
@@ -254,7 +218,7 @@ export function Video({ conn }: { conn: Conn }) {
           source ? (
             <div className="relative w-full max-w-md">
               <video
-                src={source.value}
+                src={source.uri}
                 controls
                 className="w-full rounded-lg border border-border bg-black"
               />
@@ -268,13 +232,13 @@ export function Video({ conn }: { conn: Conn }) {
             </div>
           ) : (
             <span className="text-sm text-muted">
-              Drop a source video here, upload one, or generate a video first and reuse it.
+              Drop a source video here, upload one, or send one here from a generated result.
             </span>
           )
         ) : image ? (
           <div className="relative h-28 w-28">
             <img
-              src={image.value}
+              src={image.uri}
               alt={image.name}
               className="h-full w-full rounded-lg border border-border object-cover"
             />
@@ -379,9 +343,9 @@ export function Video({ conn }: { conn: Conn }) {
             className="ml-auto"
             icon={<Film size={16} />}
             onClick={run}
-            disabled={busy || !prompt.trim() || (needsSource && !source)}
+            disabled={!prompt.trim() || (needsSource && !source)}
           >
-            {busy ? 'Working…' : submitLabel}
+            {submitLabel}
           </Button>
         </div>
         {needsSource ? (
@@ -395,45 +359,32 @@ export function Video({ conn }: { conn: Conn }) {
         ) : null}
       </Card>
 
-      {busy ? (
-        <div className="mt-4 flex items-center gap-3">
-          <p className="text-sm text-muted">{status}</p>
-          <Button variant="outline" size="sm" onClick={cancel}>
-            Cancel
-          </Button>
-        </div>
-      ) : null}
-      {error ? <p className="mt-4 text-sm text-error">{error}</p> : null}
+      {jobsError ? <p className="mt-4 text-sm text-error">{jobsError}</p> : null}
 
-      {videoUrl ? (
-        <div className="mt-6 max-w-2xl">
-          <video
-            src={videoUrl}
-            controls
-            className="w-full rounded-xl border border-border bg-black"
-          />
-          <div className="mt-3 flex flex-wrap gap-2">
-            {localPath ? (
-              <Button variant="outline" size="sm" onClick={() => window.grok.openPath(localPath)}>
-                Open file
-              </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              icon={<Wand2 size={14} />}
-              onClick={() => reuse('edit')}
-            >
-              Edit this video
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={<Film size={14} />}
-              onClick={() => reuse('extend')}
-            >
-              Extend this video
-            </Button>
+      <div className="mt-6">
+        <GenQueue
+          jobs={videoJobs.slice(0, 8)}
+          onCancel={cancel}
+          onRetry={retry}
+          onClear={() => clearFinished('video')}
+          onDismiss={dismiss}
+          title="Jobs"
+        />
+      </div>
+
+      {results.length ? (
+        <div className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold text-muted">Recent videos</h2>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+            {results.map((art) => (
+              <ArtifactCard
+                key={art.id}
+                conn={conn}
+                art={art}
+                mediaClassName="h-40 w-full rounded-lg"
+                onDeleted={(id) => setResults((prev) => prev.filter((a) => a.id !== id))}
+              />
+            ))}
           </div>
         </div>
       ) : null}

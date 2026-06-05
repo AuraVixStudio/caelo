@@ -100,6 +100,27 @@ def _within(path: Path, base: Path) -> bool:
         return False
 
 
+@router.delete("/artifacts/{artifact_id}")
+def delete_artifact(artifact_id: str, b: Backend = Depends(get_backend)) -> dict:
+    """Usuń artefakt: rekord + plik z dysku (jeśli leży w dozwolonych katalogach
+    mediów — anty-traversal). Plik spoza nich NIE jest kasowany. M11 follow-up:
+    pozwala wyczyścić „Recent" / galerię, gdy media się nazbierają."""
+    art = b.history_store.get_artifact(artifact_id)
+    if art is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    deleted_file = False
+    if art.path:
+        try:
+            target = Path(art.path).resolve()
+            if target.is_file() and any(_within(target, base) for base in _media_bases(b)):
+                target.unlink()
+                deleted_file = True
+        except OSError:
+            deleted_file = False
+    b.history_store.delete_artifact(artifact_id)
+    return {"ok": True, "deleted_file": deleted_file}
+
+
 @router.get("/artifacts/{artifact_id}/content")
 def get_artifact_content(artifact_id: str, b: Backend = Depends(get_backend)):
     art = b.history_store.get_artifact(artifact_id)

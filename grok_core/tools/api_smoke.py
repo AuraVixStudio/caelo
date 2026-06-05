@@ -76,6 +76,18 @@ def _post(base: str, path: str, body: dict, token: str | None = None):
         return exc.code, None
 
 
+def _delete(base: str, path: str, token: str | None = None):
+    """DELETE; zwraca (status, body-lub-None). Błędy HTTP zwracane jako kod."""
+    req = urllib.request.Request(base + path, method="DELETE")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
+
+
 def _cors_acao(base: str, path: str, origin: str) -> str | None:
     """Zwraca Access-Control-Allow-Origin dla żądania z danym Origin (P1-9)."""
     req = urllib.request.Request(base + path)
@@ -852,6 +864,57 @@ def _live_media_voice_routes(base: str, token: str, checks: list) -> None:
     checks.append(("/voice/tts (empty text) == 422", s == 422))
 
 
+def _live_genjobs_routes(base: str, token: str, checks: list) -> None:
+    """M11: trasy /genjobs — bramka tokenu (401/403), kształt wejścia (Pydantic → 422,
+    PRZED ciałem trasy, więc bez sieci xAI), list shape i 404. NIE wysyłamy poprawnego
+    zadania (uruchomiłoby workera dążącego do xAI + zapis do realnej bazy)."""
+    # --- bramka tokenu ---
+    s, _ = _post(base, "/genjobs/image", {"prompt": "x"})
+    checks.append(("/genjobs/image (no token) == 401", s == 401))
+    s, _ = _post(base, "/genjobs/image", {"prompt": "x"}, "wrong")
+    checks.append(("/genjobs/image (bad token) == 403", s == 403))
+    s, _ = _get(base, "/genjobs")
+    checks.append(("/genjobs (no token) == 401", s == 401))
+
+    # --- kształt wejścia (422), bez wywołania xAI ---
+    s, _ = _post(base, "/genjobs/image", {"prompt": ""}, token)
+    checks.append(("/genjobs/image (empty prompt) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/image", {"op": "edit", "prompt": "x"}, token)
+    checks.append(("/genjobs/image (edit without images) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/image",
+                 {"op": "text2img", "prompt": "x", "images": ["data:image/png;base64,AA"]}, token)
+    checks.append(("/genjobs/image (text2img with images) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/image",
+                 {"op": "edit", "prompt": "x", "images": ["http://evil/x.png"]}, token)
+    checks.append(("/genjobs/image (non-data-URI ref) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/video", {"op": "img2video", "prompt": "x"}, token)
+    checks.append(("/genjobs/video (img2video without image) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/video", {"prompt": "x", "duration": 999}, token)
+    checks.append(("/genjobs/video (duration out of range) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/video", {"op": "edit", "prompt": "x"}, token)
+    checks.append(("/genjobs/video (edit without source video) == 422", s == 422))
+    s, _ = _post(base, "/genjobs/video",
+                 {"op": "extend", "prompt": "x", "video": "https://x/v.mp4", "duration": 99}, token)
+    checks.append(("/genjobs/video (extend duration out of range) == 422", s == 422))
+
+    # --- list shape + 404 (z tokenem) ---
+    s, body = _get(base, "/genjobs", token)
+    checks.append(("/genjobs == 200 + jobs list + total_cost",
+                   s == 200 and body is not None and isinstance(body.get("jobs"), list)
+                   and "total_cost" in body))
+    s, _ = _get(base, "/genjobs/does-not-exist", token)
+    checks.append(("/genjobs/{id} (unknown) == 404", s == 404))
+
+    # --- czyszczenie listy (M11 follow-up) — token gate + kształt + 404 ---
+    s, _ = _delete(base, "/genjobs")
+    checks.append(("DELETE /genjobs (no token) == 401", s == 401))
+    s, body = _delete(base, "/genjobs", token)
+    checks.append(("DELETE /genjobs == 200 + cleared count",
+                   s == 200 and body is not None and "cleared" in body))
+    s, _ = _delete(base, "/genjobs/does-not-exist", token)
+    checks.append(("DELETE /genjobs/{id} (unknown) == 404", s == 404))
+
+
 def _unit_rest_token_auth(checks: list) -> None:
     """P1-10: require_token jest FAIL-CLOSED bez skonfigurowanego tokenu (jak WS)."""
     import types
@@ -1197,6 +1260,34 @@ def _unit_history_routes(checks: list) -> None:
             except HTTPException as e:
                 denied = e.status_code == 403
             checks.append(("/artifacts/{id}/content outside allowed dirs -> 403", denied))
+
+            # M11 follow-up: DELETE /artifacts/{id} kasuje rekord + plik (sandbox)
+            pic2 = Path(d) / "del.png"
+            pic2.write_bytes(b"\x89PNG\r\n\x1a\nx")
+            delart = store.add_artifact(type="image", mode="image", mime="image/png", path=str(pic2))
+            r = hist_route.delete_artifact(delart.id, b=b)
+            checks.append(("/artifacts/{id} DELETE removes record + file",
+                           r["ok"] is True and r["deleted_file"] is True
+                           and not pic2.exists() and store.get_artifact(delart.id) is None))
+            del404 = False
+            try:
+                hist_route.delete_artifact("does-not-exist", b=b)
+            except HTTPException as e:
+                del404 = e.status_code == 404
+            checks.append(("/artifacts/{id} DELETE unknown -> 404", del404))
+
+            # DELETE artefaktu spoza dozwolonych katalogów: rekord znika, pliku NIE ruszamy
+            ext_marker = Path(d).resolve().parent / "grok_del_outside_marker.bin"
+            ext_marker.write_bytes(b"keep")
+            try:
+                evil2 = store.add_artifact(type="file", mode="file", path=str(ext_marker))
+                r2 = hist_route.delete_artifact(evil2.id, b=b)
+                checks.append(("/artifacts/{id} DELETE outside dir: record gone, file kept",
+                               r2["deleted_file"] is False and ext_marker.exists()
+                               and store.get_artifact(evil2.id) is None))
+            finally:
+                if ext_marker.exists():
+                    ext_marker.unlink()
         except Exception as exc:  # noqa: BLE001
             checks.append((f"history routes: scenario ran ({exc})", False))
         finally:
@@ -1410,6 +1501,11 @@ def main() -> int:
         checks.append(("/artifacts/{id}/input-block (no token) == 401", s == 401))
         s, _ = _get(base, "/artifacts/nope/input-block", token)
         checks.append(("/artifacts/{id}/input-block (unknown id) == 404", s == 404))
+        # M11 follow-up: usuwanie artefaktu — token gate + 404 dla nieznanego id.
+        s, _ = _delete(base, "/artifacts/nope")
+        checks.append(("DELETE /artifacts/{id} (no token) == 401", s == 401))
+        s, _ = _delete(base, "/artifacts/does-not-exist", token)
+        checks.append(("DELETE /artifacts/{id} (unknown id) == 404", s == 404))
 
         # M9-B5: projekty huba — 200 + kształt; bramka tokenu.
         s, body = _get(base, "/projects", token)
@@ -1456,6 +1552,9 @@ def main() -> int:
         # P3-1: żywe trasy media/voice — auth (401/403) + kształt wejścia (422),
         # bez dotykania xAI.
         _live_media_voice_routes(base, token, checks)
+
+        # M11: żywe trasy /genjobs — auth + walidacja (422) + list shape + 404.
+        _live_genjobs_routes(base, token, checks)
 
         # P3-1: żywe testy WS wymagają biblioteki `websockets` (z uvicorn[standard]).
         # Wcześniej brak biblioteki dawał CICHY „pass" (fałszywie zielone). Teraz
