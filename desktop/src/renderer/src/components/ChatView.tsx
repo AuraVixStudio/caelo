@@ -11,19 +11,28 @@ import { Group, Panel, useDefaultLayout, usePanelRef } from 'react-resizable-pan
 import {
   ArrowUp,
   Copy,
+  ExternalLink,
+  Globe,
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Search,
   SlidersHorizontal,
   Sparkles,
   Square,
   Volume2,
   X
 } from 'lucide-react'
-import { type ChatMessage, type Conn } from '../lib/api'
+import { type ChatMessage, type Conn, type SearchMode, type ToolEvent } from '../lib/api'
 import { saveSettings, useModels, useSettings } from '../lib/serverState'
 import { toApiMessages } from '../lib/attachments'
+import {
+  citationHost,
+  dedupeCitations,
+  formatUsage,
+  searchActivityLabel
+} from '../lib/searchState'
 import { inputBlockToAttachment } from '../lib/sendTo'
 import { useHub } from '../lib/hub'
 import { useAttachments } from '../lib/useAttachments'
@@ -47,6 +56,18 @@ function updateLastAssistant(messages: ChatMessage[], content: string): ChatMess
   for (let i = out.length - 1; i >= 0; i--) {
     if (out[i].role === 'assistant') {
       out[i] = { ...out[i], content }
+      break
+    }
+  }
+  return out
+}
+
+/** Merge fields (citations/usage) into the last assistant message (M10-F2/F6). */
+function patchLastAssistant(messages: ChatMessage[], patch: Partial<ChatMessage>): ChatMessage[] {
+  const out = messages.slice()
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (out[i].role === 'assistant') {
+      out[i] = { ...out[i], ...patch }
       break
     }
   }
@@ -113,6 +134,30 @@ const ChatMessageRow = memo(function ChatMessageRow({
       ) : (
         <span className="text-2xl leading-none tracking-widest text-muted">…</span>
       )}
+      {m.citations?.length ? (
+        <div className="mt-3 border-t border-border/60 pt-2.5">
+          <div className="mb-1.5 text-xs font-medium text-muted">Sources</div>
+          <div className="flex flex-wrap gap-1.5">
+            {m.citations.map((c, ci) => (
+              <a
+                key={ci}
+                href={c.url}
+                target="_blank"
+                rel="noreferrer"
+                title={c.title || c.url}
+                className="flex max-w-[220px] items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-xs text-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <span className="shrink-0 text-muted/70">{ci + 1}.</span>
+                <span className="truncate">{c.title || citationHost(c.url)}</span>
+                <ExternalLink size={11} className="shrink-0 opacity-70" />
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {m.usage && formatUsage(m.usage) ? (
+        <div className="mt-2 text-[11px] text-muted">{formatUsage(m.usage)}</div>
+      ) : null}
       {m.content ? (
         <div className="absolute right-0 top-0 flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           <button
@@ -146,6 +191,11 @@ export function ChatView({ conn }: { conn: Conn }) {
   const [model, setModel] = useState<string>('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [temperature, setTemperature] = useState(0.7)
+
+  // M10-F1/F3: live search — mode (auto/on/off) + sources, plus transient activity.
+  const [searchMode, setSearchMode] = useState<SearchMode>('off')
+  const [sources, setSources] = useState<string[]>(['web', 'x'])
+  const [searchActivity, setSearchActivity] = useState<ToolEvent | null>(null)
 
   // Voice: czytanie odpowiedzi na głos (TTS → useTts); dyktowanie promptu (STT → useDictation).
   const [defaultVoice, setDefaultVoice] = useState('eve')
@@ -198,6 +248,8 @@ export function ChatView({ conn }: { conn: Conn }) {
     setSystemPrompt(settings.system_prompt || '')
     setTemperature(typeof settings.chat_temperature === 'number' ? settings.chat_temperature : 0.7)
     setModel((prev) => prev || settings.chat_model)
+    if (settings.chat_search_mode) setSearchMode(settings.chat_search_mode)
+    if (settings.chat_search_sources?.length) setSources(settings.chat_search_sources)
   }, [settings])
 
   // Auto-scroll na dół przy zmianie treści.
@@ -226,6 +278,7 @@ export function ChatView({ conn }: { conn: Conn }) {
   function runTurn(history: ChatMessage[]): void {
     lastTurnRef.current = history
     setError(null)
+    setSearchActivity(null)
     convo.patchActive((c) => {
       const last = c.messages[c.messages.length - 1]
       // Dodaj pusty bąbel asystenta tylko jeśli go jeszcze nie ma (retry po błędzie).
@@ -235,16 +288,40 @@ export function ChatView({ conn }: { conn: Conn }) {
     })
 
     stream.start(
-      { messages: toApiMessages(history), model, temperature, system_prompt: systemPrompt },
+      {
+        messages: toApiMessages(history),
+        model,
+        temperature,
+        system_prompt: systemPrompt,
+        // M10-B2: live-search mode + sources (sources only matter when searching).
+        search_mode: searchMode,
+        sources: searchMode !== 'off' ? sources : undefined
+      },
       {
         onDelta: (full) =>
           convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) })),
-        onDone: (full) =>
-          convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) })),
+        // M10-F1: live-search activity → transient "Searching…" indicator.
+        onTool: (ev) => setSearchActivity(ev),
+        // M10-F2/F6: attach sources + usage to the streaming assistant message.
+        onCitations: (cits) =>
+          convo.patchActive((c) => ({
+            ...c,
+            messages: patchLastAssistant(c.messages, { citations: dedupeCitations(cits) })
+          })),
+        onUsage: (usage) =>
+          convo.patchActive((c) => ({
+            ...c,
+            messages: patchLastAssistant(c.messages, { usage })
+          })),
+        onDone: (full) => {
+          setSearchActivity(null)
+          convo.patchActive((c) => ({ ...c, messages: updateLastAssistant(c.messages, full) }))
+        },
         onError: (err) => {
           // P2-11: pokaż błąd w pasku (z „Retry") zamiast zapisywać „⚠️ …" jako
           // odpowiedź asystenta; usuń pusty bąbel, by historia została czysta.
           setError(err)
+          setSearchActivity(null)
           convo.patchActive((c) => {
             const msgs = c.messages.slice()
             const last = msgs[msgs.length - 1]
@@ -290,6 +367,21 @@ export function ChatView({ conn }: { conn: Conn }) {
   function onModelChange(value: string): void {
     setModel(value)
     void saveSettings(conn, { chat_model: value }).catch(() => undefined)
+  }
+
+  // M10-F3: live-search mode/source choices persist as the app-wide default.
+  function changeSearchMode(mode: SearchMode): void {
+    setSearchMode(mode)
+    void saveSettings(conn, { chat_search_mode: mode }).catch(() => undefined)
+  }
+
+  function toggleSource(src: string): void {
+    setSources((prev) => {
+      const next = prev.includes(src) ? prev.filter((s) => s !== src) : [...prev, src]
+      const final = next.length ? next : prev // keep at least one source selected
+      void saveSettings(conn, { chat_search_sources: final }).catch(() => undefined)
+      return final
+    })
   }
 
   function saveChatSettings(): void {
@@ -413,7 +505,78 @@ export function ChatView({ conn }: { conn: Conn }) {
           <div className="w-52">
             <ModelSelect value={model} models={models} onChange={onModelChange} />
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
+            <Popover
+              align="end"
+              label="Live search"
+              trigger={({ toggle, open, triggerProps }) => (
+                <IconButton
+                  label={
+                    searchMode === 'off' ? 'Live search: off' : `Live search: ${searchMode}`
+                  }
+                  icon={<Globe size={18} />}
+                  active={open || searchMode !== 'off'}
+                  tooltip={!open}
+                  tooltipSide="bottom-end"
+                  onClick={toggle}
+                  {...triggerProps}
+                />
+              )}
+            >
+              {() => (
+                <div className="w-64 p-2">
+                  <div className="mb-2 text-xs font-medium text-muted">Search the web &amp; X</div>
+                  <div className="flex gap-0.5 rounded-lg bg-surface-2 p-0.5">
+                    {(['auto', 'on', 'off'] as SearchMode[]).map((mo) => (
+                      <button
+                        key={mo}
+                        onClick={() => changeSearchMode(mo)}
+                        className={cn(
+                          'flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent',
+                          searchMode === mo
+                            ? 'bg-accent text-accent-fg'
+                            : 'text-muted hover:text-fg'
+                        )}
+                      >
+                        {mo}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className={cn(
+                      'mt-3',
+                      searchMode === 'off' && 'pointer-events-none opacity-40'
+                    )}
+                  >
+                    <div className="mb-1 text-xs font-medium text-muted">Sources</div>
+                    {[
+                      { k: 'web', label: 'Web' },
+                      { k: 'x', label: 'X' }
+                    ].map(({ k, label }) => (
+                      <label
+                        key={k}
+                        className="flex cursor-pointer items-center gap-2 py-1 text-sm text-fg"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sources.includes(k)}
+                          onChange={() => toggleSource(k)}
+                          className="accent-accent"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-snug text-muted">
+                    {searchMode === 'off'
+                      ? 'Grok answers from its own knowledge.'
+                      : searchMode === 'on'
+                        ? 'Grok always searches before answering.'
+                        : 'Grok searches the web/X when it needs fresh info.'}
+                  </p>
+                </div>
+              )}
+            </Popover>
             <Popover
               align="end"
               label="System & temperature"
@@ -505,6 +668,13 @@ export function ChatView({ conn }: { conn: Conn }) {
             </div>
           </div>
         )}
+
+        {stream.streaming && searchActivity ? (
+          <div className="flex items-center justify-center gap-2 px-4 pb-1 text-xs text-muted">
+            <Search size={12} className="animate-pulse" />
+            <span>{searchActivityLabel(searchActivity)}</span>
+          </div>
+        ) : null}
 
         {displayError ? (
           <div className="flex items-center justify-center gap-2 px-4 pb-1 text-xs text-error">

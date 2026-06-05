@@ -32,6 +32,10 @@ export function useChatStream(conn: Conn): {
     setStreaming(true)
     ref.current = streamChat(conn, req, {
       onDelta: handlers.onDelta,
+      // M10-F1/F2/F6: forward live-search activity, sources and usage as-is.
+      onTool: handlers.onTool,
+      onCitations: handlers.onCitations,
+      onUsage: handlers.onUsage,
       onDone: (full) => {
         handlers.onDone(full)
         setStreaming(false)

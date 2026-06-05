@@ -162,14 +162,120 @@ def _unit_ws_auth(checks: list) -> None:
     checks.append(("origin: null/none ok", _ws_origin_ok("null") is True and _ws_origin_ok(None) is True))
 
 
+def _unit_responses_client(checks: list) -> None:
+    """M10-B1/B2/B3: klient Responses API — bez sieci podmieniamy
+    `responses_client.requests.post` na atrapę zwracającą udokumentowany strumień
+    SSE (zdarzenia typowane). Sprawdzamy: dekodowanie UTF-8 (mojibake-guard), balans
+    historii (role w `input`), aktywność narzędzi (live search), dedup cytowań,
+    usage, licznik wywołań, off→bez narzędzi, oraz że klucz idzie z providera."""
+    import types
+
+    sys.path.insert(0, REPO_DIR)
+    from grok_core import responses_client as rc  # noqa: E402
+
+    text = "Zażółć gęślą jaźń — €µ✓ live"
+
+    def _frame(d) -> bytes:
+        # ensure_ascii=False → surowe wielobajtowe UTF-8 na drucie (test dekodowania).
+        return b"data: " + json.dumps(d, ensure_ascii=False).encode("utf-8")
+
+    frames = [
+        _frame({"type": "response.created", "response": {"id": "r1"}}),
+        _frame({"type": "response.web_search_call.in_progress", "item_id": "ws1"}),
+        _frame({"type": "response.web_search_call.searching", "item_id": "ws1",
+                "action": {"query": "grok news"}}),
+        _frame({"type": "response.web_search_call.completed", "item_id": "ws1"}),
+        _frame({"type": "response.output_text.delta", "delta": text[:9]}),
+        _frame({"type": "response.output_text.delta", "delta": text[9:]}),
+        _frame({"type": "response.output_text.annotation.added",
+                "annotation": {"type": "url_citation", "url": "https://x.com/a", "title": "A"}}),
+        b"",
+        _frame({"type": "response.completed", "response": {
+            "usage": {"input_tokens": 12, "output_tokens": 34},
+            "output": [{"type": "message", "content": [
+                {"type": "output_text", "text": text, "annotations": [
+                    {"type": "url_citation", "url": "https://x.com/a", "title": "A"},
+                    {"type": "url_citation", "url": "https://ex.com/n", "title": "News"}]}]}]}}),
+        b"data: [DONE]",
+    ]
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_lines(self, decode_unicode=False):
+            captured["decode_unicode"] = decode_unicode
+            for f in frames:
+                yield f
+
+    def _post(url, **kw):
+        captured["url"] = url
+        captured["json"] = kw.get("json")
+        captured["stream"] = kw.get("stream")
+        captured["timeout"] = kw.get("timeout")
+        captured["auth"] = (kw.get("headers") or {}).get("Authorization")
+        return _Resp()
+
+    original = rc.requests
+    rc.requests = types.SimpleNamespace(post=_post, get=getattr(original, "get", None))
+    try:
+        deltas: list = []
+        tools_seen: list = []
+        res = rc.stream_response(
+            [{"role": "user", "content": "what is new"},
+             {"role": "assistant", "content": "prior"},
+             {"role": "user", "content": "now"}],
+            model="grok-4.3", api_key_provider=lambda: "KEY",
+            tools=rc.build_search_tools("auto"),
+            on_delta=lambda d, f: deltas.append((d, f)),
+            on_tool=lambda ev: tools_seen.append(ev),
+        )
+    finally:
+        rc.requests = original
+
+    checks.append(("responses: SSE decoded UTF-8 (no mojibake)", res["text"] == text))
+    checks.append(("responses: deltas accumulate to full", bool(deltas) and deltas[-1][1] == text))
+    checks.append(("responses: iter_lines(decode_unicode=False) (bytes path)",
+                   captured.get("decode_unicode") is False))
+    checks.append(("responses: POST /responses with stream + timeout",
+                   str(captured.get("url", "")).endswith("/responses")
+                   and captured.get("stream") is True and captured.get("timeout") is not None))
+    checks.append(("responses: bearer from api_key_provider", captured.get("auth") == "Bearer KEY"))
+    checks.append(("responses: history balance (input roles preserved)",
+                   [i["role"] for i in captured["json"]["input"]] == ["user", "assistant", "user"]))
+    checks.append(("responses: assistant uses output_text part",
+                   captured["json"]["input"][1]["content"][0]["type"] == "output_text"))
+    checks.append(("responses: tools attached for auto",
+                   captured["json"].get("tools") == [{"type": "web_search"}, {"type": "x_search"}]))
+    checks.append(("responses: tool activity events emitted (live search)",
+                   any(ev["tool"] == "web_search" for ev in tools_seen)
+                   and any(ev.get("query") == "grok news" for ev in tools_seen)))
+    checks.append(("responses: tool_calls counted once per item", res["tool_calls"] == 1))
+    cit_urls = sorted(c["url"] for c in res["citations"])
+    checks.append(("responses: citations parsed + deduped",
+                   cit_urls == ["https://ex.com/n", "https://x.com/a"]))
+    checks.append(("responses: usage captured", res["usage"].get("output_tokens") == 34))
+    checks.append(("responses: mode=off attaches no tools", rc.build_search_tools("off") is None))
+
+
 def _unit_chat_bridge(checks: list) -> None:
-    """P1-3: most czatu — delty przyrostowe, done z full, single-flight. Bez xAI:
-    podmieniamy backend.api na atrapę i wołamy handler z atrapą WebSocketa."""
+    """M10/P1-3: most czatu na **Responses API** — delty przyrostowe, done z full,
+    tool_call + citations (live search), single-flight, fallback na legacy, gating
+    wizji. Bez xAI: podmieniamy `responses_client.stream_response` (i legacy
+    `api.chat_completion_stream` dla fallbacku) atrapami; handler z atrapą WS."""
     import threading as _th
     import types as _types
 
     sys.path.insert(0, REPO_DIR)
     from fastapi import WebSocketDisconnect  # noqa: E402
+    from grok_core import responses_client as rc  # noqa: E402
     from grok_core.routes import chat as chat_route  # noqa: E402
 
     class _FakeWS:
@@ -199,47 +305,133 @@ def _unit_chat_bridge(checks: list) -> None:
             await self._wait_then_disconnect()
             raise WebSocketDisconnect(code=1000)
 
-    # --- scenariusz 1: protokół delta/done ---
-    async def scenario_protocol():
+    def _backend(legacy_fn=None):
+        api = _types.SimpleNamespace(
+            chat_completion_stream=legacy_fn or (lambda *a, **k: ""),
+            chat_completion=lambda *a, **k: "")
+        return _types.SimpleNamespace(
+            api=api, read_settings=lambda: {},
+            get_api_key=lambda: "k", record_event=lambda **k: None)
+
+    async def _run(frames, backend, *, terminal=("done", "error")):
         sent: list = []
         done_evt = asyncio.Event()
 
-        def stream(messages, model, temperature, on_delta=None, stop_flag=None):
-            on_delta("Hel", "Hel")
-            on_delta("lo", "Hello")
-            return "Hello"
-
-        backend = _types.SimpleNamespace(
-            api=_types.SimpleNamespace(chat_completion_stream=stream,
-                                       chat_completion=lambda *a, **k: "Hello"),
-            read_settings=lambda: {})
-
         async def on_send(item):
             sent.append(item)
-            if item.get("type") in ("done", "error"):
+            if item.get("type") in terminal:
                 done_evt.set()
 
-        ws = _FakeWS(backend, [json.dumps({"type": "chat", "messages": [], "model": "m"})], on_send)
+        ws = _FakeWS(backend, frames, on_send)
         ws._wait_then_disconnect = done_evt.wait
         await asyncio.wait_for(chat_route.chat_stream(ws), timeout=10)
         return sent
 
-    # --- scenariusz 2: single-flight (drugi chat w trakcie -> błąd busy) ---
+    orig_stream = rc.stream_response
+
+    # --- scenariusz 1: protokół delta/done + citations/usage (przez Responses) ---
+    def stub_ok(messages, **kw):
+        kw["on_delta"]("Hel", "Hel")
+        kw["on_delta"]("lo", "Hello")
+        return {"text": "Hello", "citations": [{"url": "https://a", "title": "A"}],
+                "usage": {"output_tokens": 5}, "tool_calls": 0}
+
+    try:
+        rc.stream_response = stub_ok
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "hi"}],
+                         "model": "grok-4.3"})],
+            _backend()))
+        deltas = [m for m in sent if m.get("type") == "delta"]
+        done = [m for m in sent if m.get("type") == "done"]
+        cits = [m for m in sent if m.get("type") == "citations"]
+        checks.append(("chat bridge: deltas incremental (delta field, no full)",
+                       bool(deltas) and all("delta" in d and "full" not in d for d in deltas)))
+        checks.append(("chat bridge: deltas accumulate to full text",
+                       "".join(d.get("delta", "") for d in deltas) == "Hello"))
+        checks.append(("chat bridge: done carries full", bool(done) and done[0].get("full") == "Hello"))
+        checks.append(("chat bridge: citations frame forwarded",
+                       bool(cits) and cits[0]["citations"][0]["url"] == "https://a"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: protocol scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 2: live search → ramka tool_call ---
+    def stub_search(messages, **kw):
+        kw["on_tool"]({"tool": "web_search", "status": "searching", "query": "q"})
+        kw["on_delta"]("R", "R")
+        return {"text": "R", "citations": [{"url": "https://s", "title": "S"}],
+                "usage": {}, "tool_calls": 1}
+
+    try:
+        rc.stream_response = stub_search
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "news?"}],
+                         "model": "grok-4.3", "search_mode": "auto"})],
+            _backend()))
+        tcs = [m for m in sent if m.get("type") == "tool_call"]
+        checks.append(("chat bridge: tool_call frame for live search",
+                       bool(tcs) and tcs[0].get("tool") == "web_search"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: search scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 3: fallback na legacy gdy Responses padnie (czysty czat) ---
+    def stub_raise(messages, **kw):
+        raise RuntimeError("responses unavailable")
+
+    def legacy(messages, model=None, temperature=None, on_delta=None, stop_flag=None):
+        on_delta("Leg", "Leg")
+        on_delta("acy", "Legacy")
+        return "Legacy"
+
+    try:
+        rc.stream_response = stub_raise
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "hi"}],
+                         "model": "grok-4.3"})],
+            _backend(legacy_fn=legacy)))
+        done = [m for m in sent if m.get("type") == "done"]
+        errs = [m for m in sent if m.get("type") == "error"]
+        checks.append(("chat bridge: legacy fallback on Responses failure (no tools)",
+                       bool(done) and done[0].get("full") == "Legacy" and not errs))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: fallback scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 4: wizja na modelu spoza grok-4 → czytelny błąd, bez tury ---
+    try:
+        img_msg = {"role": "user", "content": [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}]}
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [img_msg], "model": "grok-3"})],
+            _backend()))
+        errs = [m for m in sent if m.get("type") == "error"]
+        dones = [m for m in sent if m.get("type") == "done"]
+        checks.append(("chat bridge: vision on non-grok-4 -> clear error, no turn",
+                       bool(errs) and "grok-4" in (errs[0].get("error") or "") and not dones))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: vision gating scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 5: single-flight (drugi chat w trakcie -> błąd busy) ---
+    def stub_hold(release):
+        def _s(messages, **kw):
+            kw["on_delta"]("A", "A")
+            release.wait(5)  # trzymaj workera, aż nadejdzie drugi chat
+            return {"text": "A", "citations": [], "usage": {}, "tool_calls": 0}
+        return _s
+
     async def scenario_single_flight():
         sent: list = []
         release = _th.Event()
         busy_evt = asyncio.Event()
         done_evt = asyncio.Event()
-
-        def stream(messages, model, temperature, on_delta=None, stop_flag=None):
-            on_delta("A", "A")
-            release.wait(5)  # trzymaj workera, aż nadejdzie drugi chat
-            return "A"
-
-        backend = _types.SimpleNamespace(
-            api=_types.SimpleNamespace(chat_completion_stream=stream,
-                                       chat_completion=lambda *a, **k: "A"),
-            read_settings=lambda: {})
 
         async def on_send(item):
             sent.append(item)
@@ -253,23 +445,12 @@ def _unit_chat_bridge(checks: list) -> None:
             release.set()
             await done_evt.wait()
 
-        frame = json.dumps({"type": "chat", "messages": [], "model": "m"})
-        ws = _FakeWS(backend, [frame, frame], on_send)
+        rc.stream_response = stub_hold(release)
+        frame = json.dumps({"type": "chat", "messages": [], "model": "grok-4.3"})
+        ws = _FakeWS(_backend(), [frame, frame], on_send)
         ws._wait_then_disconnect = wait_then_disconnect
         await asyncio.wait_for(chat_route.chat_stream(ws), timeout=10)
         return sent
-
-    try:
-        sent = asyncio.run(scenario_protocol())
-        deltas = [m for m in sent if m.get("type") == "delta"]
-        done = [m for m in sent if m.get("type") == "done"]
-        checks.append(("chat bridge: deltas incremental (delta field, no full)",
-                       bool(deltas) and all("delta" in d and "full" not in d for d in deltas)))
-        checks.append(("chat bridge: deltas accumulate to full text",
-                       "".join(d.get("delta", "") for d in deltas) == "Hello"))
-        checks.append(("chat bridge: done carries full", bool(done) and done[0].get("full") == "Hello"))
-    except Exception as exc:  # noqa: BLE001
-        checks.append((f"chat bridge: protocol scenario ran ({exc})", False))
 
     try:
         sent2 = asyncio.run(scenario_single_flight())
@@ -277,6 +458,8 @@ def _unit_chat_bridge(checks: list) -> None:
         checks.append(("chat bridge: single-flight rejects 2nd chat", bool(busy)))
     except Exception as exc:  # noqa: BLE001
         checks.append((f"chat bridge: single-flight scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
 
 
 def _unit_api_timeouts(checks: list) -> None:
@@ -1075,7 +1258,11 @@ def main() -> int:
         # P1-4: every APIManager HTTP call must pass an explicit timeout.
         _unit_api_timeouts(checks)
 
-        # P1-3: chat streaming bridge — incremental deltas + single-flight.
+        # M10-B1/B2/B3: Responses API client — UTF-8, live-search events, citations.
+        _unit_responses_client(checks)
+
+        # P1-3/M10: chat streaming bridge on Responses — deltas, tool_call, citations,
+        # legacy fallback, vision gating, single-flight.
         _unit_chat_bridge(checks)
 
         # P1-8: route input validation (Pydantic constraints / data-URI checks).

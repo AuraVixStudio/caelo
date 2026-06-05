@@ -1,19 +1,26 @@
-"""WebSocket czatu ze streamingiem (SSE -> WS).
+"""WebSocket czatu ze streamingiem (SSE -> WS) — na **Responses API** (M10).
 
 Protokół (JSON tekstowe ramki):
   klient -> serwer:
-    {"type":"chat","messages":[...],"model":"...","temperature":0.7,"system_prompt":"..."}
+    {"type":"chat","messages":[...],"model":"...","temperature":0.7,
+     "system_prompt":"...","search_mode":"auto|on|off","sources":["web","x"]}
     {"type":"stop"}                      # przerwij bieżące generowanie
   serwer -> klient:
     {"type":"delta","delta":"<przyrost treści>"}   # przyrostowo — klient skleja
+    {"type":"tool_call","tool":"web_search|x_search","status":"...","query":"..."}
+    {"type":"citations","citations":[{"url","title"}, ...]}   # źródła live-searcha
+    {"type":"usage","usage":{...},"tool_calls":<n>}           # koszt (BYO-key, B6)
     {"type":"done","full":"<pełna odpowiedź>"}
     {"type":"error","error":"..."}
 
-Most streamingu: blokujące `APIManager.chat_completion_stream` biegnie w wątku,
-a delty trafiają do `WsStream` (ograniczona kolejka + backpressure, P1-3) i są
-wysyłane po WS. Pętla odbioru działa równolegle z wysyłką, więc {"type":"stop"}
-dociera w trakcie streamingu i ustawia flagę `stop_flag`. UTF-8 jest zachowane
-przez APIManager.
+Rdzeń czatu idzie przez **`responses_client.stream_response`** (M10-B1): jeden
+nowoczesny kanał gotowy na narzędzia serwerowe (live search — B2) i wizję (B3).
+Stare `chat/completions` zostaje TYLKO jako fallback dla czystego czatu (bez
+narzędzi), gdy Responses zawiedzie przed pierwszą deltą — `search_parameters` jest
+i tak wycofane (410 Gone). Most streamingu jak dotąd: blokujące wywołanie biegnie
+w wątku, delty/zdarzenia trafiają do `WsStream` (ograniczona kolejka + backpressure,
+P1-3/P0-9), a {"type":"stop"} ustawia per-request stop_flag w trakcie streamu.
+UTF-8 zachowane jawnie (responses_client + APIManager).
 
 Autoryzacja: token w query (`?token=...`) — przeglądarkowy WebSocket nie pozwala
 ustawić nagłówka Authorization.
@@ -28,10 +35,28 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import config  # type: ignore
 
+from grok_core import responses_client
 from grok_core.routes._ws import WsStream
 from grok_core.state import ws_authorized
 
 router = APIRouter()
+
+
+def _has_image(messages) -> bool:
+    """True, jeśli którakolwiek wiadomość niesie obraz (part `image_url`)."""
+    for m in messages or []:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            for p in content:
+                if isinstance(p, dict) and p.get("type") == "image_url":
+                    return True
+    return False
+
+
+def _is_grok4(model: str) -> bool:
+    """Rodzina grok-4 (wizja + file_search wymagają jej — M10-B3). grok-3 i
+    grok-build-0.1 są text-only z perspektywy wizji."""
+    return (model or "").lower().startswith("grok-4")
 
 
 def _last_user_text(messages) -> str:
@@ -69,10 +94,12 @@ async def chat_stream(ws: WebSocket) -> None:
 
     async with WsStream(ws) as stream:
 
-        def start_worker(messages, model: str, temperature: float) -> None:
+        def start_worker(messages, model: str, temperature: float,
+                         search_mode: str, sources) -> None:
             stop = threading.Event()        # P1-3: stop_event PER-REQUEST
             current["stop"] = stop
             got = {"any": False}
+            tools = responses_client.build_search_tools(search_mode, sources)
 
             def on_delta(delta: str, _full: str) -> None:
                 got["any"] = True
@@ -80,29 +107,56 @@ async def chat_stream(ws: WebSocket) -> None:
                 if not stream.emit({"type": "delta", "delta": delta}):
                     stop.set()  # konsument zniknął → przerwij streaming z xAI
 
+            def on_tool(ev: dict) -> None:
+                # M10-F1: aktywność narzędzia serwerowego (live search) → wskaźnik UI.
+                if not stream.emit({"type": "tool_call", **ev}):
+                    stop.set()
+
             def worker() -> None:
                 try:
                     try:
+                        result = responses_client.stream_response(
+                            messages, model=model,
+                            api_key_provider=backend.get_api_key,
+                            temperature=temperature, tools=tools,
+                            # "on" wymusza search; "auto" zostawia decyzję modelowi.
+                            tool_choice="required" if search_mode == "on" else None,
+                            on_delta=on_delta, on_tool=on_tool, stop_flag=stop.is_set,
+                        )
+                        full = result["text"]
+                    except Exception:
+                        if got["any"] or tools:
+                            # Już streamowaliśmy ALBO to tura z narzędziami (search
+                            # nie istnieje w legacy chat/completions) → bez cichego
+                            # fallbacku; zgłoś błąd.
+                            raise
+                        # Czysty czat: Responses zawiodło przed pierwszą deltą →
+                        # spadnij na legacy chat/completions (wciąż działa).
                         full = backend.api.chat_completion_stream(
                             messages, model=model, temperature=temperature,
                             on_delta=on_delta, stop_flag=stop.is_set,
                         )
-                    except Exception:
-                        if got["any"]:
-                            raise
-                        # Fallback nie-streamingowy (jak w app._worker_chat).
-                        full = backend.api.chat_completion(
-                            messages, model=model, temperature=temperature
-                        )
-                        stream.emit({"type": "delta", "delta": full})
+                        result = {"text": full, "citations": [], "usage": {}, "tool_calls": 0}
+                    # M10-F2/F6: źródła + koszt po zakończeniu streamu (przed 'done').
+                    if result.get("citations"):
+                        stream.emit({"type": "citations", "citations": result["citations"]})
+                    if result.get("usage") or result.get("tool_calls"):
+                        stream.emit({"type": "usage", "usage": result.get("usage") or {},
+                                     "tool_calls": result.get("tool_calls", 0)})
                     stream.emit({"type": "done", "full": full})
                     # M9-B2: zapisz turę do wspólnej historii huba (po zakończeniu
                     # strumienia, poza gorącą pętlą; błędy połykane w record_event).
-                    # Tekst = odpowiedź; prompt usera w meta (kolumna meta jest w FTS).
+                    # Tekst = odpowiedź; prompt usera + koszt/źródła w meta (FTS).
                     prompt = _last_user_text(messages)
                     if full or prompt:
-                        backend.record_event(mode="chat", text=full or "",
-                                             meta={"prompt": prompt, "model": model})
+                        backend.record_event(
+                            mode="chat", text=full or "",
+                            meta={"prompt": prompt, "model": model,
+                                  "search_mode": search_mode,
+                                  "tool_calls": result.get("tool_calls", 0),
+                                  "usage": result.get("usage") or {},
+                                  "citations": [c.get("url") for c in result.get("citations", [])]},
+                        )
                 except Exception as exc:  # noqa: BLE001
                     stream.emit({"type": "error", "error": str(exc)})
 
@@ -143,7 +197,21 @@ async def chat_stream(ws: WebSocket) -> None:
                         temperature = float(msg.get("temperature", 0.7))
                     except (TypeError, ValueError):
                         temperature = 0.7  # złe temperature nie może wywrócić pętli odbioru (por. P1-8)
-                    start_worker(messages, model, temperature)
+                    # M10-B2: tryb live-searcha (auto/on/off) + źródła; domyślnie OFF,
+                    # by istniejący klient (bez tych pól) zachował się jak dotąd i nie
+                    # ponosił kosztu narzędzi serwerowych bez zgody (BYO-key).
+                    search_mode = (msg.get("search_mode") or "off").lower()
+                    if search_mode not in ("auto", "on", "off"):
+                        search_mode = "off"
+                    sources = msg.get("sources") or None
+                    # M10-B3: wizja wymaga rodziny grok-4 — czytelny komunikat zamiast
+                    # niejasnego błędu API, gdy obraz trafia do modelu text-only.
+                    if _has_image(messages) and not _is_grok4(model):
+                        await stream.send({"type": "error", "error": (
+                            f"Image input (vision) requires a grok-4 model. The selected "
+                            f"model '{model}' is text-only — switch models or remove the image.")})
+                        continue
+                    start_worker(messages, model, temperature, search_mode, sources)
         except WebSocketDisconnect:
             pass
         finally:

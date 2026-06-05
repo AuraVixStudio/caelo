@@ -551,6 +551,13 @@ rekonsoliduje **aktualny stan**, by §1–12 nie wprowadzały w błąd (P3-5).
   · `GET /git/status` · `GET /git/diff` · `POST /git/add` · `POST /git/commit` · `GET`/`DELETE /permissions`.
 - **WebSocket** (token w query `?token=`): `WS /chat/stream` · `WS /agent/stream` · `WS /terminal` · `WS /voice/realtime`.
 
+**M10 (czat na Responses API — pierwszy plaster, 2026-06-05):** rdzeń `/chat/stream` chodzi przez
+**`grok_core/responses_client.py`** (`POST /v1/responses`, streaming) z **live search**
+(`web_search`/`x_search`), **wizją** (rodzina grok-4) i **cytowaniami**; legacy `chat/completions`
+zostaje tylko jako fallback czystego czatu. Nowe ramki WS: `tool_call` · `citations` · `usage`;
+nowe pola wejścia `chat`: `search_mode` (auto/on/off) + `sources`. Ustawienia: `chat_search_mode`,
+`chat_search_sources`. Pełny status i to-do (B4/B5/F5) w **[`PLAN_M10_CZAT.md`](PLAN_M10_CZAT.md)** §6.
+
 **Wersja produktu (P3-4):** jedno źródło prawdy = `desktop/package.json`; sidecar raportuje ją w
 handshake / `/health` / `/whoami` (env `GROK_CORE_APP_VERSION` ← Electron, z odczytem package.json jako
 fallbackiem). Legacy `config.APP_VERSION` to **osobna** wersja archiwalnej apki customtkinter.

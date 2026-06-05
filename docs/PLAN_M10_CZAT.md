@@ -183,3 +183,74 @@ F4 (obraz)  → po B3 ;  F5 (dokument) → po B4 ;  F6 (koszt) → po B6
 - **Kolekcje (B5):** koszt utrzymania vector store per projekt + limity — w M10 czy później?
 - **Cytowania a copyright:** pokazuj źródła i krótkie streszczenia własnymi słowami, nie kopiuj
   długich fragmentów stron do UI (czysto produktowo bezpieczniejsze).
+
+---
+
+## 6. Status M10 — PIERWSZY PLASTER UKOŃCZONY (2026-06-05)
+
+Zrealizowano **rdzeń M10** (P0 + pierwszy „wow" + wizja/koszt): `B1→B2→B3` + `F1→F4`, `F6`.
+Pozostają **B4/B5 + F5** (Q&A nad dokumentem / kolekcje) — P1/stretch, w kolejnej iteracji.
+
+**Backend (`grok_core`):**
+- **B1 ✅ `responses_client.py`** — klient `POST /v1/responses` ze streamingiem: konwersja
+  `messages → input` (`to_input`: user/system→`input_text`, assistant→`output_text`,
+  `image_url`→`input_image`, balans historii), parser zdarzeń typowanych
+  (`response.output_text.delta`, `*_search_call.*`, `annotation`, `response.completed`),
+  **jawne UTF-8** (`iter_lines(decode_unicode=False)`+`.decode`), auth z `state.get_api_key`.
+  Zwraca `{text, citations, usage, tool_calls}`. Cienka warstwa endpoint/auth — root
+  `api_manager.py` NIETKNIĘTY.
+- **B2 ✅ live search** — `build_search_tools(mode, sources)`: `off`→brak narzędzi,
+  `auto/on`→`web_search`/`x_search`. Cytowania zbierane (dedup po URL) ze zdarzeń adnotacji
+  i z `response.completed`. Liczone unikalne wywołania narzędzi.
+- **B3 ✅ wizja** — `to_input` mapuje obraz→`input_image`; trasa gat­uje obraz na modelu
+  spoza rodziny grok-4 czytelnym błędem (`_is_grok4` = `grok-4*`).
+- **`routes/chat.py`** — `/chat/stream` przełączony na `responses_client.stream_response`
+  (single-flight, `stop`, `record_event` zachowane); **fallback na legacy
+  `chat/completions`** tylko dla czystego czatu, gdy Responses padnie przed pierwszą deltą
+  (search nie ma fallbacku — `search_parameters` = 410). Nowe ramki WS: `tool_call`,
+  `citations`, `usage`. Pola wejścia: `search_mode` (domyślnie `off` — bez kosztu bez zgody),
+  `sources`.
+- **B6 ✅ (przez B2)** — `usage` (tokeny) + `tool_calls` emitowane ramką `usage` i zapisane
+  w `meta` historii huba (`record_event`).
+- **`routes/settings.py`** — `chat_search_mode` + `chat_search_sources` (domyślny tryb per app).
+
+**Frontend (`desktop/src/renderer`):**
+- **F1 ✅** wskaźnik „Searching the web/X…" z ramek `tool_call` (`searchActivityLabel`).
+- **F2 ✅** panel **Sources** — klikalne chipy (https, `target=_blank`→`shell.openExternal`),
+  dedup + skrót hosta (`citationHost`), zapis na wiadomości asystenta (przeżywa reload).
+- **F3 ✅** przełącznik **Auto/On/Off** + wybór źródeł (Web/X) w popoverze nagłówka; domyślny
+  tryb zapisywany w `/settings`.
+- **F4 ✅** wejście obrazu — istniejący pipeline załączników (M9-F4, `toApiMessages`→`image_url`)
+  + gating B3; domyślny model `grok-4.3` (rodzina grok-4) obsługuje wizję.
+- **F6 ✅** badge kosztu „N searches · X tokens" (`formatUsage`) na wiadomości.
+- Czyste utile w `lib/searchState.ts` (Vitest: `desktop/test/searchState.test.ts`).
+
+**Decyzje (odpowiedzi na §5 „otwarte pytania"):**
+- **Migracja rdzenia:** CAŁY czat idzie przez Responses (zgodnie z rekomendacją), ale czysty
+  czat ma **fallback na legacy** — bo realnego `/v1/responses` nie da się zweryfikować w
+  sandboxie (TLS), więc fallback chroni podstawowy czat przy rozjeździe wire-formatu. Search
+  (z narzędziami) fallbacku NIE ma.
+- **`tool_choice`:** `auto`→bez `tool_choice` (model decyduje), `on`→`tool_choice="required"`
+  (wymuszony search). Wartość „required" do potwierdzenia na realnym API (izolowana).
+- **Modele/wizja:** gating po `grok-4*`; starsze (grok-3) dostają czytelny błąd zamiast
+  niejasnego 4xx.
+
+**Zweryfikowane (bez sieci xAI):**
+- `api_smoke.py` — **126/126 PASS** (nowe: `_unit_responses_client` 13 asercji — UTF-8,
+  balans `input`, zdarzenia narzędzi, dedup cytowań, usage, `off`→bez narzędzi, bearer z
+  providera; przerobiony `_unit_chat_bridge` — protokół, ramka `tool_call`, ramka `citations`,
+  fallback na legacy, gating wizji, single-flight). `agent_selfcheck.py` 81/81 — zero regresji.
+- `npm run typecheck` ✅. UI w podglądzie web (devMock): popover Auto/On/Off + źródła działa
+  (zapis trybu), panel **Sources** i badge kosztu renderują się (zaseedowana rozmowa).
+- Vitest (`searchState.test.ts`) **napisany**, ale devDep `vitest` nie jest zainstalowany w tym
+  środowisku (jak w CLAUDE.md — wymaga jednorazowego `npm install -D`); logika sprawdzona typami
+  + ręcznie.
+
+**Do weryfikacji po stronie użytkownika (ważny klucz xAI + sieć):** realny `POST /v1/responses`
+— kształt drutu (nazwy zdarzeń SSE, definicje `web_search`/`x_search`, `tool_choice="required"`,
+lokalizacja cytowań), czy tool-use działa na tokenie OAuth czy wymaga klucza API. Parser jest
+TOLERANCYJNY i izolowany w `responses_client.py` — łatwy do korekty po potwierdzeniu kształtu.
+
+**Pozostaje w M10 (następna iteracja):** **B4** (Q&A nad dokumentem inline — blok `document`
+w `to_input` + `validation.py`), **F5** (chip dokumentu w composerze + „Based on document"),
+**B5** (kolekcje/`file_search` — stretch).

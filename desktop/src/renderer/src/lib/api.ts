@@ -14,11 +14,29 @@ export interface ChatAttachment {
   text?: string // file text (kind === 'text')
 }
 
+/** A source returned by live search (M10-F2). Deduped by url. */
+export interface Citation {
+  url: string
+  title?: string
+}
+
+/** Tool/token usage for a turn (M10-F6, BYO-key cost transparency). */
+export interface ChatUsage {
+  tool_calls?: number
+  input_tokens?: number
+  output_tokens?: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   attachments?: ChatAttachment[]
+  citations?: Citation[] // live-search sources (assistant messages)
+  usage?: ChatUsage // tool calls + tokens for this turn (assistant messages)
 }
+
+/** Live-search mode (M10-F3): Auto = model decides, On = forced, Off = no tools. */
+export type SearchMode = 'auto' | 'on' | 'off'
 
 /** Część treści multimodalnej dla /chat/completions (tekst lub obraz). */
 export type ContentPart =
@@ -49,6 +67,8 @@ export interface SettingsResp {
   code_model: string
   system_prompt: string
   chat_temperature: number
+  chat_search_mode: SearchMode
+  chat_search_sources: string[]
   has_api_key: boolean
 }
 
@@ -65,6 +85,8 @@ export type SettingsPatch = Partial<{
   code_model: string
   system_prompt: string
   chat_temperature: number
+  chat_search_mode: SearchMode
+  chat_search_sources: string[]
 }>
 
 /** Błąd HTTP z kodem statusu — pozwala wywołującym rozróżnić auth (401/403),
@@ -456,12 +478,24 @@ export interface ChatStreamPayload {
   model: string
   temperature: number
   system_prompt?: string
+  search_mode?: SearchMode // M10-B2: live-search mode (default off, server-side)
+  sources?: string[] // M10-B2: web/x/news (only meaningful when searching)
+}
+
+/** A live-search activity event from the server tool loop (M10-F1). */
+export interface ToolEvent {
+  tool: string // 'web_search' | 'x_search' | 'file_search'
+  status: string // 'in_progress' | 'searching' | 'completed' | ...
+  query?: string | null
 }
 
 export interface ChatStreamHandlers {
   onDelta: (full: string) => void
   onDone: (full: string) => void
   onError: (err: string) => void
+  onTool?: (ev: ToolEvent) => void // M10-F1: search activity indicator
+  onCitations?: (citations: Citation[]) => void // M10-F2: clickable sources
+  onUsage?: (usage: ChatUsage) => void // M10-F6: cost/usage badge
 }
 
 /** Otwiera WS /chat/stream, wysyła jedną turę i strumieniuje odpowiedź. */
@@ -478,7 +512,18 @@ export function streamChat(
 
   ws.onopen = () => ws.send(JSON.stringify({ type: 'chat', ...payload }))
   ws.onmessage = (ev) => {
-    let m: { type?: string; delta?: string; full?: string; error?: string }
+    let m: {
+      type?: string
+      delta?: string
+      full?: string
+      error?: string
+      tool?: string
+      status?: string
+      query?: string | null
+      citations?: Citation[]
+      usage?: ChatUsage
+      tool_calls?: number
+    }
     try {
       m = JSON.parse(ev.data as string)
     } catch {
@@ -487,6 +532,13 @@ export function streamChat(
     if (m.type === 'delta') {
       acc += m.delta ?? ''
       handlers.onDelta(acc)
+    } else if (m.type === 'tool_call') {
+      // M10-F1: server-side live-search activity (web_search/x_search).
+      handlers.onTool?.({ tool: m.tool ?? '', status: m.status ?? '', query: m.query })
+    } else if (m.type === 'citations') {
+      handlers.onCitations?.(m.citations ?? [])
+    } else if (m.type === 'usage') {
+      handlers.onUsage?.({ ...(m.usage ?? {}), tool_calls: m.tool_calls ?? m.usage?.tool_calls })
     } else if (m.type === 'done') {
       finished = true
       handlers.onDone(m.full ?? acc)
