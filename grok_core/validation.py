@@ -20,6 +20,7 @@ MAX_VIDEO_URI = 64 * 1024 * 1024   # data-URI wideo (znaki)
 MAX_TTS_TEXT = 8000        # długość tekstu do TTS
 MAX_STT_B64 = 30 * 1024 * 1024     # ~22 MB audio w base64 (znaki)
 MAX_DOCUMENT_URI = 48 * 1024 * 1024  # data-URI dokumentu (PDF/arkusz) w base64 (znaki) — M10-B4
+MAX_COLLECTION_FILE_BYTES = 32 * 1024 * 1024  # surowy upload dokumentu do kolekcji — M10-B5
 
 # Historia/artefakty huba (M9-B3) — limity zapytań GET /history /artifacts.
 MAX_HISTORY_QUERY = 256    # długość frazy szukania (q, FTS)

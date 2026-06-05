@@ -289,6 +289,134 @@ def _unit_responses_client(checks: list) -> None:
     checks.append(("responses: oversize document skipped (cap, no crash)", over == []))
 
 
+def _unit_collections(checks: list) -> None:
+    """M10-B5: kolekcje (file_search) — klient vector store (mock HTTP xAI), Backend
+    (upload→store→file record, current_vs, list, remove) i trasy /collections. Bez
+    sieci: `collections_client.requests` podmieniony; magazyn + ustawienia → temp."""
+    import base64
+    import tempfile
+    import types
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+    from fastapi import HTTPException  # noqa: E402
+    from grok_core import collections_client as cc  # noqa: E402
+    import grok_core.history_store as HS  # noqa: E402
+    from grok_core.history_store import HistoryStore  # noqa: E402
+    from grok_core.routes import collections as coll_route  # noqa: E402
+    from grok_core.state import Backend  # noqa: E402
+
+    calls = {"upload": 0, "create": 0, "attach": 0, "delete": 0}
+
+    class _Resp:
+        encoding = "utf-8"
+
+        def __init__(self, body):
+            self._b = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._b
+
+    def _post(url, **kw):
+        if "/vector_stores/" in url and url.endswith("/files"):
+            calls["attach"] += 1
+            return _Resp({"id": "vsf_X"})
+        if url.endswith("/vector_stores"):
+            calls["create"] += 1
+            return _Resp({"id": "vs_X"})
+        if url.endswith("/files"):
+            calls["upload"] += 1
+            return _Resp({"id": "file_X"})
+        return _Resp({})
+
+    def _delete(url, **kw):
+        calls["delete"] += 1
+        return _Resp({})
+
+    with tempfile.TemporaryDirectory() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        prev_store = HS._default_store
+        prev_settings = config.SETTINGS_FILE
+        orig_req = cc.requests
+        HS._default_store = store
+        config.SETTINGS_FILE = Path(d) / "grok_settings.json"
+        cc.requests = types.SimpleNamespace(post=_post, delete=_delete)
+        try:
+            b = Backend.__new__(Backend)  # bez __init__ (bez I/O / sieci)
+            b.get_api_key = lambda: "k"
+
+            # bez aktywnego projektu → upload ValueError (kolekcje są per projekt)
+            no_proj = False
+            try:
+                b.collection_upload(b"x", "a.pdf")
+            except ValueError:
+                no_proj = True
+            checks.append(("collections: upload without project -> ValueError", no_proj))
+
+            proj = store.add_project(name="Proj")
+            b.current_project_id = proj.id
+
+            cf = b.collection_upload(b"PDFBYTES", "report.pdf")
+            checks.append(("collections: 1st upload creates store + file + attach",
+                           calls == {"upload": 1, "create": 1, "attach": 1, "delete": 0}
+                           and cf.file_id == "file_X" and cf.vector_store_id == "vs_X"))
+            checks.append(("collections: current_vector_store_id after upload",
+                           b.current_vector_store_id() == "vs_X"))
+
+            b.collection_upload(b"MORE", "notes.pdf")
+            checks.append(("collections: 2nd upload reuses store (no new create)",
+                           calls["create"] == 1 and calls["upload"] == 2 and calls["attach"] == 2))
+            checks.append(("collections: list files (2)", len(b.collection_files()) == 2))
+
+            # trasa GET /collections
+            r = coll_route.list_collection(b=b)
+            checks.append(("/collections list shape",
+                           isinstance(r.get("files"), list) and len(r["files"]) == 2
+                           and r.get("has_collection") is True))
+
+            # trasa POST /collections/files (data-URI w JSON)
+            data_uri = "data:application/pdf;base64," + base64.b64encode(b"PDF").decode()
+            rr = coll_route.upload_collection_file(
+                coll_route.UploadDocReq(name="t.pdf", data=data_uri), b=b)
+            checks.append(("/collections upload (data-URI) ok",
+                           rr["file"]["name"] == "t.pdf" and len(b.collection_files()) == 3))
+
+            # remove (xAI delete + rekord)
+            ok = b.collection_remove(cf.id)
+            checks.append(("collections: remove file (xAI delete + record)",
+                           ok and calls["delete"] == 1 and len(b.collection_files()) == 2))
+
+            # trasa upload bez aktywnego projektu → 400
+            b.current_project_id = None
+            r400 = False
+            try:
+                coll_route.upload_collection_file(
+                    coll_route.UploadDocReq(name="x.pdf", data=data_uri), b=b)
+            except HTTPException as e:
+                r400 = e.status_code == 400
+            checks.append(("/collections upload without project -> 400", r400))
+
+            # walidacja: nie-data-URI odrzucone (Pydantic)
+            from pydantic import ValidationError  # noqa: E402
+            bad = False
+            try:
+                coll_route.UploadDocReq(name="x", data="http://evil/x.pdf")
+            except ValidationError:
+                bad = True
+            checks.append(("/collections upload non-data-URI rejected", bad))
+        except Exception as exc:  # noqa: BLE001
+            checks.append((f"collections: scenario ran ({exc})", False))
+        finally:
+            HS._default_store = prev_store
+            config.SETTINGS_FILE = prev_settings
+            cc.requests = orig_req
+            store.close()
+
+
 def _unit_chat_bridge(checks: list) -> None:
     """M10/P1-3: most czatu na **Responses API** — delty przyrostowe, done z full,
     tool_call + citations (live search), single-flight, fallback na legacy, gating
@@ -329,13 +457,14 @@ def _unit_chat_bridge(checks: list) -> None:
             await self._wait_then_disconnect()
             raise WebSocketDisconnect(code=1000)
 
-    def _backend(legacy_fn=None):
+    def _backend(legacy_fn=None, vs=None):
         api = _types.SimpleNamespace(
             chat_completion_stream=legacy_fn or (lambda *a, **k: ""),
             chat_completion=lambda *a, **k: "")
         return _types.SimpleNamespace(
             api=api, read_settings=lambda: {},
-            get_api_key=lambda: "k", record_event=lambda **k: None)
+            get_api_key=lambda: "k", record_event=lambda **k: None,
+            current_vector_store_id=lambda: vs)  # M10-B5: kolekcja projektu
 
     async def _run(frames, backend, *, terminal=("done", "error")):
         sent: list = []
@@ -440,6 +569,37 @@ def _unit_chat_bridge(checks: list) -> None:
                        bool(errs) and "grok-4" in (errs[0].get("error") or "") and not dones))
     except Exception as exc:  # noqa: BLE001
         checks.append((f"chat bridge: vision gating scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 4b: file_search dołączone dla kolekcji projektu (B5) ---
+    cap_tools: list = []
+
+    def stub_capture(messages, **kw):
+        cap_tools.append(kw.get("tools"))
+        kw["on_delta"]("ok", "ok")
+        return {"text": "ok", "citations": [], "usage": {}, "tool_calls": 0}
+
+    try:
+        rc.stream_response = stub_capture
+        # grok-4 + projekt z kolekcją + web-search OFF → tools zawiera file_search.
+        asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "q"}],
+                         "model": "grok-4.3", "search_mode": "off"})],
+            _backend(vs="vs_1")))
+        fs_on = any(t and any(x.get("type") == "file_search" for x in t) for t in cap_tools)
+        checks.append(("chat bridge: file_search attached for project collection (B5)", fs_on))
+
+        cap_tools.clear()
+        # model spoza grok-4 → file_search POMINIĘTY (wymaga grok-4).
+        asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "q"}],
+                         "model": "grok-3", "search_mode": "off"})],
+            _backend(vs="vs_1")))
+        checks.append(("chat bridge: file_search skipped on non-grok-4",
+                       all(not t for t in cap_tools)))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: file_search scenario ran ({exc})", False))
     finally:
         rc.stream_response = orig_stream
 
@@ -1238,6 +1398,14 @@ def main() -> int:
         s, _ = _post(base, "/projects/current", {"project_id": None})
         checks.append(("/projects/current (no token) == 401", s == 401))
 
+        # M10-B5: collections (project knowledge / file_search) — 200 + shape; token gate.
+        s, body = _get(base, "/collections", token)
+        checks.append(("/collections == 200 + shape",
+                       s == 200 and body is not None and isinstance(body.get("files"), list)
+                       and "has_collection" in body))
+        s, _ = _get(base, "/collections")
+        checks.append(("/collections (no token) == 401", s == 401))
+
         s, _ = _get(base, "/models")
         checks.append(("/models (no token) == 401", s == 401))
         s, _ = _get(base, "/models", "wrong")
@@ -1285,8 +1453,11 @@ def main() -> int:
         # M10-B1/B2/B3: Responses API client — UTF-8, live-search events, citations.
         _unit_responses_client(checks)
 
+        # M10-B5: collections (file_search) — vector-store client + Backend + routes.
+        _unit_collections(checks)
+
         # P1-3/M10: chat streaming bridge on Responses — deltas, tool_call, citations,
-        # legacy fallback, vision gating, single-flight.
+        # legacy fallback, vision gating, file_search attach, single-flight.
         _unit_chat_bridge(checks)
 
         # P1-8: route input validation (Pydantic constraints / data-URI checks).

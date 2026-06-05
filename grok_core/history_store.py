@@ -87,15 +87,35 @@ class HistoryEvent:
 class Project:
     """Projekt — wspólny scope historii/artefaktów dla wszystkich trybów (M9-B5).
     `root` wiąże projekt z workspace'em kodu (most z `recent_workspaces`); puste
-    `root` = projekt bez folderu (np. czysto czatowy)."""
+    `root` = projekt bez folderu (np. czysto czatowy). `vector_store_id` (M10-B5) =
+    kolekcja xAI z dokumentami projektu (file_search w wielu rozmowach)."""
     id: str
     name: str
     root: str = ""
     created_at: float = 0.0
+    vector_store_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "root": self.root,
-                "created_at": self.created_at}
+                "created_at": self.created_at, "vector_store_id": self.vector_store_id}
+
+
+@dataclass
+class CollectionFile:
+    """Dokument w kolekcji projektu (M10-B5): mapuje plik xAI (`file_id`) w vector
+    store (`vector_store_id`) na metadane do listy w UI."""
+    id: str
+    project_id: str
+    vector_store_id: str
+    file_id: str
+    name: str = ""
+    bytes: int = 0
+    created_at: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "project_id": self.project_id,
+                "vector_store_id": self.vector_store_id, "file_id": self.file_id,
+                "name": self.name, "bytes": self.bytes, "created_at": self.created_at}
 
 
 def _fts_query(q: str) -> str:
@@ -205,6 +225,16 @@ class HistoryStore:
                     created_at  REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_projects_root ON projects(root);
+                CREATE TABLE IF NOT EXISTS collection_files (
+                    id              TEXT PRIMARY KEY,
+                    project_id      TEXT NOT NULL,
+                    vector_store_id TEXT NOT NULL,
+                    file_id         TEXT NOT NULL,
+                    name            TEXT NOT NULL DEFAULT '',
+                    bytes           INTEGER NOT NULL DEFAULT 0,
+                    created_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_collfiles_project ON collection_files(project_id);
                 CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
                     text,
                     meta,
@@ -213,6 +243,11 @@ class HistoryStore:
                 );
                 """
             )
+            # M10-B5: dołóż kolumnę vector_store_id do istniejącej tabeli projects
+            # (migracja — CREATE TABLE IF NOT EXISTS nie dodaje kolumn do starej bazy).
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(projects)")}
+            if "vector_store_id" not in cols:
+                self._conn.execute("ALTER TABLE projects ADD COLUMN vector_store_id TEXT")
 
     # --- artefakty ------------------------------------------------------------
 
@@ -361,6 +396,55 @@ class HistoryStore:
             ).fetchall()
         return [self._row_to_project(r) for r in rows]
 
+    # --- kolekcje projektu (M10-B5: file_search) ------------------------------
+
+    def set_project_vector_store(self, project_id: str, vector_store_id: str) -> None:
+        """Przypisz (lub zmień) vector store kolekcji projektu."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE projects SET vector_store_id = ? WHERE id = ?",
+                (vector_store_id, project_id),
+            )
+
+    def add_collection_file(self, *, project_id: str, vector_store_id: str,
+                            file_id: str, name: str = "", bytes: int = 0,
+                            id: Optional[str] = None,
+                            created_at: Optional[float] = None) -> CollectionFile:
+        cf = CollectionFile(
+            id=id or uuid.uuid4().hex, project_id=project_id,
+            vector_store_id=vector_store_id, file_id=file_id, name=name,
+            bytes=int(bytes or 0),
+            created_at=time.time() if created_at is None else float(created_at),
+        )
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO collection_files "
+                "(id, project_id, vector_store_id, file_id, name, bytes, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (cf.id, cf.project_id, cf.vector_store_id, cf.file_id, cf.name,
+                 cf.bytes, cf.created_at),
+            )
+        return cf
+
+    def list_collection_files(self, project_id: str) -> list[CollectionFile]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM collection_files WHERE project_id = ? ORDER BY created_at DESC",
+                (project_id,),
+            ).fetchall()
+        return [self._row_to_collection_file(r) for r in rows]
+
+    def get_collection_file(self, file_row_id: str) -> Optional[CollectionFile]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM collection_files WHERE id = ?", (file_row_id,)
+            ).fetchone()
+        return self._row_to_collection_file(row) if row else None
+
+    def remove_collection_file(self, file_row_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM collection_files WHERE id = ?", (file_row_id,))
+
     # --- helpery --------------------------------------------------------------
 
     @staticmethod
@@ -403,8 +487,18 @@ class HistoryStore:
 
     @staticmethod
     def _row_to_project(row: sqlite3.Row) -> Project:
+        keys = row.keys()
         return Project(id=row["id"], name=row["name"], root=row["root"],
-                       created_at=row["created_at"])
+                       created_at=row["created_at"],
+                       vector_store_id=row["vector_store_id"] if "vector_store_id" in keys else None)
+
+    @staticmethod
+    def _row_to_collection_file(row: sqlite3.Row) -> CollectionFile:
+        return CollectionFile(
+            id=row["id"], project_id=row["project_id"],
+            vector_store_id=row["vector_store_id"], file_id=row["file_id"],
+            name=row["name"], bytes=row["bytes"], created_at=row["created_at"],
+        )
 
     def close(self) -> None:
         with self._lock:

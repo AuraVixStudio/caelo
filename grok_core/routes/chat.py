@@ -35,7 +35,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import config  # type: ignore
 
-from grok_core import responses_client
+from grok_core import collections_client, responses_client
 from grok_core.routes._ws import WsStream
 from grok_core.state import ws_authorized
 
@@ -100,7 +100,16 @@ async def chat_stream(ws: WebSocket) -> None:
             stop = threading.Event()        # P1-3: stop_event PER-REQUEST
             current["stop"] = stop
             got = {"any": False}
-            tools = responses_client.build_search_tools(search_mode, sources)
+            tools = list(responses_client.build_search_tools(search_mode, sources) or [])
+            # M10-B5: file_search nad kolekcją aktywnego projektu (grok-4) — niezależnie
+            # od web-searcha (to wiedza usera, nie web). Dołączane tylko gdy kolekcja ma
+            # pliki (`current_vector_store_id` → None gdy pusta) i model to grok-4.
+            if _is_grok4(model):
+                vs_id = backend.current_vector_store_id()
+                fs_tool = collections_client.file_search_tool([vs_id]) if vs_id else None
+                if fs_tool:
+                    tools.append(fs_tool)
+            tools = tools or None  # brak narzędzi → None (czysty czat z fallbackiem)
 
             def on_delta(delta: str, _full: str) -> None:
                 got["any"] = True

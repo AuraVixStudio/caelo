@@ -420,6 +420,38 @@ export const selectProject = (
 ): Promise<{ current_project_id: string | null; project: HubProject | null }> =>
   api(c, '/projects/current', { method: 'POST', body: JSON.stringify({ project_id: projectId }) })
 
+// --- Project collections (M10-B5): persistent knowledge / file_search ---
+export interface CollectionFile {
+  id: string
+  project_id: string
+  vector_store_id: string
+  file_id: string
+  name: string
+  bytes: number
+  created_at: number
+}
+
+export const listCollection = (
+  c: Conn
+): Promise<{ files: CollectionFile[]; project_id: string | null; has_collection: boolean }> =>
+  api(c, '/collections')
+
+/** Upload a document (data-URI) to the active project's collection. Indexing on the
+ *  xAI side can take a while, so give it a generous timeout. */
+export const uploadCollectionFile = (
+  c: Conn,
+  name: string,
+  data: string
+): Promise<{ file: CollectionFile }> =>
+  api(c, '/collections/files', {
+    method: 'POST',
+    body: JSON.stringify({ name, data }),
+    timeoutMs: 180_000
+  })
+
+export const deleteCollectionFile = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/collections/files/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
 // --- Workspace / files / git (mini-IDE) ---
 export interface TreeEntry {
   name: string

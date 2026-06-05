@@ -42,6 +42,7 @@ import { useConversations } from '../lib/useConversations'
 import { useDictation } from '../lib/useDictation'
 import { useTts } from '../lib/useTts'
 import { AttachButton, AttachmentChips } from './Attachments'
+import { KnowledgePopover } from './KnowledgePopover'
 import { titleFromText } from '../lib/storage'
 import { cn } from '../lib/cn'
 import { Markdown } from './Markdown'
@@ -517,6 +518,7 @@ export function ChatView({ conn }: { conn: Conn }) {
             <ModelSelect value={model} models={models} onChange={onModelChange} />
           </div>
           <div className="ml-auto flex items-center gap-1">
+            <KnowledgePopover conn={conn} />
             <Popover
               align="end"
               label="Live search"

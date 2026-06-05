@@ -202,6 +202,56 @@ class Backend:
         except Exception:
             log.warning("Could not persist current project", exc_info=True)
 
+    # --- kolekcje projektu (M10-B5: trwała wiedza / file_search) ---------------
+    def collection_upload(self, data: bytes, filename: str):
+        """Wgraj dokument do kolekcji AKTYWNEGO projektu (vector store xAI). Tworzy
+        vector store leniwie przy pierwszym pliku. Zwraca rekord CollectionFile.
+        Brak aktywnego projektu → ValueError (kolekcje są per projekt)."""
+        from grok_core import collections_client
+
+        pid = self.current_project_id
+        if not pid:
+            raise ValueError("No active project — select or create one first")
+        proj = self.history_store.get_project(pid)
+        if proj is None:
+            raise ValueError("Unknown project")
+        vs_id = proj.vector_store_id
+        if not vs_id:
+            vs_id = collections_client.create_vector_store(
+                proj.name or "Project", self.get_api_key)
+            self.history_store.set_project_vector_store(pid, vs_id)
+        file_id = collections_client.upload_file(data, filename, self.get_api_key)
+        collections_client.add_file_to_store(vs_id, file_id, self.get_api_key)
+        return self.history_store.add_collection_file(
+            project_id=pid, vector_store_id=vs_id, file_id=file_id,
+            name=filename, bytes=len(data or b""))
+
+    def collection_files(self):
+        """Pliki w kolekcji aktywnego projektu (pusta lista bez projektu)."""
+        pid = self.current_project_id
+        return self.history_store.list_collection_files(pid) if pid else []
+
+    def collection_remove(self, file_row_id: str) -> bool:
+        """Usuń dokument z kolekcji (xAI + rekord). False, gdy nie znaleziono."""
+        from grok_core import collections_client
+
+        cf = self.history_store.get_collection_file(file_row_id)
+        if cf is None:
+            return False
+        collections_client.delete_file_from_store(
+            cf.vector_store_id, cf.file_id, self.get_api_key)
+        self.history_store.remove_collection_file(file_row_id)
+        return True
+
+    def current_vector_store_id(self):
+        """Vector store aktywnego projektu — TYLKO gdy ma pliki (inaczej None, by nie
+        dołączać pustego/płatnego file_search). Używane przez `/chat/stream` (M10-B5)."""
+        pid = self.current_project_id
+        if not pid:
+            return None
+        files = self.history_store.list_collection_files(pid)
+        return files[0].vector_store_id if files else None
+
     @staticmethod
     def _media_kind(legacy_mode: str, ext: str):
         """Zmapuj legacy tryb zapisu ('generate'/'edit'/'video'/'tts') + rozszerzenie
