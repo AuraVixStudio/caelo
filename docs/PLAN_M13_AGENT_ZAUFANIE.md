@@ -8,6 +8,10 @@
 > To „table stakes" dla parytetu z Claude Code/Codex — nie pełna platforma, tylko zaufanie.
 > Tagi: **[P0]** krytyczne, **[P1]** ważne. Wysiłek: S≈dni, M≈1–2 tyg., L≈3–4 tyg.
 
+> **STATUS (2026-06-05): ✅ B1–B5 + F1–F4 ZROBIONE** (commit `e8956bf`), zweryfikowane bez xAI
+> (`agent_selfcheck` 114, `api_smoke` 152, typecheck ✅). **⬜ pozostaje F5** (diff per-hunk).
+> Szczegóły realizacji w §6; weryfikacja na żywo (realne xAI) — na maszynie usera.
+
 ---
 
 ## 0. Na czym budujemy (masz już 80% fundamentu)
@@ -40,7 +44,7 @@
 
 ## 1. Backend (`grok_core/agent`)
 
-### M13-B1 [P0] Generowanie diffa przy mutacji  — M
+### ✅ M13-B1 [P0] Generowanie diffa przy mutacji  — M  — ZROBIONE (`e8956bf`)
 - **Cel:** każda mutacja pliku niesie czytelny, ujednolicony diff do zatwierdzenia.
 - **Zakres:** w `tools.py` (lub helper `agent/diff.py`) przed zastosowaniem `write_file`/`edit_file`
   policz unified diff (stara treść vs nowa). Nowy plik → diff jako same dodania; (ew. usunięcie →
@@ -51,7 +55,7 @@
 - **Selfcheck:** `agent_selfcheck.py` — diff generowany dla `write`/`edit`, poprawny dla nowego pliku,
   binarny → znacznik zamiast diffa.
 
-### M13-B2 [P0] Tryb planowania (plan mode)  — M
+### ✅ M13-B2 [P0] Tryb planowania (plan mode)  — M  — ZROBIONE (`e8956bf`; rozszerzone do 4 trybów: ask/accept-edits/plan/bypass)
 - **Cel:** agent najpierw proponuje plan, nic nie zmieniając.
 - **Zakres:** flaga sesji `plan` w `session.py` → dozwolone tylko narzędzia READONLY (reuse podziału);
   MUTATING odrzucane z czytelnym komunikatem („blocked in plan mode"). Agent zwraca plan (kroki).
@@ -61,7 +65,7 @@
 - **Selfcheck:** `agent_selfcheck` — MUTATING zablokowane w plan, dozwolone po przełączeniu;
   READONLY zawsze; plan nie tworzy checkpointu (bo nic nie zmienia).
 
-### M13-B3 [P0] Checkpointy + undo  — M
+### ✅ M13-B3 [P0] Checkpointy + undo  — M  — ZROBIONE (`e8956bf`)
 - **Cel:** jednym kliknięciem wrócić do stanu sprzed sesji.
 - **Zakres:** na starcie sesji utwórz checkpoint; przed pierwszą modyfikacją danej ścieżki kopiuj
   oryginał do `.grok/checkpoints/<session_id>/` + wpis w manifeście (ścieżka, hash, czy „utworzony").
@@ -72,7 +76,7 @@
 - **Selfcheck:** `agent_selfcheck` — snapshot-przed-zapisem, poprawność restore (treść + usunięcie
   utworzonych), odrzucenie ścieżek spoza sandboxa, sesja z `run_command` oznaczona „undo częściowy".
 
-### M13-B4 [P1] `GROK.md` — auto-pamięć projektu  — S
+### ✅ M13-B4 [P1] `GROK.md` — auto-pamięć projektu  — S  — ZROBIONE (`e8956bf`)
 - **Cel:** stałe reguły projektu zawsze w kontekście agenta (odpowiednik CLAUDE.md/AGENTS.md).
 - **Zakres:** na starcie sesji wczytaj `GROK.md` z (a) korzenia workspace i (b) globalnego `DATA_DIR`;
   wstrzyknij do system promptu (workspace dopisuje/nadpisuje globalny). UTF-8 + cap rozmiaru; brak
@@ -81,7 +85,7 @@
 - **Selfcheck:** `agent_selfcheck` — plik wczytany i wstrzyknięty, cap rozmiaru, brak pliku OK,
   workspace nadpisuje global.
 
-### M13-B5 [P1] Spójne API: diff w zatwierdzeniu + checkpoint/undo  — S/M
+### ✅ M13-B5 [P1] Spójne API: diff w zatwierdzeniu + checkpoint/undo  — S/M  — ZROBIONE (`e8956bf`)
 - **Cel:** front ma jednolite wejście do nowych funkcji przez WS i REST.
 - **Zakres:** żądanie zatwierdzenia (WS `/agent/stream`) niesie diff; REST `/permissions` analogicznie.
   Nowe trasy REST: `GET /agent/checkpoints`, `POST /agent/undo` (oraz event WS o utworzeniu checkpointu).
@@ -94,7 +98,7 @@
 
 ## 2. Frontend (`desktop/src/renderer`)
 
-### M13-F1 [P0] Modal zatwierdzenia z diffem  — L
+### ✅ M13-F1 [P0] Modal zatwierdzenia z diffem  — L  — ZROBIONE (`e8956bf`; accept/reject per plik, binarny obsłużony; per-hunk = F5)
 - **Cel:** „Review changes" — kolorowy diff przed zastosowaniem.
 - **Zakres:** rozbuduj istniejący UI zatwierdzenia (`PermissionGate` front) o render unified diff
   per plik z podświetleniem (**CodeMirror 6**, który już masz w `CodeEditor.tsx`); accept/reject
@@ -102,28 +106,28 @@
 - **DoD:** gdy agent chce edytować, modal pokazuje kolorowy diff; user akceptuje/odrzuca per plik.
 - **Test:** Vitest (`desktop/test/`) — parsowanie diffa + zaznaczanie plików (czyste utile).
 
-### M13-F2 [P0] Tryb planowania w UI  — M
+### ✅ M13-F2 [P0] Tryb planowania w UI  — M  — ZROBIONE (`e8956bf`; selektor 4 trybów jak „Mode" w Claude Code)
 - **Cel:** „Plan first" — zobacz plan zanim cokolwiek się zmieni.
 - **Zakres:** przełącznik „Plan first"; plan renderowany jako checklista kroków; przycisk
   „Approve & run" przełącza w wykonanie; widoczna informacja, że mutacje są w planie wyłączone.
 - **DoD:** włączenie Plan → agent zwraca plan → „Approve & run" go wykonuje.
 - **Test:** Vitest — maszyna stanów plan→execute.
 
-### M13-F3 [P0] Checkpointy + Undo w UI  — M
+### ✅ M13-F3 [P0] Checkpointy + Undo w UI  — M  — ZROBIONE (`e8956bf`)
 - **Cel:** widoczna oś checkpointów i jeden przycisk cofania.
 - **Zakres:** lista/oś checkpointów sesji; „Undo to checkpoint"; wizualne potwierdzenie
   przywróconych/usuniętych plików; baner „partial undo" dla sesji z `run_command`.
 - **DoD:** jedno kliknięcie przywraca stan; sesja z komendą jasno oznaczona jako częściowo cofalna.
 - **Test:** Vitest — stan listy checkpointów.
 
-### M13-F4 [P1] Edytor `GROK.md`  — S
+### ✅ M13-F4 [P1] Edytor `GROK.md`  — S  — ZROBIONE (`e8956bf`; otwierany w istniejącym edytorze CodeMirror)
 - **Cel:** wygodna edycja reguł projektu.
 - **Zakres:** podgląd/edycja `GROK.md` workspace (CodeMirror); zapis przez backend; podpowiedź, że
   zmiany wejdą od następnej sesji agenta.
 - **DoD:** edycja + zapis → następna sesja podnosi reguły.
 - **Test:** Vitest — minimalny (stan edytora/zapisu).
 
-### M13-F5 [P1] Diff per hunk  — S/M
+### ⬜ M13-F5 [P1] Diff per hunk  — S/M  — TODO (odłożone — wymaga aplikowania częściowego patcha w backendzie)
 - **Cel:** ziarnistość — akceptuj część zmian w pliku, odrzuć resztę.
 - **Zakres:** rozbuduj F1 z per-plik na per-hunk (zaznacz hunki → tylko zaznaczone trafiają do patcha).
 - **DoD:** akceptuję część hunków, odrzucam resztę; zastosowane są tylko zaakceptowane.
@@ -134,11 +138,11 @@
 ## 3. Kolejność i zależności
 
 ```
-B1 (diff)  ──►  F1 (modal z diffem)  ──►  F5 (per-hunk)
-B2 (plan)  ──►  F2 (plan w UI)
-B3 (checkpoint/undo)  ──►  F3 (undo w UI)
-B4 (GROK.md)  ──►  F4 (edytor)         [niezależne, tanie — można wpleść kiedykolwiek]
-B5 (spójne API)  ── spina B1/B3 z WS+REST
+✅ B1 (diff)  ──►  ✅ F1 (modal z diffem)  ──►  ⬜ F5 (per-hunk)
+✅ B2 (plan)  ──►  ✅ F2 (plan w UI → selektor 4 trybów)
+✅ B3 (checkpoint/undo)  ──►  ✅ F3 (undo w UI)
+✅ B4 (GROK.md)  ──►  ✅ F4 (edytor)
+✅ B5 (spójne API)  ── spina B1/B3 z WS+REST
 ```
 
 - **Fundament + pierwszy „wow":** `B1→F1` (zatwierdzanie z diffem) i `B3→F3` (undo) — to one
@@ -149,14 +153,17 @@ B5 (spójne API)  ── spina B1/B3 z WS+REST
 
 ## 4. Definicja ukończenia M13 (całość)
 
-1. Każda edycja agenta pokazuje **przeglądalny, kolorowy diff** przed zastosowaniem; accept/reject
-   per plik (docelowo per hunk).
-2. **Tryb planowania:** agent proponuje plan tylko z narzędziami READONLY; mutacje wyłączone do akceptacji.
-3. **Undo** jednym kliknięciem przywraca pliki (i usuwa utworzone) do stanu sprzed sesji, sandbox-safe;
+> **Status: ✅ spełnione (poza per-hunk = F5).** Zweryfikowane bez xAI; weryfikacja na żywo u usera.
+
+1. ✅ Każda edycja agenta pokazuje **przeglądalny, kolorowy diff** przed zastosowaniem; accept/reject
+   per plik (⬜ per hunk = F5, odłożone).
+2. ✅ **Tryb planowania:** agent proponuje plan tylko z narzędziami READONLY; mutacje wyłączone do
+   akceptacji (rozszerzone do 4 trybów: ask/accept-edits/plan/bypass).
+3. ✅ **Undo** jednym kliknięciem przywraca pliki (i usuwa utworzone) do stanu sprzed sesji, sandbox-safe;
    sesje z `run_command` uczciwie oznaczone jako „undo częściowy".
-4. **`GROK.md`** z workspace jest auto-wczytywany do kontekstu agenta.
-5. WS i REST spójne; nowe trasy **fail-closed**; manifest zapisywany atomowo; `agent_selfcheck.py`
-   rozszerzony; **81 dotychczasowych asercji M1/M5–M6 nadal przechodzi** (zero regresji hardeningu).
+4. ✅ **`GROK.md`** z workspace jest auto-wczytywany do kontekstu agenta.
+5. ✅ WS i REST spójne; nowe trasy **fail-closed**; manifest zapisywany atomowo; `agent_selfcheck.py`
+   rozszerzony (**81 → 114**, zero regresji hardeningu); `api_smoke.py` **141 → 152**.
 
 ## 5. Otwarte pytania techniczne
 

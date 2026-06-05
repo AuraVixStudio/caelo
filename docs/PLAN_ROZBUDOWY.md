@@ -6,6 +6,10 @@
 >
 > **Zmiana vs v1:** agent kodujący NIE jest już rdzeniem — jest jednym z pięciu trybów.
 > Środek ciężkości przesunięty na **spójność między trybami** i **jakość każdego trybu**.
+>
+> **Postęp (2026-06-05):** ✅ **M9** (szkielet huba) · ✅ **M10** (czat: Responses API + live search) ·
+> ✅ **M13** (agent: zaufanie — diffy/plan/checkpointy/GROK.md; ⬜ tylko per-hunk F5). Następne: **M14**
+> (MCP) lub dokończenie F5. Rozpisy: `PLAN_M9_SZKIELET.md`, `PLAN_M10_CZAT.md`, `PLAN_M13_AGENT_ZAUFANIE.md`.
 
 ---
 
@@ -91,7 +95,7 @@ Plaster pionowy = UI + backend + asercje w `agent_selfcheck.py`. S≈dni, M≈1�
 
 ### FILAR 1 — najpierw kręgosłup
 
-**M9 — Szkielet huba**  *(KAMIEŃ WĘGIELNY — to definiuje „all-in-one")*
+**✅ M9 — Szkielet huba**  *(KAMIEŃ WĘGIELNY — to definiuje „all-in-one")* — **KOMPLETNY**
 - **Magistrala kontekstu (M).** Wynik jednego trybu staje się wejściem innego: wygenerowany
   obraz → „opisz w czacie" / „użyj w agencie"; fragment kodu → „wygeneruj diagram". (Na screenie
   już robisz „Opisz obraz" z załącznikiem — usystematyzuj to jako wzorzec „Wyślij do…").
@@ -105,7 +109,7 @@ Plaster pionowy = UI + backend + asercje w `agent_selfcheck.py`. S≈dni, M≈1�
 
 ### FILAR 2 — doskonałość trybów
 
-**M10 — Czat na poziomie**  *(najtańszy duży skok dzięki narzędziom wbudowanym)*
+**✅ M10 — Czat na poziomie**  *(najtańszy duży skok dzięki narzędziom wbudowanym)* — **KOMPLETNY**
 - **Live search (S/M).** Wepnij `web_search()` + `x_search()` — masz je w API za darmo. Pokaż
   źródła/cytowania w UI. To Twój wyróżnik i materiał marketingowy.
 - **Wizja na wejściu (S).** Wrzuć obraz do czatu → Grok go czyta (masz już moduł Image; tu chodzi
@@ -119,11 +123,14 @@ Plaster pionowy = UI + backend + asercje w `agent_selfcheck.py`. S≈dni, M≈1�
 **M12 — Głos**
 - **Tryb czasu rzeczywistego (S/M).** Dyktowanie/rozmowa sterująca dowolnym trybem (masz moduł Voice).
 
-**M13 — Agent: zaufanie**  *(table stakes dla zakładki Code)*
-- **Przeglądalne diffy (L).** Każda mutacja → diff w modalu `PermissionGate`: accept/reject per plik → per hunk.
-- **Tryb planowania (M).** Tylko narzędzia READONLY → plan → akceptacja → wykonanie (masz podział tooli).
-- **Checkpointy / undo (M).** Snapshot przed sesją (cieniowy git `.grok/` lub `git stash`) + „Cofnij".
-- **`GROK.md` (S).** Auto-pamięć projektu w system prompcie agenta.
+**✅ M13 — Agent: zaufanie**  *(table stakes dla zakładki Code)* — **KOMPLETNY** (poza per-hunk; commit `e8956bf`)
+- ✅ **Przeglądalne diffy (L).** Każda mutacja → diff w karcie zatwierdzenia: accept/reject per plik
+  (binarny → znacznik „binary"). ⬜ **per hunk = F5** (odłożone).
+- ✅ **Tryb planowania (M).** Tylko narzędzia READONLY → plan → akceptacja → wykonanie. Rozszerzone do
+  **4 trybów** (ask/accept-edits/plan/bypass) — selektor „Mode" jak w Claude Code.
+- ✅ **Checkpointy / undo (M).** Snapshot kopii plików do `.grok/checkpoints/<sid>/` (bez zależności od
+  gita) + „Undo to checkpoint" / „Undo all"; `run_command` → „partial undo".
+- ✅ **`GROK.md` (S).** Auto-pamięć projektu (workspace + global) w system prompcie agenta + edytor w UI.
 
 ### FILAR 3 — otwarta platforma
 
