@@ -1,4 +1,4 @@
-# Dokumentacja — Grok Desktop
+# Dokumentacja — Caelo
 
 Indeks dokumentów projektu. Główny opis i szybki start: [`../README.md`](../README.md).
 Instrukcje dla asystenta/architektura w pigułce: [`../CLAUDE.md`](../CLAUDE.md).
@@ -18,7 +18,7 @@ Instrukcje dla asystenta/architektura w pigułce: [`../CLAUDE.md`](../CLAUDE.md)
 
 ## Powiązane README (poza `docs/`)
 
-- [`../grok_core/README.md`](../grok_core/README.md) — backend: instalacja venv, **lista endpointów**, self-checki.
+- [`../caelo_core/README.md`](../caelo_core/README.md) — backend: instalacja venv, **lista endpointów**, self-checki.
 - [`../desktop/README.md`](../desktop/README.md) — frontend: skrypty, struktura, wybór interpretera Pythona.
 
 > Legacy customtkinter (dawniej `archive/`) został usunięty z repo (kopia zewnętrzna) — domknięcie Fazy 8.

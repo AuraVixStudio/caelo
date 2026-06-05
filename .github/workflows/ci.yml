@@ -1,8 +1,10 @@
 name: CI
 
-# P3-1: ciągła integracja — uruchamia backendowe self-checki (3 z 4 skryptów;
-# sidecar_smoke.py wymaga spakowanego .exe z PyInstallera, więc biegnie dopiero
-# po `npm run pack:sidecar` na maszynie wydającej, nie tutaj) oraz typecheck frontu.
+# Ciągła integracja — każdy PR przechodzi te same bramki co utrzymujący:
+#   • secrets   — skan sekretów na CAŁEJ historii (gitleaks, M15-2),
+#   • backend   — wszystkie self-checki Pythona (M15-3; sidecar_smoke wymaga
+#                 spakowanego .exe, więc biegnie dopiero przy wydaniu, nie tutaj),
+#   • frontend  — typecheck + ESLint + Vitest (M15-3).
 on:
   push:
     branches: [main]
@@ -15,10 +17,30 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  secrets:
+    # M15-2: ostatnia bariera przed commitem klucza xAI / tokenu OAuth (BYO-key).
+    # Skanuje pełną historię (fetch-depth: 0); konfiguracja w .gitleaks.toml.
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # pełna historia dla `gitleaks detect`
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # GITLEAKS_LICENSE jest wymagany tylko dla repozytoriów ORGANIZACJI;
+          # dla repo osobistego / publicznego skan jest darmowy.
+
   backend:
-    # Aplikacja jest Windows-only (cmd.exe, pywinpty, tree-kill `taskkill`), a
-    # self-checki spawnują sidecar i weryfikują zachowania zależne od platformy —
+    # Aplikacja celuje głównie w Windows (cmd.exe, pywinpty, tree-kill `taskkill`),
+    # a self-checki spawnują sidecar i weryfikują zachowania zależne od platformy —
     # więc CI backendu biegnie na Windows, tak jak środowisko docelowe.
     name: Backend self-checks (Windows)
     runs-on: windows-latest
@@ -34,31 +56,42 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: grok_core/requirements.txt
+          cache-dependency-path: caelo_core/requirements.txt
 
       - name: Install backend dependencies
-        run: python -m pip install --upgrade pip && pip install -r grok_core/requirements.txt
+        run: python -m pip install --upgrade pip && pip install -r caelo_core/requirements.txt
 
       # Każdy skrypt to samodzielny zestaw asercji (kod wyjścia != 0 => fail).
-      # Uruchamiane z korzenia repo (sidecar startowany jako `python -m grok_core`).
+      # Uruchamiane z korzenia repo (sidecar startowany jako `python -m caelo_core`).
       - name: Handshake + /health + token auth
-        run: python grok_core/tools/handshake_check.py
+        run: python caelo_core/tools/handshake_check.py
 
       - name: REST + WS routes + token/CORS + unit logic (api_smoke)
-        run: python grok_core/tools/api_smoke.py
+        run: python caelo_core/tools/api_smoke.py
 
       - name: Agent tools + loop + sandbox (agent_selfcheck)
-        run: python grok_core/tools/agent_selfcheck.py
+        run: python caelo_core/tools/agent_selfcheck.py
+
+      - name: Cross-platform PTY / tree-kill / paths (crossplatform_check)
+        run: python caelo_core/tools/crossplatform_check.py
+
+      - name: MCP client (mock stdio server)
+        run: python caelo_core/tools/mcp_check.py
+
+      - name: Generation queue lifecycle (genjobs_check)
+        run: python caelo_core/tools/genjobs_check.py
+
+      - name: SQLite hub backbone (history_check)
+        run: python caelo_core/tools/history_check.py
 
   frontend:
-    name: Frontend typecheck
+    name: Frontend typecheck + lint + tests
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: desktop
     env:
-      # Typecheck nie potrzebuje binarki Electrona — pomijamy jej pobieranie
-      # (szybciej, bez flaky-sieci).
+      # Typecheck/lint/test nie potrzebują binarki Electrona — pomijamy jej pobieranie.
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
@@ -75,3 +108,17 @@ jobs:
 
       - name: Typecheck (tsc — node + web)
         run: npm run typecheck
+
+      # NOTE (M15-3 / M8): eslint+vitest są skonfigurowane i mają testy, ale ich
+      # devDeps nie są jeszcze w package.json/lock (dodanie wymaga `npm install -D`
+      # na maszynie z siecią, by zaktualizować package-lock — inaczej `npm ci`
+      # powyżej by padło). Do tego czasu dociągamy toolchain efemerycznie (bez
+      # zapisu do lockfile), żeby PR i tak przechodził przez lint i testy.
+      - name: Install lint/test toolchain (ephemeral)
+        run: npm install --no-save --no-package-lock eslint@^9 typescript-eslint@^8 eslint-plugin-react-hooks@^5 globals@^16 vitest@^3
+
+      - name: Lint (ESLint — react-hooks)
+        run: npm run lint
+
+      - name: Unit tests (Vitest)
+        run: npm test

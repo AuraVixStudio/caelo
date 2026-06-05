@@ -3,11 +3,15 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { ThemeProvider } from './lib/theme'
+import { migrateLegacyStorage } from './lib/migrateStorage'
 import './index.css'
 
 async function boot(): Promise<void> {
+  // M15: przepisz klucze localStorage sprzed rebrandu ('grok.*' → 'caelo.*').
+  migrateLegacyStorage()
+
   // Podgląd UI w przeglądarce (bez Electrona): podstaw atrapę mostka. Tylko DEV.
-  if (import.meta.env.DEV && !window.grok) {
+  if (import.meta.env.DEV && !window.caelo) {
     const { installBrowserMock } = await import('./lib/devMock')
     installBrowserMock()
   }

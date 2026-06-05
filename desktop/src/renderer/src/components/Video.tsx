@@ -189,7 +189,7 @@ export function Video({ conn }: { conn: Conn }) {
   return (
     <Page
       title="Video"
-      subtitle="Generate, edit, or extend short videos with Grok. Every job queues and lands in your gallery."
+      subtitle="Generate, edit, or extend short videos with Caelo. Every job queues and lands in your gallery."
     >
       {/* Mode toggle */}
       <div className="mb-4 inline-flex rounded-lg border border-border bg-surface-2 p-0.5">

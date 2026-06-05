@@ -1,4 +1,4 @@
-// Statyczne listy opcji mediów — odwzorowane z grok_core/config.py.
+// Statyczne listy opcji mediów — odwzorowane z caelo_core/config.py.
 export const ASPECT_RATIOS = [
   'auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3',
   '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20'
@@ -10,7 +10,7 @@ export const RESOLUTIONS = ['1k', '2k']
 export const IMAGE_VARIANTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 // Fallback listy modeli obrazu, gdy /models jeszcze nie odpowiedziało
-// (źródło prawdy: grok_core/config.py -> IMAGE_MODELS).
+// (źródło prawdy: caelo_core/config.py -> IMAGE_MODELS).
 export const IMAGE_MODELS = ['grok-imagine-image', 'grok-imagine-image-quality']
 
 // Maks. liczba obrazów referencyjnych w edycji (limit API).
@@ -30,7 +30,7 @@ export const EXTEND_DURATION_MAX = 10
 export const EXTEND_DURATION_DEFAULT = 6
 
 // --- Voice ---
-// Pięć wbudowanych głosów Grok (źródło prawdy: grok_core/config.py -> VOICE_VOICES).
+// Pięć wbudowanych głosów Grok (źródło prawdy: caelo_core/config.py -> VOICE_VOICES).
 export const VOICES = [
   { id: 'eve', label: 'Eve · energetic' },
   { id: 'ara', label: 'Ara · warm' },
@@ -40,7 +40,7 @@ export const VOICES = [
 ]
 export const DEFAULT_VOICE = 'eve'
 
-// M12-B5/F5: stawki kosztu audio — MIRROR grok_core/config.py (BYO-key). STT batch
+// M12-B5/F5: stawki kosztu audio — MIRROR caelo_core/config.py (BYO-key). STT batch
 // liczy backend z `duration`; STT-stream koszt liczy renderer z sekund mikrofonu.
 export const AUDIO_COST = {
   sttPerHourBatch: 0.1,

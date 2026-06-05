@@ -110,7 +110,7 @@ export function ArtifactCard({
       </div>
       <div className="flex flex-wrap items-center gap-1">
         {art.path ? (
-          <Button variant="outline" size="sm" onClick={() => window.grok.openPath(art.path)}>
+          <Button variant="outline" size="sm" onClick={() => window.caelo.openPath(art.path)}>
             Open
           </Button>
         ) : null}

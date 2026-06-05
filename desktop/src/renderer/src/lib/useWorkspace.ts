@@ -84,7 +84,7 @@ export function useWorkspace(conn: Conn): {
   }
 
   async function openFolder(): Promise<void> {
-    const picked = await window.grok.selectFolder()
+    const picked = await window.caelo.selectFolder()
     if (picked) await selectWorkspace(picked)
   }
 

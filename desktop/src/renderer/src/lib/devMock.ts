@@ -1,9 +1,9 @@
 import type { CoreConnection } from '../types'
 
 /**
- * DEV-only: atrapa mostka `window.grok`, gdy renderer działa w zwykłej przeglądarce
+ * DEV-only: atrapa mostka `window.caelo`, gdy renderer działa w zwykłej przeglądarce
  * (podgląd wyglądu UI bez Electrona). Importowana wyłącznie pod gałęzią
- * `import.meta.env.DEV && !window.grok`, więc nie trafia do produkcyjnego bundla
+ * `import.meta.env.DEV && !window.caelo`, więc nie trafia do produkcyjnego bundla
  * i nigdy nie nadpisuje prawdziwego mostka z preloadu Electrona.
  */
 export function installBrowserMock(): void {
@@ -14,7 +14,7 @@ export function installBrowserMock(): void {
     port: 9,
     version: 'preview'
   }
-  window.grok = {
+  window.caelo = {
     getCore: () => Promise.resolve(conn),
     onCoreStatus: () => () => undefined,
     selectFolder: () => Promise.resolve(null),

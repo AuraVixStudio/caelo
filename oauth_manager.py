@@ -156,7 +156,7 @@ class OAuthManager:
             "state": state,
             "nonce": nonce,
             "plan": "generic",
-            "referrer": "grok-desktop-app",
+            "referrer": "caelo-desktop-app",
         }
         url = OAUTH_AUTHORIZE_URL + "?" + urllib.parse.urlencode(params)
 

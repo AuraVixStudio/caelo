@@ -1,6 +1,7 @@
 // Klient WebSocket agenta kodowania (/agent/stream).
 // Utrzymuje jedno połączenie na sesję modułu Code; emituje zdarzenia do handlerów.
 
+import type { TeamReport } from './api'
 import type { Conn } from './api'
 
 /** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda / plik binarny /
@@ -19,11 +20,28 @@ export interface ApprovalDetail {
   qualified_name?: string // mcp__<server>__<tool>
   description?: string // opis narzędzia z serwera
   args?: Record<string, unknown> // proponowane argumenty wywołania
+  // M17-F3: atrybucja zatwierdzenia do subagenta-pytającego.
+  agent_id?: string
+  role?: string
+  task?: string
+}
+
+/** M17-B6: status pojedynczego subagenta w ramce cyklu życia. */
+export interface SubagentStatus {
+  agent_id: string
+  role: string
+  task: string
+  status: string // queued | running | done | failed | cancelled | timeout
+  summary: string
+  merge_id: string | null
+  files_changed: number
+  turns: number
+  tool_calls: number
 }
 
 /**
  * Ramki serwer→klient agenta (P2-7) — **discriminated union** po `type`, zgodny z
- * protokołem w `grok_core/routes/agent.py`. Zastępuje luźne `{type:string; [k]:unknown}`.
+ * protokołem w `caelo_core/routes/agent.py`. Zastępuje luźne `{type:string; [k]:unknown}`.
  */
 export type AgentEvent =
   | { type: 'workspace'; path: string }
@@ -37,6 +55,10 @@ export type AgentEvent =
   | { type: 'stopped' }
   | { type: 'done' }
   | { type: 'error'; error: string }
+  // M17 — zespół subagentów (multipleks po agent_id na tym samym WS):
+  | { type: 'subagent'; agent_id: string; role: string; task: string; event: AgentEvent }
+  | ({ type: 'subagent_status' } & SubagentStatus)
+  | { type: 'team_done'; report: TeamReport }
 
 function asString(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback
@@ -67,7 +89,15 @@ function parseDetail(v: unknown): ApprovalDetail | undefined {
   if (d.args !== null && typeof d.args === 'object' && !Array.isArray(d.args)) {
     out.args = d.args as Record<string, unknown>
   }
+  // M17-F3: atrybucja do subagenta.
+  if (typeof d.agent_id === 'string') out.agent_id = d.agent_id
+  if (typeof d.role === 'string') out.role = d.role
+  if (typeof d.task === 'string') out.task = d.task
   return out
+}
+
+function asNum(v: unknown): number {
+  return typeof v === 'number' ? v : 0
 }
 
 /**
@@ -110,6 +140,32 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
       return { type: 'done' }
     case 'error':
       return { type: 'error', error: asString(o.error, 'error') }
+    case 'subagent': {
+      const inner = parseAgentEvent(o.event) // zagnieżdżona ramka subagenta
+      if (!inner) return null
+      return {
+        type: 'subagent',
+        agent_id: asString(o.agent_id),
+        role: asString(o.role),
+        task: asString(o.task),
+        event: inner
+      }
+    }
+    case 'subagent_status':
+      return {
+        type: 'subagent_status',
+        agent_id: asString(o.agent_id),
+        role: asString(o.role),
+        task: asString(o.task),
+        status: asString(o.status, 'queued'),
+        summary: asString(o.summary),
+        merge_id: typeof o.merge_id === 'string' ? o.merge_id : null,
+        files_changed: asNum(o.files_changed),
+        turns: asNum(o.turns),
+        tool_calls: asNum(o.tool_calls)
+      }
+    case 'team_done':
+      return { type: 'team_done', report: o.report as TeamReport }
     default:
       return null
   }

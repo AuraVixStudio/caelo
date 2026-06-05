@@ -1,14 +1,15 @@
-# ── Python (legacy app + grok_core sidecar) ──
+# ── Python (caelo_core sidecar) ──
 __pycache__/
 *.pyc
 .venv/
-grok_core/.venv/
+caelo_core/.venv/
+grok_core/.venv/        # legacy (sprzed rebrandu M15) — na wszelki wypadek
 
 # ── Build / dystrybucja — ZAKOTWICZONE do korzenia repo (P3-2) ──
 # Bez wiodącego "/" wzorzec "build/" łapał też desktop/build/ i ignorował IKONĘ
 # INSTALATORA (desktop/build/icon.ico = electron-builder buildResources) → fresh
 # clone budował instalator bez ikony. Kotwiczymy do korzenia: PyInstaller pisze do
-# ./build (working) i ./dist/grok-core (sidecar), legacy do ./Output. Wyjście
+# ./build (working) i ./dist/caelo-core (sidecar), legacy do ./Output. Wyjście
 # desktopu jest osobno (desktop/dist/, desktop/out/ niżej).
 /build/
 /dist/
@@ -28,32 +29,47 @@ desktop/.vite/
 # ── Dane użytkownika i sekrety (NIE commitować) ──
 # Jawne nazwy (dokumentują, które pliki istnieją) + SIATKA wzorców (P3-3): wcześniej
 # ignorowane były tylko nazwy 1:1, więc przyszłe/poboczne warianty PRZECIEKAŁYBY do
-# repo — np. grok_cache.json, kopie grok_auth.json.bak, temp *.json.tmp z atomic_write,
+# repo — np. caelo_cache.json, kopie caelo_auth.json.bak, temp *.json.tmp z atomic_write,
 # pliki środowisk *.env / .env.local, czy *.token.
 .env
 *.env
 .env.*
 *.token
-grok_auth.json
-grok_settings.json
-grok_config.json
-grok_chats.json
-grok_permissions.json
-# Siatka: dowolny grok_*.json (też przyszłe) oraz ich kopie/temp (.bak/.tmp/.old).
+caelo_auth.json
+caelo_settings.json
+caelo_config.json
+caelo_chats.json
+caelo_permissions.json
+# Siatka: dowolny caelo_*.json (też przyszłe) oraz ich kopie/temp (.bak/.tmp/.old).
+caelo_*.json
+caelo_*.json.*
+# M9: magazyn SQLite huba (caelo_history.db) + pliki poboczne WAL (-wal/-shm),
+# backup korupcji (.corrupt) i przyszłe bazy caelo_*.db. W dev DATA_DIR = korzeń repo,
+# więc bez tej siatki baza wyciekłaby do commita.
+caelo_*.db
+caelo_*.db-*
+caelo_*.db.*
+# M14: log audytu wywołań narzędzi (B5).
+caelo_audit.log
+caelo_audit.log.*
+
+# Wsteczna zgodność (sprzed rebrandu M15): stare pliki grok_* też trzymamy poza repo,
+# gdyby u kogoś nie zaszła jeszcze migracja config._migrate_legacy_data().
 grok_*.json
 grok_*.json.*
-# M9: magazyn SQLite huba (grok_history.db) + pliki poboczne WAL (-wal/-shm),
-# backup korupcji (.corrupt) i przyszłe bazy grok_*.db. W dev DATA_DIR = korzeń repo,
-# więc bez tej siatki baza wyciekłaby do commita.
 grok_*.db
 grok_*.db-*
 grok_*.db.*
+grok_audit.log
+grok_audit.log.*
+
+# Katalogi danych (wspólne dla obu nazw).
 generated_history/
 # M10-B5: lokalne dokumenty „wiedzy projektu" (config.PROJECT_DOCS_DIR). W dev
 # DATA_DIR = korzeń repo, więc bez tego wgrane PDF-y wyciekłyby do commita.
 project_docs/
-# M14: log audytu wywołań narzędzi (B5) i katalog skilli użytkownika (B6). W dev
-# DATA_DIR = korzeń repo. grok_mcp/commands/hooks.json łapie już siatka grok_*.json.
-grok_audit.log
-grok_audit.log.*
+# M14-B6: katalog skilli użytkownika.
 /skills/
+# M17: izolowane worktree subagentów (config.WORKTREES_DIR). W dev DATA_DIR = korzeń
+# repo, więc bez tego kopie workspace wyciekłyby do commita.
+worktrees/

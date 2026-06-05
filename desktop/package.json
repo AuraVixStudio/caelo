@@ -1,7 +1,7 @@
 {
-  "name": "grok-desktop",
+  "name": "caelo-desktop",
   "version": "0.0.1",
-  "description": "Grok Desktop — powłoka Electron (frontend) dla aplikacji Grok w stylu Claude Code / Codex",
+  "description": "Caelo — powłoka Electron (frontend) klienta desktopowego dla modeli xAI Grok, w stylu Claude Code / Codex",
   "author": "grooverpty",
   "main": "./out/main/index.js",
   "scripts": {
@@ -15,8 +15,11 @@
     "lint": "eslint src",
     "test": "vitest run",
     "pack:sidecar": "powershell -ExecutionPolicy Bypass -File ../build_sidecar.ps1",
+    "pack:sidecar:unix": "bash ../build_sidecar.sh",
     "dist": "npm run build && electron-builder --win",
-    "dist:full": "npm run pack:sidecar && npm run build && electron-builder --win"
+    "dist:full": "npm run pack:sidecar && npm run build && electron-builder --win",
+    "dist:mac": "npm run pack:sidecar:unix && npm run build && electron-builder --mac",
+    "dist:linux": "npm run pack:sidecar:unix && npm run build && electron-builder --linux"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

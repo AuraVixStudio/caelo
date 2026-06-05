@@ -11,7 +11,7 @@ export interface CoreConnection {
 
 declare global {
   interface Window {
-    grok: {
+    caelo: {
       getCore: () => Promise<CoreConnection>
       onCoreStatus: (callback: (status: CoreConnection) => void) => () => void
       selectFolder: () => Promise<string | null>

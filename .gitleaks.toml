@@ -1,0 +1,42 @@
+# Gitleaks config (M15-2) — wykrywanie sekretów w repo i w CAŁEJ historii.
+# Używane przez pre-commit (.pre-commit-config.yaml) oraz job „Secret scan" w CI.
+#
+# Caelo jest BYO-key: sekrety (klucz xAI, tokeny OAuth) NIGDY nie trafiają do repo
+# (są gitignored). Ten skaner to ostatnia linia obrony przed przypadkowym commitem.
+
+title = "Caelo gitleaks config"
+
+[extend]
+# Bazuj na wbudowanych regułach gitleaks (klucze AWS/GCP/Stripe/GitHub, prywatne
+# klucze, generyczne API keys, tokeny itp.).
+useDefault = true
+
+[allowlist]
+description = "Znane fałszywe alarmy (nie-sekrety)"
+
+# Plik z prawdziwym kluczem xAI bywa lokalnie jako .env — i tak gitignored, ale
+# wykluczamy go też ze skanu na wszelki wypadek (gdyby ktoś wymusił dodanie).
+paths = [
+    '''(^|/)\.env($|\..*)''',
+    '''(^|/)caelo_.*\.json$''',
+    '''(^|/)caelo_auth\.json$''',
+    # Lockfile'y zawierają hashe integralności wyglądające jak „sekrety" — to nie są sekrety.
+    '''(^|/)package-lock\.json$''',
+    '''(^|/)caelo_core/requirements\.lock$''',
+    # Sygnatury CLA (publiczne nazwy użytkowników) — nie sekrety.
+    '''(^|/)\.github/cla-signatures\.json$''',
+]
+
+regexes = [
+    # Publiczny PKCE client_id grok-cli/Hermes (jawny w config.py, BEZ sekretu) — nie token.
+    '''b1a00492-073a-47ea-816f-4c329264a828''',
+]
+
+# Stopwords pomagają wyciszyć generyczne dopasowania w fixture'ach testów/markerach.
+stopwords = [
+    "marker",
+    "example",
+    "placeholder",
+    "dummy",
+    "fake",
+]

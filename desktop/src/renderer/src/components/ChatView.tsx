@@ -132,7 +132,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
         <span className="flex h-5 w-5 items-center justify-center rounded-md bg-accent/15 text-accent">
           <Sparkles size={12} />
         </span>
-        Grok
+        Caelo
         {basedOnDocument ? (
           <span
             className="flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted"
@@ -235,7 +235,7 @@ export function ChatView({ conn }: { conn: Conn }) {
     taRef.current?.focus()
   })
 
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: 'grok.chat' })
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: 'caelo.chat' })
   const convosPanelRef = usePanelRef()
   const [convosCollapsed, setConvosCollapsed] = useState(false)
 
@@ -642,10 +642,10 @@ export function ChatView({ conn }: { conn: Conn }) {
                   </div>
                   <p className="mt-2 text-[11px] leading-snug text-muted">
                     {searchMode === 'off'
-                      ? 'Grok answers from its own knowledge.'
+                      ? 'Caelo answers from its own knowledge.'
                       : searchMode === 'on'
-                        ? 'Grok always searches before answering.'
-                        : 'Grok searches the web/X when it needs fresh info.'}
+                        ? 'Caelo always searches before answering.'
+                        : 'Caelo searches the web/X when it needs fresh info.'}
                   </p>
                 </div>
               )}
@@ -716,7 +716,7 @@ export function ChatView({ conn }: { conn: Conn }) {
             </div>
             <h2 className="text-xl font-semibold">Start a conversation</h2>
             <p className="mt-1.5 text-sm text-muted">
-              Streaming chat powered by Grok via the local backend.
+              Streaming chat powered by xAI models via the local backend.
             </p>
           </div>
         ) : (
@@ -814,7 +814,7 @@ export function ChatView({ conn }: { conn: Conn }) {
               onChange={(e) => setInput(e.target.value)}
               onInput={autoGrow}
               onKeyDown={onKeyDown}
-              placeholder="Message Grok…"
+              placeholder="Message Caelo…"
               rows={1}
               className="max-h-52 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed text-fg outline-none placeholder:text-muted"
             />

@@ -158,7 +158,7 @@ export function KnowledgePopover({
           {!hub.currentProjectId ? (
             <div className="flex flex-col gap-2">
               <p className="text-xs leading-snug text-muted">
-                Documents live in a project. Pick one or create a project to add knowledge Grok can
+                Documents live in a project. Pick one or create a project to add knowledge Caelo can
                 search across its chats.
               </p>
               {hub.projects.length ? (
@@ -248,7 +248,7 @@ export function KnowledgePopover({
                     Attach all to message ({files.length})
                   </button>
                   <p className="mt-1.5 text-[10px] leading-snug text-muted">
-                    Adds these documents to your next message so Grok can read them (grok-4).
+                    Adds these documents to your next message so Caelo can read them (grok-4).
                   </p>
                 </>
               ) : null}

@@ -61,7 +61,7 @@ const STATUS: Record<CoreConnection['status'], { label: string; dot: string }> =
   stopped: { label: 'Backend stopped', dot: 'bg-muted' }
 }
 
-const RAIL_KEY = 'grok.rail.collapsed'
+const RAIL_KEY = 'caelo.rail.collapsed'
 
 /** Loader treści podczas doczytywania chunku leniwego modułu (P2-4). */
 function ModuleFallback() {
@@ -184,7 +184,7 @@ export default function App() {
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-fg">
             <Sparkles size={18} />
           </span>
-          {!collapsed ? <span className="truncate text-[15px] font-semibold">Grok Desktop</span> : null}
+          {!collapsed ? <span className="truncate text-[15px] font-semibold">Caelo</span> : null}
         </div>
 
         {/* Nav */}

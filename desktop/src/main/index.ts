@@ -5,8 +5,8 @@ import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
-// Linia handshake wypisywana przez sidecara (patrz grok_core/__main__.py).
-const HANDSHAKE_PREFIX = '__GROK_CORE_READY__'
+// Linia handshake wypisywana przez sidecara (patrz caelo_core/__main__.py).
+const HANDSHAKE_PREFIX = '__CAELO_CORE_READY__'
 
 // Nadzór sidecara: po nagłym padzie restartujemy z narastającym backoffem.
 const MAX_RESTARTS = 5
@@ -42,27 +42,27 @@ function repoRoot(): string {
 
 /** Wybór interpretera Pythona dla sidecara w trybie dev. */
 function resolvePython(): string {
-  if (process.env.GROK_CORE_PYTHON) return process.env.GROK_CORE_PYTHON
+  if (process.env.CAELO_CORE_PYTHON) return process.env.CAELO_CORE_PYTHON
   const venvPy =
     process.platform === 'win32'
-      ? join(repoRoot(), 'grok_core', '.venv', 'Scripts', 'python.exe')
-      : join(repoRoot(), 'grok_core', '.venv', 'bin', 'python')
+      ? join(repoRoot(), 'caelo_core', '.venv', 'Scripts', 'python.exe')
+      : join(repoRoot(), 'caelo_core', '.venv', 'bin', 'python')
   if (existsSync(venvPy)) return venvPy
   return process.platform === 'win32' ? 'python' : 'python3'
 }
 
 /**
  * Jak uruchomić sidecar:
- *  - spakowany (.exe): bundlowany binarka PyInstaller z resources/grok-core,
- *  - dev: `python -m grok_core` z venv backendu.
+ *  - spakowany (.exe): bundlowany binarka PyInstaller z resources/caelo-core,
+ *  - dev: `python -m caelo_core` z venv backendu.
  */
 function resolveSidecar(): { command: string; args: string[]; cwd: string } {
   if (app.isPackaged) {
-    const exeName = process.platform === 'win32' ? 'grok-core.exe' : 'grok-core'
-    const dir = join(process.resourcesPath, 'grok-core')
+    const exeName = process.platform === 'win32' ? 'caelo-core.exe' : 'caelo-core'
+    const dir = join(process.resourcesPath, 'caelo-core')
     return { command: join(dir, exeName), args: [], cwd: dir }
   }
-  return { command: resolvePython(), args: ['-m', 'grok_core'], cwd: repoRoot() }
+  return { command: resolvePython(), args: ['-m', 'caelo_core'], cwd: repoRoot() }
 }
 
 function broadcast(): void {
@@ -148,7 +148,7 @@ function scheduleStableReset(): void {
 
 /** Ubija sidecar tak, by handler 'exit' przeprowadził restart (zamiast parkować w 'error'). */
 function killCoreForRestart(reason: string): void {
-  console.error(`[grok-core] ${reason}; restarting sidecar`)
+  console.error(`[caelo-core] ${reason}; restarting sidecar`)
   if (coreProcess) treeKill(coreProcess)
 }
 
@@ -182,7 +182,7 @@ async function verifyConnection(): Promise<void> {
   }
 }
 
-/** Uruchamia backend (dev: python -m grok_core; prod: grok-core.exe) i czeka na handshake. */
+/** Uruchamia backend (dev: python -m caelo_core; prod: caelo-core.exe) i czeka na handshake. */
 function startCore(): void {
   const { command, args, cwd } = resolveSidecar()
   const token = randomBytes(32).toString('hex')
@@ -195,11 +195,11 @@ function startCore(): void {
     windowsHide: true, // sidecar ma konsolę (stdout=handshake) — ukryj jej okno
     env: {
       ...process.env,
-      GROK_CORE_TOKEN: token,
+      CAELO_CORE_TOKEN: token,
       // P3-4: wersja PRODUKTU (desktop/package.json) wstrzyknięta do sidecara, by
       // raportował ją w handshake/`/health` także w spakowanym buildzie (gdzie nie
       // może odczytać package.json). To JEDNO źródło prawdy dla wersji.
-      GROK_CORE_APP_VERSION: app.getVersion(),
+      CAELO_CORE_APP_VERSION: app.getVersion(),
       PYTHONUNBUFFERED: '1',
       PYTHONUTF8: '1'
     }
@@ -243,13 +243,13 @@ function startCore(): void {
           broadcast()
         }
       } else if (line) {
-        console.log('[grok-core]', line)
+        console.log('[caelo-core]', line)
       }
     })
   }
 
   coreProcess.stderr?.on('data', (chunk: Buffer) => {
-    console.error('[grok-core:stderr]', chunk.toString().trimEnd())
+    console.error('[caelo-core:stderr]', chunk.toString().trimEnd())
   })
 
   coreProcess.on('exit', (code, signal) => {
@@ -356,7 +356,7 @@ function createWindow(): void {
     minHeight: 720,
     show: false,
     backgroundColor: '#0f1323',
-    title: 'Grok Desktop',
+    title: 'Caelo',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // sandbox=false: preload jest minimalny (4 mosty IPC), ale `contextIsolation`
@@ -429,10 +429,68 @@ ipcMain.handle('shell:openPath', async (_event, target: string) => {
   return shell.openPath(target)
 })
 
+/** M15-8: auto-aktualizacja przez electron-updater + GitHub Releases (najpierw Windows).
+ *  `electron-updater` to OPCJONALNA zależność runtime — ładujemy ją przez `require`
+ *  w try/catch, więc brak pakietu (przed `npm install electron-updater`) nie wywraca
+ *  apki ani typechecku, a w spakowanym buildzie auto-update po prostu „ożywa".
+ *  Działa tylko w buildzie (`app.isPackaged`); wyłączysz przez CAELO_DISABLE_AUTOUPDATE=1. */
+function initAutoUpdate(): void {
+  if (!app.isPackaged) return // dev nie ma feeda wydań
+  if (process.env.CAELO_DISABLE_AUTOUPDATE === '1') {
+    console.log('[update] disabled via CAELO_DISABLE_AUTOUPDATE')
+    return
+  }
+  let autoUpdater: {
+    autoDownload: boolean
+    on: (ev: string, cb: (arg?: unknown) => void) => void
+    checkForUpdates: () => Promise<unknown>
+    quitAndInstall: () => void
+  } | null = null
+  try {
+    // require (nie import) — bez statycznego rozwiązywania modułu: typecheck przechodzi
+    // nawet gdy pakiet nie jest jeszcze zainstalowany.
+    autoUpdater = require('electron-updater').autoUpdater
+  } catch {
+    console.warn('[update] electron-updater not installed — auto-update disabled')
+    return
+  }
+  if (!autoUpdater) return
+  try {
+    autoUpdater.autoDownload = true
+    autoUpdater.on('update-available', (info) =>
+      console.log('[update] available:', (info as { version?: string } | undefined)?.version)
+    )
+    autoUpdater.on('update-not-available', () => console.log('[update] up to date'))
+    autoUpdater.on('error', (err) => console.error('[update] error:', err))
+    autoUpdater.on('update-downloaded', (info) => {
+      const version = (info as { version?: string } | undefined)?.version ?? ''
+      console.log('[update] downloaded:', version)
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      void dialog
+        .showMessageBox(mainWindow, {
+          type: 'info',
+          buttons: ['Restart now', 'Later'],
+          defaultId: 0,
+          cancelId: 1,
+          title: 'Update ready',
+          message: `Caelo ${version} has been downloaded.`,
+          detail: 'Restart the app to apply the update.'
+        })
+        .then((r) => {
+          if (r.response === 0) autoUpdater?.quitAndInstall()
+        })
+    })
+    void autoUpdater.checkForUpdates()
+  } catch (err) {
+    console.error('[update] init failed:', err)
+  }
+}
+
 app.whenReady().then(() => {
-  if (process.platform === 'win32') app.setAppUserModelId('com.grok.desktop')
+  if (process.platform === 'win32') app.setAppUserModelId('com.caelo.desktop')
   startCore()
   createWindow()
+  initAutoUpdate() // M15-8: sprawdź aktualizacje (no-op w dev / bez electron-updater)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

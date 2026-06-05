@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // Samodzielny serwer Vite dla samego renderera (bez Electrona) — wyłącznie do
-// wizualnego podglądu UI w przeglądarce. Atrapę `window.grok` instaluje main.tsx
+// wizualnego podglądu UI w przeglądarce. Atrapę `window.caelo` instaluje main.tsx
 // pod gałęzią DEV. Nie używany w buildzie/produkcji.
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),

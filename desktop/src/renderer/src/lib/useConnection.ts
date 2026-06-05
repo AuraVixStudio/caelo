@@ -5,8 +5,8 @@ import type { CoreConnection } from '../types'
 export function useConnection(): CoreConnection {
   const [conn, setConn] = useState<CoreConnection>({ status: 'starting' })
   useEffect(() => {
-    void window.grok.getCore().then(setConn)
-    const unsubscribe = window.grok.onCoreStatus(setConn)
+    void window.caelo.getCore().then(setConn)
+    const unsubscribe = window.caelo.onCoreStatus(setConn)
     return unsubscribe
   }, [])
   return conn

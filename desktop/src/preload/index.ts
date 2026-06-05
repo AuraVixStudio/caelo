@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { CoreConnection } from '../main/index'
 
 // Bezpieczny most: renderer dostaje wyłącznie te metody (contextIsolation).
-const grokApi = {
+const caeloApi = {
   /** Bieżący stan połączenia z backendem (port, token, baseUrl). */
   getCore: (): Promise<CoreConnection> => ipcRenderer.invoke('core:get'),
 
@@ -20,6 +20,6 @@ const grokApi = {
   openPath: (path: string): Promise<string> => ipcRenderer.invoke('shell:openPath', path)
 }
 
-contextBridge.exposeInMainWorld('grok', grokApi)
+contextBridge.exposeInMainWorld('caelo', caeloApi)
 
-export type GrokApi = typeof grokApi
+export type CaeloApi = typeof caeloApi

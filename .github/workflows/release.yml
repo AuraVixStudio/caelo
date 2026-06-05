@@ -1,0 +1,74 @@
+name: Release
+
+# M15-9: budowa instalatorów per-OS na runnerze danego systemu (cross-compile
+# sidecara PyInstaller jest niepraktyczny — każdy OS buduje swój własny sidecar).
+# Wyzwalane TAGIEM `v*` (np. v1.2.0) lub ręcznie. Publikuje do GitHub Releases →
+# tworzy feed (latest.yml) dla auto-update (M15-8, electron-updater).
+#
+# Windows jest platformą główną; mac/Linux budują się „na żądanie" — fail-fast: false,
+# więc brak certów/zależności na jednym OS nie blokuje pozostałych.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write          # tworzenie GitHub Release + upload artefaktów
+
+jobs:
+  build:
+    name: Build & publish (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            sidecar: powershell -ExecutionPolicy Bypass -File build_sidecar.ps1
+          - os: macos-latest
+            sidecar: bash build_sidecar.sh
+          - os: ubuntu-latest
+            sidecar: bash build_sidecar.sh
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Build sidecar (PyInstaller, per-OS)
+        run: ${{ matrix.sidecar }}
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+
+      # electron-updater jest zależnością runtime auto-update (M15-8) — domyślnie nie ma
+      # jej jeszcze w package.json (patrz M15-8), więc dociągamy ją do builda.
+      - name: Ensure electron-updater present
+        working-directory: desktop
+        run: npm ls electron-updater || npm install electron-updater
+
+      - name: Build & publish installer
+        working-directory: desktop
+        run: npx --no-install electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # --- Podpisywanie (opcjonalne; uzupełnij sekrety, by włączyć) ---
+          # Windows Authenticode:
+          #   CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          #   CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # macOS Developer ID + notaryzacja:
+          #   APPLE_ID: ${{ secrets.APPLE_ID }}
+          #   APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

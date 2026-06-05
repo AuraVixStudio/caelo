@@ -4,13 +4,16 @@ import os
 import sys
 from pathlib import Path
 
-_log = logging.getLogger("grok.config")
+_log = logging.getLogger("caelo.config")
 
-APP_NAME = "AI Studio Pro"
-# UWAGA (P3-4): to wersja LEGACY archiwalnej apki customtkinter — używana WYŁĄCZNIE
-# przez archive/app.py (tytuł okna). Wersja NOWEGO produktu (Electron + sidecar) ma
-# JEDNO źródło prawdy w desktop/package.json i jest raportowana przez grok_core/server.py
-# (env GROK_CORE_APP_VERSION ← Electron, z odczytem package.json jako fallbackiem).
+APP_NAME = "Caelo"
+# Nazwa katalogu danych użytkownika w wersji spakowanej (np. %LOCALAPPDATA%\Caelo).
+# M15 (rebranding): poprzednio "AI Studio Pro" — migrację starego katalogu i plików
+# stanu (grok_* → caelo_*) obsługuje _migrate_legacy_data() poniżej, bez utraty danych.
+_LEGACY_APP_NAME = "AI Studio Pro"
+# Wersja NOWEGO produktu (Electron + sidecar) ma JEDNO źródło prawdy w
+# desktop/package.json i jest raportowana przez caelo_core/server.py
+# (env CAELO_CORE_APP_VERSION ← Electron, z odczytem package.json jako fallbackiem).
 APP_VERSION = "1.1"
 
 # --- API Configuration ---
@@ -21,15 +24,22 @@ BASE_DIR = Path(__file__).resolve().parent
 IS_FROZEN = getattr(sys, "frozen", False)
 
 
-def _user_data_dir():
-    """Zapisywalny katalog danych użytkownika (używany w wersji spakowanej)."""
+def _user_data_base() -> Path:
+    """Bazowy katalog danych użytkownika per-OS (bez nazwy aplikacji).
+    Windows → %LOCALAPPDATA%; macOS → ~/Library/Application Support;
+    Linux/inne → $XDG_DATA_HOME (lub ~/.local/share)."""
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     elif sys.platform == "darwin":
         base = os.path.expanduser("~/Library/Application Support")
     else:
         base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    return Path(base) / APP_NAME
+    return Path(base)
+
+
+def _user_data_dir(app_name: str = APP_NAME) -> Path:
+    """Zapisywalny katalog danych użytkownika (używany w wersji spakowanej)."""
+    return _user_data_base() / app_name
 
 
 # W wersji spakowanej (.exe) dane trzymamy w profilu użytkownika, bo obok aplikacji
@@ -38,26 +48,80 @@ def _user_data_dir():
 DATA_DIR = _user_data_dir() if IS_FROZEN else BASE_DIR
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _migrate_legacy_data() -> None:
+    """M15 (rebranding): przenieś dane sprzed zmiany nazwy bez ich utraty.
+      (a) wersja spakowana — stary katalog danych „AI Studio Pro" → „Caelo";
+      (b) pliki stanu grok_*.json/db/log → caelo_* (dev: korzeń repo; frozen: po (a)).
+    Idempotentne: przenosi tylko, gdy źródło istnieje, a cel jeszcze nie — więc
+    bezpiecznie odpala się przy każdym imporcie."""
+    # (a) stary katalog (tylko frozen — w dev DATA_DIR = korzeń repo, nie zależy od APP_NAME)
+    if IS_FROZEN:
+        try:
+            old_dir = _user_data_dir(_LEGACY_APP_NAME)
+            if old_dir != DATA_DIR and old_dir.is_dir():
+                for item in old_dir.iterdir():
+                    dest = DATA_DIR / item.name
+                    if not dest.exists():
+                        try:
+                            os.replace(item, dest)
+                        except OSError as exc:
+                            _log.warning("legacy data-dir migration: %s failed: %s", item.name, exc)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("legacy data-dir migration skipped: %s", exc)
+    # (b) pliki grok_* → caelo_* (nazwy poniżej obejmują też pliki poboczne SQLite WAL)
+    legacy_pairs = [
+        ("grok_config.json", "caelo_config.json"),
+        ("grok_settings.json", "caelo_settings.json"),
+        ("grok_auth.json", "caelo_auth.json"),
+        ("grok_chats.json", "caelo_chats.json"),
+        ("grok_permissions.json", "caelo_permissions.json"),
+        ("grok_mcp.json", "caelo_mcp.json"),
+        ("grok_commands.json", "caelo_commands.json"),
+        ("grok_hooks.json", "caelo_hooks.json"),
+        ("grok_subagents.json", "caelo_subagents.json"),
+        ("grok_audit.log", "caelo_audit.log"),
+        ("grok_history.db", "caelo_history.db"),
+        ("grok_history.db-wal", "caelo_history.db-wal"),
+        ("grok_history.db-shm", "caelo_history.db-shm"),
+    ]
+    for old_name, new_name in legacy_pairs:
+        old = DATA_DIR / old_name
+        new = DATA_DIR / new_name
+        if old.exists() and not new.exists():
+            try:
+                os.rename(old, new)
+            except OSError as exc:
+                _log.warning("legacy data migration: %s -> %s failed: %s", old_name, new_name, exc)
+
+
+_migrate_legacy_data()
+
 HISTORY_DIR = DATA_DIR / "generated_history"
 HISTORY_DIR.mkdir(exist_ok=True)
-CONFIG_FILE = DATA_DIR / "grok_config.json"      # HistoryManager (history/chat/save_path)
-SETTINGS_FILE = DATA_DIR / "grok_settings.json"  # API key (fallback) + chat model
-AUTH_FILE = DATA_DIR / "grok_auth.json"          # OAuth tokens (do NOT commit)
-CHATS_FILE = DATA_DIR / "grok_chats.json"        # conversations
-PERMISSIONS_FILE = DATA_DIR / "grok_permissions.json"  # agent allowlist ("Always allow")
+CONFIG_FILE = DATA_DIR / "caelo_config.json"      # HistoryManager (history/chat/save_path)
+SETTINGS_FILE = DATA_DIR / "caelo_settings.json"  # API key (fallback) + chat model
+AUTH_FILE = DATA_DIR / "caelo_auth.json"          # OAuth tokens (do NOT commit)
+CHATS_FILE = DATA_DIR / "caelo_chats.json"        # conversations
+PERMISSIONS_FILE = DATA_DIR / "caelo_permissions.json"  # agent allowlist ("Always allow")
 # M9-B1: kręgosłup huba — magazyn artefaktów + historii (SQLite + FTS5). Własny plik,
-# NIE dotyka grok_config.json (HistoryManager). Cross-platform (sqlite3 ze stdlib).
-HISTORY_DB_FILE = DATA_DIR / "grok_history.db"   # artifacts + history (grok_core.history_store)
+# NIE dotyka caelo_config.json (HistoryManager). Cross-platform (sqlite3 ze stdlib).
+HISTORY_DB_FILE = DATA_DIR / "caelo_history.db"   # artifacts + history (caelo_core.history_store)
 # M10-B5: lokalne dokumenty „wiedzy projektu" (xAI nie ma vector stores). Per projekt
 # podkatalog; dołączane do wiadomości jako input_file na żądanie ("Attach all").
 PROJECT_DOCS_DIR = DATA_DIR / "project_docs"
 # M14 (rozszerzalność) — własne pliki stanu, wszystkie przez load_json_or_backup +
-# atomic_write_text (jak pozostałe). Nie dotykają grok_config.json (HistoryManager).
-MCP_FILE = DATA_DIR / "grok_mcp.json"            # M14-B1: skonfigurowane serwery MCP
-COMMANDS_FILE = DATA_DIR / "grok_commands.json"  # M14-B4: komendy użytkownika (slash)
-HOOKS_FILE = DATA_DIR / "grok_hooks.json"        # M14-B5: konfiguracja hooków cyklu życia narzędzi
-AUDIT_LOG_FILE = DATA_DIR / "grok_audit.log"     # M14-B5: log audytu wywołań narzędzi (JSONL)
+# atomic_write_text (jak pozostałe). Nie dotykają caelo_config.json (HistoryManager).
+MCP_FILE = DATA_DIR / "caelo_mcp.json"            # M14-B1: skonfigurowane serwery MCP
+COMMANDS_FILE = DATA_DIR / "caelo_commands.json"  # M14-B4: komendy użytkownika (slash)
+HOOKS_FILE = DATA_DIR / "caelo_hooks.json"        # M14-B5: konfiguracja hooków cyklu życia narzędzi
+AUDIT_LOG_FILE = DATA_DIR / "caelo_audit.log"     # M14-B5: log audytu wywołań narzędzi (JSONL)
 SKILLS_DIR = DATA_DIR / "skills"                 # M14-B6: lokalne pakiety skilli (<name>/SKILL.md)
+# M17 (subagenci) — role + limity zespołu (własny plik, jak M14). Atomowe zapisy +
+# load_json_or_backup. Worktrees mutujących subagentów = kopie workspace (jak checkpoint
+# M13, bez gita) trzymane POZA workspace (nie brudzą drzewa usera); sprzątane po scaleniu/odrzuceniu.
+SUBAGENTS_FILE = DATA_DIR / "caelo_subagents.json"  # M17-F4: definicje ról + limity zespołu
+WORKTREES_DIR = DATA_DIR / "worktrees"             # M17-B3: izolowane kopie workspace per subagent
 
 
 def atomic_write_text(path, text: str) -> None:

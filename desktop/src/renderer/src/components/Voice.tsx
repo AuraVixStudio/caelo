@@ -293,7 +293,7 @@ export function Voice({ conn }: { conn: Conn }) {
   const usageLabel = formatAudioUsage(usage)
 
   return (
-    <Page title="Voice" subtitle="Dictate, talk with Grok, transcribe, or read text aloud.">
+    <Page title="Voice" subtitle="Dictate, talk with Caelo, transcribe, or read text aloud.">
       {/* Mode toggle + session cost (F5) */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
@@ -328,7 +328,7 @@ export function Voice({ conn }: { conn: Conn }) {
             <Textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Type something for Grok to read aloud…"
+              placeholder="Type something for Caelo to read aloud…"
               rows={4}
               className="mb-4"
             />
@@ -370,7 +370,7 @@ export function Voice({ conn }: { conn: Conn }) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => window.grok.openPath(ttsAudio.path as string)}
+                  onClick={() => window.caelo.openPath(ttsAudio.path as string)}
                 >
                   Open file
                 </Button>
@@ -479,7 +479,7 @@ export function Voice({ conn }: { conn: Conn }) {
             <p className="flex items-center gap-2 text-xs text-muted">
               <span className={cn('h-2 w-2 rounded-full', TALK_STATE[talkState].dot)} />
               <span className="font-medium text-fg">{TALK_STATE[talkState].label}</span>
-              {' · just start talking — your speech interrupts Grok (barge-in).'}
+              {' · just start talking — your speech interrupts Caelo (barge-in).'}
             </p>
           </Card>
           {talkError ? <p className="mt-4 text-sm text-error">{talkError}</p> : null}

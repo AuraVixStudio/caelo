@@ -11,8 +11,8 @@ export interface Conversation {
   messages: ChatMessage[]
 }
 
-const KEY = 'grok.chat.conversations.v1'
-const ACTIVE_KEY = 'grok.chat.active.v1'
+const KEY = 'caelo.chat.conversations.v1'
+const ACTIVE_KEY = 'caelo.chat.active.v1'
 
 export function loadConversations(): Conversation[] {
   try {

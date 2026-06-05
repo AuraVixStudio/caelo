@@ -1,5 +1,5 @@
-// Klient backendu grok-core: REST + WebSocket czatu.
-// baseUrl i token pochodzą z handshake'u (window.grok.getCore()).
+// Klient backendu caelo-core: REST + WebSocket czatu.
+// baseUrl i token pochodzą z handshake'u (window.caelo.getCore()).
 
 import { blobToDataUri } from './files'
 
@@ -671,8 +671,8 @@ export const agentUndo = (c: Conn, checkpointId?: string | null): Promise<UndoRe
     body: JSON.stringify({ checkpoint_id: checkpointId ?? null })
   })
 
-// --- Agent project rules (GROK.md, M13-B4/F4) ---
-export interface GrokMdResp {
+// --- Agent project rules (CAELO.md, M13-B4/F4) ---
+export interface CaeloMdResp {
   content: string
   exists: boolean
   global_exists: boolean
@@ -680,10 +680,10 @@ export interface GrokMdResp {
   name: string
 }
 
-export const getGrokMd = (c: Conn): Promise<GrokMdResp> => api(c, '/agent/grok-md')
+export const getCaeloMd = (c: Conn): Promise<CaeloMdResp> => api(c, '/agent/caelo-md')
 
-export const putGrokMd = (c: Conn, content: string): Promise<{ ok: boolean; path: string }> =>
-  api(c, '/agent/grok-md', { method: 'PUT', body: JSON.stringify({ content }) })
+export const putCaeloMd = (c: Conn, content: string): Promise<{ ok: boolean; path: string }> =>
+  api(c, '/agent/caelo-md', { method: 'PUT', body: JSON.stringify({ content }) })
 
 // --- M14: Extensibility (MCP servers / hooks / skills / slash commands) ---------
 
@@ -815,6 +815,103 @@ export const addCommand = (
 ): Promise<{ command: SlashCommand }> => api(c, '/commands', { method: 'POST', body: JSON.stringify(body) })
 export const removeCommand = (c: Conn, name: string): Promise<{ ok: boolean }> =>
   api(c, `/commands/${encodeURIComponent(name)}`, { method: 'DELETE' })
+
+// --- M17: Subagent teams (roles / limits / worktree merges / runs) ---------------
+export interface TeamRole {
+  id: string
+  label: string
+  description: string
+  tools: string[] // file tools allowed for this role
+  mcp: 'none' | 'readonly' | 'all'
+  worktree: boolean // mutating role → works in an isolated copy, reviewed at merge
+  model: string // '' = inherit orchestrator model
+  prompt: string
+  builtin: boolean
+}
+
+export interface TeamLimits {
+  max_parallel: number
+  max_depth: number
+  timeout_s: number
+  max_subagents: number
+  max_total_turns: number
+  max_iters: number
+}
+
+export interface MergeFile {
+  path: string
+  kind: 'created' | 'modified' | 'deleted'
+}
+
+export interface TeamMerge {
+  id: string
+  agent_id: string
+  role: string
+  task: string
+  files: MergeFile[]
+  conflicts: string[] // paths also changed by another pending merge
+  created_at: number
+  file_count: number
+}
+
+export interface SubagentReport {
+  agent_id: string
+  role: string
+  task: string
+  status: string // queued | running | done | failed | cancelled | timeout
+  summary: string
+  error: string
+  turns: number
+  tool_calls: number
+  input_tokens: number
+  output_tokens: number
+  est_usd: number
+  duration: number
+  merge_id: string | null
+  files_changed: number
+}
+
+export interface TeamTotals {
+  subagents: number
+  turns: number
+  tool_calls: number
+  input_tokens: number
+  output_tokens: number
+  merges: number
+  est_usd: number
+}
+
+export interface TeamReport {
+  run: number
+  subagents: SubagentReport[]
+  totals: TeamTotals
+  errors: string[]
+  created_at: number
+}
+
+export const listTeamRoles = (c: Conn): Promise<{ roles: TeamRole[]; limits: TeamLimits }> =>
+  api(c, '/agent/team/roles')
+export const upsertTeamRole = (c: Conn, body: Partial<TeamRole> & { id: string }): Promise<{ role: TeamRole }> =>
+  api(c, '/agent/team/roles', { method: 'POST', body: JSON.stringify(body) })
+export const removeTeamRole = (c: Conn, id: string): Promise<{ ok: boolean; roles: TeamRole[] }> =>
+  api(c, `/agent/team/roles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const setTeamLimits = (c: Conn, body: Partial<TeamLimits>): Promise<{ limits: TeamLimits }> =>
+  api(c, '/agent/team/limits', { method: 'PUT', body: JSON.stringify(body) })
+
+export const listTeamMerges = (c: Conn): Promise<{ merges: TeamMerge[]; has_workspace: boolean }> =>
+  api(c, '/agent/team/merges')
+export const teamMergeDiff = (c: Conn, id: string): Promise<{ diff: string }> =>
+  api(c, `/agent/team/merges/${encodeURIComponent(id)}/diff`)
+export const applyTeamMerge = (
+  c: Conn,
+  id: string
+): Promise<{ ok: boolean; applied: string[]; deleted: string[]; skipped: string[] }> =>
+  api(c, `/agent/team/merges/${encodeURIComponent(id)}/apply`, { method: 'POST' })
+export const rejectTeamMerge = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/agent/team/merges/${encodeURIComponent(id)}/reject`, { method: 'POST' })
+export const clearTeamMerges = (c: Conn): Promise<{ ok: boolean; cleared: number }> =>
+  api(c, '/agent/team/merges', { method: 'DELETE' })
+export const listTeamRuns = (c: Conn): Promise<{ runs: TeamReport[] }> => api(c, '/agent/team/runs')
 
 export interface ChatStreamHandle {
   stop: () => void

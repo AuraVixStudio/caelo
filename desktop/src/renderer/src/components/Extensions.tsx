@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Blocks, SlashSquare, Webhook, Sparkles } from 'lucide-react'
+import { Blocks, SlashSquare, Users, Webhook, Sparkles } from 'lucide-react'
 import type { Conn } from '../lib/api'
 import { cn } from '../lib/cn'
 import { Page } from './ui/Page'
@@ -7,12 +7,14 @@ import { McpServers } from './extensions/McpServers'
 import { HooksPanel } from './extensions/HooksPanel'
 import { SkillsLibrary } from './extensions/SkillsLibrary'
 import { CommandsPanel } from './extensions/CommandsPanel'
+import { SubagentsPanel } from './extensions/SubagentsPanel'
 
 const TABS = [
   { id: 'mcp', label: 'MCP Servers', icon: Blocks },
   { id: 'commands', label: 'Commands', icon: SlashSquare },
   { id: 'hooks', label: 'Hooks', icon: Webhook },
-  { id: 'skills', label: 'Skills', icon: Sparkles }
+  { id: 'skills', label: 'Skills', icon: Sparkles },
+  { id: 'subagents', label: 'Subagents', icon: Users }
 ] as const
 
 type Tab = (typeof TABS)[number]['id']
@@ -53,6 +55,7 @@ export function Extensions({ conn }: { conn: Conn }) {
       {tab === 'commands' ? <CommandsPanel conn={conn} /> : null}
       {tab === 'hooks' ? <HooksPanel conn={conn} /> : null}
       {tab === 'skills' ? <SkillsLibrary conn={conn} /> : null}
+      {tab === 'subagents' ? <SubagentsPanel conn={conn} /> : null}
     </Page>
   )
 }

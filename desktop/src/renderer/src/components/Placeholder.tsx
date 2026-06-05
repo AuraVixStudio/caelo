@@ -19,14 +19,14 @@ export function Placeholder({ name, conn }: { name: string; conn: CoreConnection
     if (conn.status === 'ready' && conn.baseUrl && conn.token) {
       fetch(`${conn.baseUrl}/whoami`, { headers: { Authorization: `Bearer ${conn.token}` } })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-        .then((d) => setRoundTrip(`grok-core v${d.version} · port ${d.port}`))
+        .then((d) => setRoundTrip(`caelo-core v${d.version} · port ${d.port}`))
         .catch((e) => setRoundTrip(`error: ${String(e)}`))
     }
   }, [conn.status, conn.baseUrl, conn.token])
 
   return (
     <Page title={name} subtitle="Coming in a later phase." maxWidth="max-w-2xl">
-      <Card title="Backend (grok-core)">
+      <Card title="Backend (caelo-core)">
         <dl className="grid grid-cols-[140px_1fr] gap-y-2.5 text-sm">
           <dt className="text-muted">Status</dt>
           <dd className={cn('m-0 font-mono', STATUS_TEXT[conn.status])}>{conn.status}</dd>

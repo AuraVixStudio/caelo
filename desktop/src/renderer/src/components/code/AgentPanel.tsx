@@ -3,11 +3,24 @@ import { Check, ChevronDown, History, ListChecks, Mic, Pencil, Play, ShieldCheck
 import { AgentConnection, type AgentEvent, type ApprovalDetail } from '../../lib/agentClient'
 import {
   agentUndo,
+  applyTeamMerge,
   listCheckpoints,
+  listTeamMerges,
+  rejectTeamMerge,
   type ChatAttachment,
   type CheckpointInfo,
-  type Conn
+  type Conn,
+  type TeamMerge,
+  type TeamReport
 } from '../../lib/api'
+import {
+  addApproval,
+  applyEvent,
+  applyStatus,
+  clearApproval,
+  type SubAgentMap
+} from '../../lib/teamView'
+import { TeamView } from './TeamView'
 import {
   AGENT_MODES,
   canApproveRun,
@@ -96,6 +109,10 @@ export function AgentPanel({
   const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([])
   const [partial, setPartial] = useState(false)
   const [undoing, setUndoing] = useState(false)
+  // M17-F1/F2/F5: drzewo subagentów, oczekujące scalenia worktree, ostatni raport zespołu.
+  const [teamNodes, setTeamNodes] = useState<SubAgentMap>({})
+  const [merges, setMerges] = useState<TeamMerge[]>([])
+  const [teamReport, setTeamReport] = useState<TeamReport | null>(null)
 
   const agentRef = useRef<AgentConnection | null>(null)
   const curAssistant = useRef<string | null>(null)
@@ -130,6 +147,15 @@ export function AgentPanel({
   const refreshCheckpointsRef = useRef(refreshCheckpoints)
   refreshCheckpointsRef.current = refreshCheckpoints
 
+  // M17-F2: pobierz oczekujące scalenia worktree (autorytatywne źródło, jak checkpointy).
+  const refreshMerges = (): void => {
+    void listTeamMerges(conn)
+      .then((r) => setMerges(r.merges))
+      .catch(() => undefined)
+  }
+  const refreshMergesRef = useRef(refreshMerges)
+  refreshMergesRef.current = refreshMerges
+
   // Połączenie WS agenta (jedno na sesję modułu Code).
   useEffect(() => {
     const agent = new AgentConnection(
@@ -155,6 +181,9 @@ export function AgentPanel({
     if (connected && workspacePath) {
       agentRef.current?.setWorkspace(workspacePath)
       refreshCheckpointsRef.current()
+      refreshMergesRef.current()
+      setTeamNodes({}) // nowy workspace → nowe drzewo zespołu
+      setTeamReport(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
@@ -211,7 +240,25 @@ export function AgentPanel({
         break
       }
       case 'approval_request':
-        patchTool(e.id, { status: 'awaiting', detail: e.detail })
+        // M17-F3: zatwierdzenie subagenta (detail.agent_id) → karta w jego węźle,
+        // nie w głównym strumieniu (atrybucja). Orkiestrator → dotychczasowa ścieżka.
+        if (e.detail?.agent_id) {
+          setTeamNodes((m) => addApproval(m, e.id, e.name, e.detail))
+        } else {
+          patchTool(e.id, { status: 'awaiting', detail: e.detail })
+        }
+        break
+      case 'subagent':
+        // M17-F1: zagnieżdżona ramka subagenta → aktualizuj jego węzeł w drzewie.
+        setTeamNodes((m) => applyEvent(m, e.agent_id, e.role, e.task, e.event))
+        break
+      case 'subagent_status':
+        setTeamNodes((m) => applyStatus(m, e))
+        if (e.merge_id) refreshMergesRef.current() // pojawiło się scalenie do przeglądu
+        break
+      case 'team_done':
+        setTeamReport(e.report)
+        refreshMergesRef.current()
         break
       case 'checkpoint':
         // M13-F3: agent zsnapshotował pliki → odśwież oś checkpointów.
@@ -251,6 +298,7 @@ export function AgentPanel({
         // M13-F2: po planie → faza review (pokaż „Approve & run"); po wykonaniu → idle.
         setPlanPhase((p) => planReducer(p, { type: 'done' }))
         refreshCheckpointsRef.current()
+        refreshMergesRef.current() // M17: subagenci mogli przygotować scalenia
         onFilesChangedRef.current()
         break
       case 'error':
@@ -303,6 +351,37 @@ export function AgentPanel({
   function approve(id: string, decision: 'accept' | 'reject' | 'always'): void {
     patchTool(id, { status: 'pending' })
     agentRef.current?.approve(id, decision)
+  }
+
+  // M17-F3: decyzja na karcie zatwierdzenia subagenta (id znamespace'owany).
+  function approveTeam(id: string, decision: 'accept' | 'reject' | 'always'): void {
+    setTeamNodes((m) => clearApproval(m, id))
+    agentRef.current?.approve(id, decision)
+  }
+
+  // M17-F2: scal/odrzuć zmiany worktree subagenta (jeden diff).
+  async function applyMerge(id: string): Promise<void> {
+    try {
+      await applyTeamMerge(conn, id)
+      pushInfo('Merged subagent changes into the workspace.')
+      onFilesChangedRef.current()
+      refreshCheckpointsRef.current() // merge tworzy checkpoint (cofalne)
+    } catch {
+      pushInfo('Merge failed.', 'warn')
+    } finally {
+      refreshMergesRef.current()
+    }
+  }
+
+  async function rejectMerge(id: string): Promise<void> {
+    try {
+      await rejectTeamMerge(conn, id)
+      pushInfo('Discarded the subagent worktree.')
+    } catch {
+      pushInfo('Discard failed.', 'warn')
+    } finally {
+      refreshMergesRef.current()
+    }
   }
 
   // M13-F3: cofnij wskazany checkpoint (lub całą sesję, gdy brak id).
@@ -391,6 +470,17 @@ export function AgentPanel({
           entries.map((e) => <EntryView key={e.id} entry={e} onApprove={approve} />)
         )}
       </div>
+
+      <TeamView
+        nodes={teamNodes}
+        merges={merges}
+        report={teamReport}
+        conn={conn}
+        onApprove={approveTeam}
+        onApplyMerge={(id) => void applyMerge(id)}
+        onRejectMerge={(id) => void rejectMerge(id)}
+        busy={busy}
+      />
 
       {showApproveRun ? (
         <div className="shrink-0 border-t border-border bg-accent/5 px-3 py-2">
@@ -653,7 +743,7 @@ function EntryView({
   if (entry.kind === 'assistant') {
     return (
       <div>
-        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Grok</div>
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Caelo</div>
         {entry.text ? (
           <Markdown text={entry.text} />
         ) : (

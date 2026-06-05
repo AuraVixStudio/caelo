@@ -122,7 +122,7 @@ export function Settings({ conn }: { conn: Conn }) {
   }
 
   async function browse(): Promise<void> {
-    const picked = await window.grok.selectFolder()
+    const picked = await window.caelo.selectFolder()
     if (!picked) return
     try {
       await setOutputDir(conn, picked)
@@ -275,7 +275,7 @@ export function Settings({ conn }: { conn: Conn }) {
         </Card>
 
         {/* Appearance */}
-        <Card title="Appearance" subtitle="Choose how Grok Desktop looks.">
+        <Card title="Appearance" subtitle="Choose how Caelo looks.">
           <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
             {THEME_MODES.map(({ mode, label, icon: Icon }) => {
               const selected = theme === mode

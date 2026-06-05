@@ -1,6 +1,6 @@
-appId: com.grok.desktop
-productName: Grok Desktop
-copyright: Copyright © 2026 grooverpty
+appId: com.caelo.desktop
+productName: Caelo
+copyright: Copyright © 2026 Caelo contributors
 
 directories:
   buildResources: build      # opcjonalna ikona: desktop/build/icon.ico (inaczej domyślna Electron)
@@ -12,24 +12,64 @@ files:
   - package.json
   - '!**/*.map'
 
-# Spakowany sidecar PyInstaller (zbuduj wcześniej: build_sidecar.ps1 -> ../dist/grok-core).
-# Trafia do resources/grok-core, skąd uruchamia go proces główny (app.isPackaged).
+# Spakowany sidecar PyInstaller (zbuduj wcześniej: build_sidecar.ps1 -> ../dist/caelo-core).
+# Trafia do resources/caelo-core, skąd uruchamia go proces główny (app.isPackaged).
 extraResources:
-  - from: ../dist/grok-core
-    to: grok-core
+  - from: ../dist/caelo-core
+    to: caelo-core
 
 asar: true
+
+# M15-8: feed auto-aktualizacji = GitHub Releases. electron-builder generuje z tej
+# sekcji `app-update.yml` (w paczce) oraz `latest.yml` (w wydaniu), a electron-updater
+# w procesie głównym czyta z nich nową wersję. Owner/repo są wnioskowane z pola
+# `repository` w package.json lub z remote'a gita — USTAW je po utworzeniu repo
+# (albo odkomentuj i wpisz poniżej). Publikacja dzieje się tylko z flagą `--publish`.
+publish:
+  - provider: github
+    # owner: <github-owner>
+    # repo: caelo
 
 win:
   target:
     - target: nsis
       arch:
         - x64
+  # Podpisywanie Authenticode (opcjonalne) — ustaw CSC_LINK + CSC_KEY_PASSWORD w env
+  # CI; bez tego instalator jest niepodpisany (SmartScreen ostrzeże). Patrz docs/PLAN_M15 §Podpisywanie.
 
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: Grok-Desktop-Setup-${version}.${ext}
-  shortcutName: Grok Desktop
-  uninstallDisplayName: Grok Desktop
+  artifactName: Caelo-Setup-${version}.${ext}
+  shortcutName: Caelo
+  uninstallDisplayName: Caelo
+
+# M15-9 (warunkowe): cele mac/Linux — SKONFIGUROWANE, budowane NA ŻĄDANIE na runnerze
+# per-OS (cross-compile sidecara PyInstaller jest niepraktyczny). Sidecar
+# (../dist/caelo-core) musi być zbudowany na DOCELOWYM OS (build_sidecar.sh) PRZED
+# electron-builderem. extraResources/main proces są OS-agnostyczne (caelo-core vs .exe).
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+  # Notaryzacja (Developer ID + notarytool): ustaw APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+  # APPLE_TEAM_ID + cert w env CI. Bez tego Gatekeeper zablokuje. Patrz docs/PLAN_M15 §Podpisywanie.
+
+linux:
+  target:
+    - target: AppImage
+    - target: deb
+  category: Development
+  maintainer: Caelo contributors
+  synopsis: Desktop client for the xAI Grok API (chat, media, voice, coding agent)
+
+dmg:
+  artifactName: Caelo-${version}-${arch}.${ext}
+
+appImage:
+  artifactName: Caelo-${version}.${ext}

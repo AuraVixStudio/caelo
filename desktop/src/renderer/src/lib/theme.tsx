@@ -11,7 +11,7 @@ import {
 export type ThemeMode = 'light' | 'dark' | 'system'
 type Resolved = 'light' | 'dark'
 
-const STORAGE_KEY = 'grok.theme'
+const STORAGE_KEY = 'caelo.theme'
 
 interface ThemeCtx {
   theme: ThemeMode
