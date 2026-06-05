@@ -42,20 +42,21 @@ from grok_core.state import ws_authorized
 router = APIRouter()
 
 
-def _has_image(messages) -> bool:
-    """True, jeśli którakolwiek wiadomość niesie obraz (part `image_url`)."""
+def _has_rich_input(messages) -> bool:
+    """True, jeśli którakolwiek wiadomość niesie obraz (`image_url`) lub dokument
+    (`document`) — oba wymagają rodziny grok-4 (wizja M10-B3 / dokument M10-B4)."""
     for m in messages or []:
         content = m.get("content") if isinstance(m, dict) else None
         if isinstance(content, list):
             for p in content:
-                if isinstance(p, dict) and p.get("type") == "image_url":
+                if isinstance(p, dict) and p.get("type") in ("image_url", "document"):
                     return True
     return False
 
 
 def _is_grok4(model: str) -> bool:
-    """Rodzina grok-4 (wizja + file_search wymagają jej — M10-B3). grok-3 i
-    grok-build-0.1 są text-only z perspektywy wizji."""
+    """Rodzina grok-4 (wizja + dokumenty + file_search wymagają jej — M10-B3/B4).
+    grok-3 i grok-build-0.1 są text-only z perspektywy wizji/dokumentów."""
     return (model or "").lower().startswith("grok-4")
 
 
@@ -204,12 +205,12 @@ async def chat_stream(ws: WebSocket) -> None:
                     if search_mode not in ("auto", "on", "off"):
                         search_mode = "off"
                     sources = msg.get("sources") or None
-                    # M10-B3: wizja wymaga rodziny grok-4 — czytelny komunikat zamiast
-                    # niejasnego błędu API, gdy obraz trafia do modelu text-only.
-                    if _has_image(messages) and not _is_grok4(model):
+                    # M10-B3/B4: wizja i dokumenty wymagają rodziny grok-4 — czytelny
+                    # komunikat zamiast niejasnego błędu API na modelu text-only.
+                    if _has_rich_input(messages) and not _is_grok4(model):
                         await stream.send({"type": "error", "error": (
-                            f"Image input (vision) requires a grok-4 model. The selected "
-                            f"model '{model}' is text-only — switch models or remove the image.")})
+                            f"Image and document input require a grok-4 model. The selected "
+                            f"model '{model}' is text-only — switch models or remove the attachment.")})
                         continue
                     start_worker(messages, model, temperature, search_mode, sources)
         except WebSocketDisconnect:

@@ -35,6 +35,7 @@ from typing import Callable, List, Optional
 import requests  # type: ignore
 
 import config  # type: ignore
+from grok_core import validation as V
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +88,22 @@ def _image_part(url: str) -> dict:
     return {"type": "input_image", "image_url": url}
 
 
+def _document_part(doc: dict) -> Optional[dict]:
+    """Q&A nad dokumentem inline (M10-B4): blok `document` z send-to bus / composera
+    (`{data:<data-URI>, mime, name}`) → part `input_file` Responses (file_data +
+    filename). Zwraca None, gdy brak danych lub przekroczony cap rozmiaru (skip-with-log,
+    by jeden zły załącznik nie wywracał całej tury)."""
+    data = doc.get("data") or doc.get("file_data")
+    if not data:
+        return None
+    try:
+        V.validate_document_uri(data)
+    except ValueError as exc:
+        log.warning("Skipping document attachment: %s", exc)
+        return None
+    return {"type": "input_file", "filename": doc.get("name") or "document", "file_data": data}
+
+
 def _image_url_from_part(p: dict) -> Optional[str]:
     """Wyciągnij URL obrazu z partu w formacie chat/completions, gdzie `image_url`
     bywa stringiem ALBO obiektem {"url": ...} (oba warianty w ekosystemie)."""
@@ -126,7 +143,11 @@ def to_input(messages: list) -> list:
                     url = _image_url_from_part(p)
                     if url:
                         parts.append(_image_part(url))
-                elif ptype in ("input_text", "output_text", "input_image"):
+                elif ptype == "document":
+                    dpart = _document_part(p.get("document") or {})
+                    if dpart:
+                        parts.append(dpart)
+                elif ptype in ("input_text", "output_text", "input_image", "input_file"):
                     # Już w formacie Responses (np. przekazane wprost) — zachowaj.
                     parts.append(p)
         if parts:

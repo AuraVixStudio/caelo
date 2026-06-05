@@ -48,6 +48,16 @@ export function citationHost(url: string): string {
   }
 }
 
+/** Best display label for a source chip: a real page title when present, else the
+ *  domain. The live Responses API often returns the inline reference number
+ *  ("1", "2", …) as the citation title — useless as a label — so we fall back to the
+ *  host in that case (the chip already shows its own ordinal). */
+export function citationLabel(c: Citation): string {
+  const title = (c.title || '').trim()
+  if (title && !/^\d+$/.test(title)) return title
+  return citationHost(c.url)
+}
+
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
   return String(n)

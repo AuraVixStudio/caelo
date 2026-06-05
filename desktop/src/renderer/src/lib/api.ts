@@ -9,9 +9,10 @@ export interface Conn {
 export interface ChatAttachment {
   id: string
   name: string
-  kind: 'image' | 'text'
-  uri?: string // image data-URI (kind === 'image')
+  kind: 'image' | 'text' | 'document'
+  uri?: string // data-URI (kind === 'image' or 'document')
   text?: string // file text (kind === 'text')
+  mime?: string // document mime (kind === 'document')
 }
 
 /** A source returned by live search (M10-F2). Deduped by url. */
@@ -38,10 +39,12 @@ export interface ChatMessage {
 /** Live-search mode (M10-F3): Auto = model decides, On = forced, Off = no tools. */
 export type SearchMode = 'auto' | 'on' | 'off'
 
-/** Część treści multimodalnej dla /chat/completions (tekst lub obraz). */
+/** Część treści multimodalnej (tekst / obraz / dokument). Obraz → vision (B3),
+ *  dokument → Q&A nad dokumentem (B4); backend mapuje je na format Responses API. */
 export type ContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
+  | { type: 'document'; document: { data: string; mime: string; name: string } }
 
 /** Wiadomość w formacie API (content może być stringiem lub listą part-ów). */
 export interface ApiChatMessage {

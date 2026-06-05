@@ -12,6 +12,7 @@ import {
   ArrowUp,
   Copy,
   ExternalLink,
+  FileText,
   Globe,
   Mic,
   PanelLeftClose,
@@ -28,7 +29,7 @@ import { type ChatMessage, type Conn, type SearchMode, type ToolEvent } from '..
 import { saveSettings, useModels, useSettings } from '../lib/serverState'
 import { toApiMessages } from '../lib/attachments'
 import {
-  citationHost,
+  citationLabel,
   dedupeCitations,
   formatUsage,
   searchActivityLabel
@@ -85,12 +86,14 @@ const ChatMessageRow = memo(function ChatMessageRow({
   message,
   index,
   isSpeaking,
+  basedOnDocument,
   onCopy,
   onSpeak
 }: {
   message: ChatMessage
   index: number
   isSpeaking: boolean
+  basedOnDocument: boolean
   onCopy: (content: string) => void
   onSpeak: (idx: number, content: string) => void
 }) {
@@ -128,6 +131,14 @@ const ChatMessageRow = memo(function ChatMessageRow({
           <Sparkles size={12} />
         </span>
         Grok
+        {basedOnDocument ? (
+          <span
+            className="flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted"
+            title="This answer is grounded in the attached document"
+          >
+            <FileText size={10} /> Based on document
+          </span>
+        ) : null}
       </div>
       {m.content ? (
         <Markdown text={m.content} />
@@ -148,7 +159,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
                 className="flex max-w-[220px] items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-xs text-muted outline-none transition-colors hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
               >
                 <span className="shrink-0 text-muted/70">{ci + 1}.</span>
-                <span className="truncate">{c.title || citationHost(c.url)}</span>
+                <span className="truncate">{citationLabel(c)}</span>
                 <ExternalLink size={11} className="shrink-0 opacity-70" />
               </a>
             ))}
@@ -661,6 +672,10 @@ export function ChatView({ conn }: { conn: Conn }) {
                   message={m}
                   index={i}
                   isSpeaking={tts.speakingIdx === i}
+                  basedOnDocument={
+                    m.role === 'assistant' &&
+                    !!messages[i - 1]?.attachments?.some((a) => a.kind === 'document')
+                  }
                   onCopy={copyMessage}
                   onSpeak={tts.speak}
                 />

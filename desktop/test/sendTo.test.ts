@@ -37,22 +37,33 @@ describe('inputBlockToAttachment', () => {
     })
   })
 
-  it('falls back to a generic name and returns null for unsupported (document) blocks', () => {
+  it('falls back to a generic name for blocks with no name', () => {
     const img: InputBlock = {
       ...base,
       name: '',
       block: { type: 'image_url', image_url: { url: 'data:image/png;base64,BB' } }
     }
     expect(inputBlockToAttachment(img)?.name).toBe('image')
+  })
 
+  it('maps a document block to a document attachment (M10-F5)', () => {
     const doc: InputBlock = {
       artifact_id: 'd2',
       type: 'file',
       mode: 'chat',
       mime: 'application/pdf',
       name: 'a.pdf',
-      block: { type: 'document', document: { data: 'data:application/pdf;base64,CC', mime: 'application/pdf', name: 'a.pdf' } }
+      block: {
+        type: 'document',
+        document: { data: 'data:application/pdf;base64,CC', mime: 'application/pdf', name: 'a.pdf' }
+      }
     }
-    expect(inputBlockToAttachment(doc)).toBeNull()
+    expect(inputBlockToAttachment(doc)).toEqual({
+      id: 'art:d2',
+      name: 'a.pdf',
+      kind: 'document',
+      uri: 'data:application/pdf;base64,CC',
+      mime: 'application/pdf'
+    })
   })
 })

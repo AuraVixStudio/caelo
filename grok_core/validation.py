@@ -19,6 +19,7 @@ MAX_IMAGE_URI = 12 * 1024 * 1024   # ~9 MB obrazu zakodowanego w base64 (znaki)
 MAX_VIDEO_URI = 64 * 1024 * 1024   # data-URI wideo (znaki)
 MAX_TTS_TEXT = 8000        # długość tekstu do TTS
 MAX_STT_B64 = 30 * 1024 * 1024     # ~22 MB audio w base64 (znaki)
+MAX_DOCUMENT_URI = 48 * 1024 * 1024  # data-URI dokumentu (PDF/arkusz) w base64 (znaki) — M10-B4
 
 # Historia/artefakty huba (M9-B3) — limity zapytań GET /history /artifacts.
 MAX_HISTORY_QUERY = 256    # długość frazy szukania (q, FTS)
@@ -38,6 +39,18 @@ def validate_image_uri(uri: str) -> str:
         raise ValueError("image must be a data:image/*;base64 URI")
     if len(uri) > MAX_IMAGE_URI:
         raise ValueError(f"image too large (> {MAX_IMAGE_URI // (1024 * 1024)} MB)")
+    return uri
+
+
+def validate_document_uri(uri: str) -> str:
+    """Wymaga `data:<mime>;base64,…` dokumentu (np. PDF/arkusz) w rozsądnym rozmiarze
+    (M10-B4). Zwraca URI albo rzuca ValueError (anti-OOM przy załączniku w czacie)."""
+    if not isinstance(uri, str) or not uri.startswith("data:"):
+        raise ValueError("document must be a data:<mime>;base64 URI")
+    if ";base64," not in uri[:128]:
+        raise ValueError("document must be base64-encoded")
+    if len(uri) > MAX_DOCUMENT_URI:
+        raise ValueError(f"document too large (> {MAX_DOCUMENT_URI // (1024 * 1024)} MB)")
     return uri
 
 

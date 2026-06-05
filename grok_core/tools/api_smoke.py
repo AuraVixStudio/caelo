@@ -264,6 +264,30 @@ def _unit_responses_client(checks: list) -> None:
     checks.append(("responses: usage captured", res["usage"].get("output_tokens") == 34))
     checks.append(("responses: mode=off attaches no tools", rc.build_search_tools("off") is None))
 
+    # M10-B4: document content part → Responses `input_file` (Q&A nad dokumentem inline).
+    doc_in = rc.to_input([{"role": "user", "content": [
+        {"type": "text", "text": "summarize"},
+        {"type": "document", "document": {
+            "data": "data:application/pdf;base64,JVBERi0xLjQK", "mime": "application/pdf",
+            "name": "report.pdf"}}]}])
+    doc_parts = doc_in[0]["content"] if doc_in else []
+    checks.append(("responses: document part -> input_file (B4)",
+                   any(p.get("type") == "input_file" and p.get("filename") == "report.pdf"
+                       and str(p.get("file_data", "")).startswith("data:application/pdf")
+                       for p in doc_parts)))
+
+    # B4: dokument przekraczający cap jest POMINIĘTY (anti-OOM), bez wywracania tury.
+    import grok_core.validation as Vmod  # noqa: E402
+    cap = Vmod.MAX_DOCUMENT_URI
+    Vmod.MAX_DOCUMENT_URI = 64
+    try:
+        over = rc.to_input([{"role": "user", "content": [
+            {"type": "document", "document": {
+                "data": "data:application/pdf;base64," + "A" * 200, "name": "big.pdf"}}]}])
+    finally:
+        Vmod.MAX_DOCUMENT_URI = cap
+    checks.append(("responses: oversize document skipped (cap, no crash)", over == []))
+
 
 def _unit_chat_bridge(checks: list) -> None:
     """M10/P1-3: most czatu na **Responses API** — delty przyrostowe, done z full,

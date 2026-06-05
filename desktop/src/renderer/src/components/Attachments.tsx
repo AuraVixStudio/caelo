@@ -3,6 +3,12 @@ import { Paperclip, X } from 'lucide-react'
 import type { ChatAttachment } from '../lib/api'
 import { cn } from '../lib/cn'
 
+/** Short uppercase badge for a document chip, e.g. "report.pdf" -> "PDF". */
+function extBadge(name: string): string {
+  const ext = name.split('.').pop() || ''
+  return (ext || 'doc').slice(0, 3).toUpperCase()
+}
+
 /** Przycisk dołączania plików (spinacz) z ukrytym <input type=file multiple>. */
 export function AttachButton({
   onPick,
@@ -17,7 +23,7 @@ export function AttachButton({
     // P2-6: input jest `sr-only` (nie `hidden`), więc pozostaje fokusowalny z klawiatury;
     // etykieta dostaje pierścień fokusu, gdy input jest aktywny.
     <label
-      title="Attach images or text files"
+      title="Attach images, documents (PDF/sheets), or text files"
       className={cn(
         'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted transition-colors hover:bg-surface-2 hover:text-fg',
         'focus-within:ring-2 focus-within:ring-accent',
@@ -30,7 +36,7 @@ export function AttachButton({
         type="file"
         multiple
         className="sr-only"
-        aria-label="Attach images or text files"
+        aria-label="Attach images, documents, or text files"
         disabled={disabled}
         onChange={(e: ChangeEvent<HTMLInputElement>) => {
           onPick(e.target.files)
@@ -63,7 +69,7 @@ export function AttachmentChips({
             <img src={a.uri} alt={a.name} className="h-6 w-6 rounded object-cover" />
           ) : (
             <span className="flex h-6 w-6 items-center justify-center rounded bg-surface text-[9px] font-bold uppercase text-muted">
-              Txt
+              {a.kind === 'document' ? extBadge(a.name) : 'Txt'}
             </span>
           )}
           <span className="max-w-[140px] truncate">{a.name}</span>

@@ -5,6 +5,7 @@ import {
   searchActivityLabel,
   dedupeCitations,
   citationHost,
+  citationLabel,
   formatUsage
 } from '../src/renderer/src/lib/searchState'
 
@@ -70,6 +71,21 @@ describe('citationHost', () => {
   })
   it('returns the input on parse failure', () => {
     expect(citationHost('not a url')).toBe('not a url')
+  })
+})
+
+describe('citationLabel', () => {
+  it('uses a real title when present', () => {
+    expect(citationLabel({ url: 'https://x.ai/news', title: 'Grok 4 announcement' })).toBe(
+      'Grok 4 announcement'
+    )
+  })
+  it('falls back to the host when title is a bare reference number', () => {
+    // The live Responses API returns titles like "1", "2" — show the domain instead.
+    expect(citationLabel({ url: 'https://openrouter.ai/grok', title: '3' })).toBe('openrouter.ai')
+  })
+  it('falls back to the host when title is empty', () => {
+    expect(citationLabel({ url: 'https://www.theverge.com/a/b' })).toBe('theverge.com')
   })
 })
 
