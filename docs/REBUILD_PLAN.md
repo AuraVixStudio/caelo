@@ -549,18 +549,19 @@ rekonsoliduje **aktualny stan**, by §1–12 nie wprowadzały w błąd (P3-5).
   · `POST /voice/tts` · `POST /voice/stt` · `GET /history` · `GET`/`PUT /config/output-dir`
   · `GET`/`POST /fs/workspace` · `GET /fs/tree` · `GET /fs/read` · `GET /fs/recent` · `POST /fs/write`
   · `GET /git/status` · `GET /git/diff` · `POST /git/add` · `POST /git/commit` · `GET`/`DELETE /permissions`
-  · `GET /collections` · `POST /collections/files` · `DELETE /collections/files/{id}`.
+  · `GET /collections` · `POST /collections/files` · `GET /collections/files/{id}/content` · `DELETE /collections/files/{id}`.
 - **WebSocket** (token w query `?token=`): `WS /chat/stream` · `WS /agent/stream` · `WS /terminal` · `WS /voice/realtime`.
 
 **M10 KOMPLETNY (czat na Responses API, 2026-06-05):** rdzeń `/chat/stream` chodzi przez
 **`grok_core/responses_client.py`** (`POST /v1/responses`, streaming) z **live search**
 (`web_search`/`x_search`), **wizją** (rodzina grok-4), **Q&A nad dokumentem** (`input_file`),
 **cytowaniami** i licznikiem kosztów; legacy `chat/completions` zostaje tylko jako fallback
-czystego czatu. **Kolekcje per projekt** (`collections_client.py` — vector stores/files; tabela
-`collection_files` + `projects.vector_store_id`) dają `file_search` nad wgranymi dokumentami w
-wielu rozmowach. Nowe ramki WS: `tool_call` · `citations` · `usage`; pola `chat`: `search_mode`
-(auto/on/off) + `sources`. Live search + dokumenty **potwierdzone na realnym API**. Pełny status
-w **[`PLAN_M10_CZAT.md`](PLAN_M10_CZAT.md)** §6.
+czystego czatu. **Wiedza projektu** (B5): xAI nie ma serwerowych vector stores
+(`/v1/vector_stores` → 404), więc dokumenty są trzymane **lokalnie** (`config.PROJECT_DOCS_DIR`,
+tabela `collection_files`) i dołączane do wiadomości jako `input_file` **na żądanie** („Attach
+all"). Nowe ramki WS: `tool_call` · `citations` · `usage`; pola `chat`: `search_mode`
+(auto/on/off) + `sources`. Live search + Q&A nad dokumentem **potwierdzone na realnym API**.
+Pełny status w **[`PLAN_M10_CZAT.md`](PLAN_M10_CZAT.md)** §6.
 
 **Wersja produktu (P3-4):** jedno źródło prawdy = `desktop/package.json`; sidecar raportuje ją w
 handshake / `/health` / `/whoami` (env `GROK_CORE_APP_VERSION` ← Electron, z odczytem package.json jako

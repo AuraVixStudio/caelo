@@ -102,20 +102,25 @@ class Project:
 
 @dataclass
 class CollectionFile:
-    """Dokument w kolekcji projektu (M10-B5): mapuje plik xAI (`file_id`) w vector
-    store (`vector_store_id`) na metadane do listy w UI."""
+    """Dokument w „wiedzy projektu" (M10-B5). xAI nie wspiera serwerowych vector
+    stores (`/v1/vector_stores` → 404), więc dokument jest trzymany **lokalnie**
+    (`path` pod `DATA_DIR/project_docs`) i dołączany do wiadomości jako `input_file`
+    na żądanie (przycisk „Attach all"). Pola `vector_store_id`/`file_id` zostają dla
+    zgodności schematu (puste)."""
     id: str
     project_id: str
-    vector_store_id: str
-    file_id: str
     name: str = ""
+    path: str = ""
+    mime: str = ""
     bytes: int = 0
     created_at: float = 0.0
+    vector_store_id: str = ""
+    file_id: str = ""
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "project_id": self.project_id,
-                "vector_store_id": self.vector_store_id, "file_id": self.file_id,
-                "name": self.name, "bytes": self.bytes, "created_at": self.created_at}
+        return {"id": self.id, "project_id": self.project_id, "name": self.name,
+                "path": self.path, "mime": self.mime, "bytes": self.bytes,
+                "created_at": self.created_at}
 
 
 def _fts_query(q: str) -> str:
@@ -228,9 +233,11 @@ class HistoryStore:
                 CREATE TABLE IF NOT EXISTS collection_files (
                     id              TEXT PRIMARY KEY,
                     project_id      TEXT NOT NULL,
-                    vector_store_id TEXT NOT NULL,
-                    file_id         TEXT NOT NULL,
+                    vector_store_id TEXT NOT NULL DEFAULT '',
+                    file_id         TEXT NOT NULL DEFAULT '',
                     name            TEXT NOT NULL DEFAULT '',
+                    path            TEXT NOT NULL DEFAULT '',
+                    mime            TEXT NOT NULL DEFAULT '',
                     bytes           INTEGER NOT NULL DEFAULT 0,
                     created_at      REAL NOT NULL
                 );
@@ -243,11 +250,17 @@ class HistoryStore:
                 );
                 """
             )
-            # M10-B5: dołóż kolumnę vector_store_id do istniejącej tabeli projects
-            # (migracja — CREATE TABLE IF NOT EXISTS nie dodaje kolumn do starej bazy).
-            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(projects)")}
-            if "vector_store_id" not in cols:
+            # M10-B5: migracje kolumn (CREATE TABLE IF NOT EXISTS nie dodaje kolumn
+            # do istniejącej tabeli) — vector_store_id w projects (relikt), path+mime
+            # w collection_files (lokalne przechowywanie dokumentów wiedzy projektu).
+            pcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(projects)")}
+            if "vector_store_id" not in pcols:
                 self._conn.execute("ALTER TABLE projects ADD COLUMN vector_store_id TEXT")
+            ccols = {r["name"] for r in self._conn.execute("PRAGMA table_info(collection_files)")}
+            if "path" not in ccols:
+                self._conn.execute("ALTER TABLE collection_files ADD COLUMN path TEXT NOT NULL DEFAULT ''")
+            if "mime" not in ccols:
+                self._conn.execute("ALTER TABLE collection_files ADD COLUMN mime TEXT NOT NULL DEFAULT ''")
 
     # --- artefakty ------------------------------------------------------------
 
@@ -406,23 +419,23 @@ class HistoryStore:
                 (vector_store_id, project_id),
             )
 
-    def add_collection_file(self, *, project_id: str, vector_store_id: str,
-                            file_id: str, name: str = "", bytes: int = 0,
-                            id: Optional[str] = None,
+    def add_collection_file(self, *, project_id: str, name: str = "", path: str = "",
+                            mime: str = "", bytes: int = 0, vector_store_id: str = "",
+                            file_id: str = "", id: Optional[str] = None,
                             created_at: Optional[float] = None) -> CollectionFile:
         cf = CollectionFile(
-            id=id or uuid.uuid4().hex, project_id=project_id,
-            vector_store_id=vector_store_id, file_id=file_id, name=name,
-            bytes=int(bytes or 0),
+            id=id or uuid.uuid4().hex, project_id=project_id, name=name, path=path,
+            mime=mime, bytes=int(bytes or 0), vector_store_id=vector_store_id,
+            file_id=file_id,
             created_at=time.time() if created_at is None else float(created_at),
         )
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO collection_files "
-                "(id, project_id, vector_store_id, file_id, name, bytes, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(id, project_id, vector_store_id, file_id, name, path, mime, bytes, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (cf.id, cf.project_id, cf.vector_store_id, cf.file_id, cf.name,
-                 cf.bytes, cf.created_at),
+                 cf.path, cf.mime, cf.bytes, cf.created_at),
             )
         return cf
 
@@ -494,10 +507,13 @@ class HistoryStore:
 
     @staticmethod
     def _row_to_collection_file(row: sqlite3.Row) -> CollectionFile:
+        keys = row.keys()
         return CollectionFile(
-            id=row["id"], project_id=row["project_id"],
+            id=row["id"], project_id=row["project_id"], name=row["name"],
+            path=row["path"] if "path" in keys else "",
+            mime=row["mime"] if "mime" in keys else "",
+            bytes=row["bytes"], created_at=row["created_at"],
             vector_store_id=row["vector_store_id"], file_id=row["file_id"],
-            name=row["name"], bytes=row["bytes"], created_at=row["created_at"],
         )
 
     def close(self) -> None:

@@ -216,15 +216,17 @@ Ostatni element — **B5 (kolekcje/`file_search`)** — domknięty (trwała wied
   (search nie ma fallbacku — `search_parameters` = 410). Nowe ramki WS: `tool_call`,
   `citations`, `usage`. Pola wejścia: `search_mode` (domyślnie `off` — bez kosztu bez zgody),
   `sources`.
-- **B5 ✅ kolekcje (`file_search`) — trwała wiedza projektu** — nowy izolowany
-  **`collections_client.py`** (xAI vector stores/files: `upload_file`→`create_vector_store`→
-  `add_file_to_store`, `delete`, `file_search_tool`); `history_store`: kolumna
-  `vector_store_id` w `projects` (migracja `ALTER TABLE`) + tabela `collection_files` +
-  metody; `Backend.collection_upload/files/remove/current_vector_store_id` (vector store leniwie
-  per projekt); `routes/collections.py` (`POST /collections/files` data-URI JSON — bez nowej
-  zależności `python-multipart`; `GET /collections`; `DELETE /collections/files/{id}`); chat
-  **auto-dołącza `file_search`** nad kolekcją aktywnego projektu (grok-4), niezależnie od
-  web-searcha. Aktywność widoczna jako „Searching files…" (`_classify_tool` „file_search").
+- **B5 ✅ wiedza projektu — LOKALNA, dołączana na żądanie** ⚠️ **PIVOT (2026-06-05):** xAI
+  **nie wspiera** serwerowych vector stores (`/v1/vector_stores` → **404**, potwierdzone przez
+  usera), więc `file_search` odpadł. Zamiast tego: dokumenty trzymane **lokalnie** pod
+  `config.PROJECT_DOCS_DIR` (`DATA_DIR/project_docs/<project_id>`), dołączane do wiadomości jako
+  `input_file` **na żądanie** („Attach all") — ścieżka B4, sprawdzona. Bez kosztu per wiadomość;
+  user decyduje, kiedy. `history_store`: tabela `collection_files` (+ kolumny `path`,`mime`;
+  migracja `ALTER TABLE`); `Backend.collection_upload/files/file_path/remove` (zapis na dysk,
+  anty-traversal pod PROJECT_DOCS_DIR); `routes/collections.py`: `POST /collections/files`
+  (data-URI JSON), `GET /collections`, `GET /collections/files/{id}/content` (FileResponse,
+  sandbox), `DELETE …`. **`collections_client.py` USUNIĘTY** (był pod vector store); chat nie
+  dokłada już `file_search`.
 - **B6 ✅ (przez B2)** — `usage` (tokeny) + `tool_calls` emitowane ramką `usage` i zapisane
   w `meta` historii huba (`record_event`).
 - **`routes/settings.py`** — `chat_search_mode` + `chat_search_sources` (domyślny tryb per app).
@@ -245,7 +247,9 @@ Ostatni element — **B5 (kolekcje/`file_search`)** — domknięty (trwała wied
   document"** na odpowiedzi (gdy poprzednia tura miała dokument).
 - **F6 ✅** badge kosztu „N searches · X tokens" (`formatUsage`) na wiadomości.
 - **B5 UI ✅** `KnowledgePopover` (ikona Library w nagłówku): upload/list/remove dokumentów
-  kolekcji aktywnego projektu (`/collections`); hint „select a project", gdy brak projektu.
+  wiedzy aktywnego projektu + **„Attach all to message"** (pobiera treść każdego dokumentu →
+  `blobToDataUri` → załącznik `document` w composerze przez `onAttach=att.add`). Brak projektu →
+  **inline create/select** (lista projektów + pole „New project…"; przełącznik był tylko w History).
 - Czyste utile w `lib/searchState.ts` (Vitest: `searchState.test.ts`); document w
   `attachments.test.ts` + `sendTo.test.ts`.
 
@@ -260,27 +264,28 @@ Ostatni element — **B5 (kolekcje/`file_search`)** — domknięty (trwała wied
   niejasnego 4xx.
 
 **Zweryfikowane:**
-- **NA REALNYM API (user, 2026-06-05):** live search end-to-end — pytanie → server-side search →
-  odpowiedź z klikalnymi cytowaniami [1..7] + licznik „1 search · 12k tokens". Kształt drutu
-  Responses/searcha/cytowań/usage POTWIERDZONY w praktyce.
-- `api_smoke.py` — **142/142 PASS** (`_unit_responses_client`: UTF-8, balans `input`, zdarzenia
+- **NA REALNYM API (user, 2026-06-05):** live search end-to-end (pytanie → server-side search →
+  klikalne cytowania [1..7] + „1 search · 12k tokens") ORAZ **Q&A nad dokumentem** (załączony PDF
+  → trafne streszczenie). Kształt drutu Responses/search/citations/usage/`input_file` POTWIERDZONY.
+  **`/v1/vector_stores` → 404** (user) → B5 zpivotowane na lokalne dokumenty + „Attach all" (B4).
+- `api_smoke.py` — **141/141 PASS** (`_unit_responses_client`: UTF-8, balans `input`, zdarzenia
   narzędzi, dedup cytowań, usage, `off`→bez narzędzi, bearer z providera, document→`input_file`,
-  oversize-skip; **`_unit_collections`**: upload→store+file+attach, reuse store, list, remove,
-  trasy `/collections`, data-URI/projekt guard; `_unit_chat_bridge` — protokół, `tool_call`,
-  `citations`, fallback, gating wizji/dokumentu, **file_search attach/skip (grok-4)**, single-flight).
-  `agent_selfcheck.py` 81/81 — zero regresji (mimo migracji schematu `projects`).
+  oversize-skip; **`_unit_collections`** (lokalne): upload→plik na dysku+rekord(path/mime), list,
+  content (FileResponse), remove, **anty-traversal** pod PROJECT_DOCS_DIR, data-URI/projekt guard;
+  `_unit_chat_bridge` — protokół, `tool_call`,
+  `citations`, fallback, gating wizji/dokumentu, single-flight).
+  `agent_selfcheck.py` 81/81 — zero regresji (mimo migracji schematu `projects`/`collection_files`).
 - `npm run typecheck` ✅. UI w podglądzie web (devMock): popover Auto/On/Off + źródła, panel
   **Sources**, badge kosztu, chip dokumentu (PDF) + „Based on document", **Knowledge popover
-  (Library)** — renderują się.
+  (Library) + inline create projektu** — renderują się.
 - Vitest (`searchState`/`attachments`/`sendTo`) **napisany**, ale devDep `vitest` nie jest
   zainstalowany w tym środowisku (jak w CLAUDE.md — wymaga jednorazowego `npm install -D`); logika
   sprawdzona typami + ręcznie.
 
-**Do weryfikacji po stronie użytkownika (pozostałe):** **kolekcje (B5)** na realnym API — kształt
-endpointów vector store (`/v1/files`, `/v1/vector_stores`, `/v1/vector_stores/{id}/files`) i narzędzia
-`file_search`; `tool_choice="required"` dla trybu „On"; czy tool-use działa na OAuth czy wymaga klucza
-API. Klient/konwersja TOLERANCYJNE i izolowane w `responses_client.py`/`collections_client.py` — łatwe
-do korekty po potwierdzeniu kształtu.
+**Do weryfikacji po stronie użytkownika (pozostałe):** **B5 lokalne** — pełny przepływ „Attach all"
+na maszynie usera (upload PDF do projektu → „Attach all" → wiadomość → odpowiedź ugruntowana). Mechanizm
+opiera się WYŁĄCZNIE na sprawdzonym `input_file` (B4 potwierdzony), więc ryzyko niskie. `tool_choice=
+"required"` dla trybu „On" (web search) — do potwierdzenia (izolowane w `responses_client.py`).
 
 **M10 zamknięty** — wszystkie kamienie B1–B6 + F1–F6 zrealizowane. Kolejny milestone wg roadmapy:
 **M13** (agent: zaufanie — diffy/plan/checkpoint/`GROK.md`).

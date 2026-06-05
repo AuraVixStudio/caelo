@@ -48,6 +48,9 @@ PERMISSIONS_FILE = DATA_DIR / "grok_permissions.json"  # agent allowlist ("Alway
 # M9-B1: kręgosłup huba — magazyn artefaktów + historii (SQLite + FTS5). Własny plik,
 # NIE dotyka grok_config.json (HistoryManager). Cross-platform (sqlite3 ze stdlib).
 HISTORY_DB_FILE = DATA_DIR / "grok_history.db"   # artifacts + history (grok_core.history_store)
+# M10-B5: lokalne dokumenty „wiedzy projektu" (xAI nie ma vector stores). Per projekt
+# podkatalog; dołączane do wiadomości jako input_file na żądanie ("Attach all").
+PROJECT_DOCS_DIR = DATA_DIR / "project_docs"
 
 
 def atomic_write_text(path, text: str) -> None:

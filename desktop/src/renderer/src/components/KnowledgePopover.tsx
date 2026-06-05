@@ -1,9 +1,11 @@
 import { useCallback, useState, type FormEvent } from 'react'
-import { FileText, Folder, Library, Loader2, Plus, Trash2 } from 'lucide-react'
+import { FileText, Folder, Library, Loader2, Paperclip, Plus, Trash2 } from 'lucide-react'
 import {
+  collectionFileDataUri,
   deleteCollectionFile,
   listCollection,
   uploadCollectionFile,
+  type ChatAttachment,
   type CollectionFile,
   type Conn
 } from '../lib/api'
@@ -19,7 +21,14 @@ import { Popover } from './ui/Popover'
  * (vector store xAI), przeszukiwane narzędziem `file_search` w wielu rozmowach
  * tego projektu (na modelach grok-4). Upload/list/remove przez `/collections`.
  */
-export function KnowledgePopover({ conn }: { conn: Conn }) {
+export function KnowledgePopover({
+  conn,
+  onAttach
+}: {
+  conn: Conn
+  /** Add a project document to the composer as an attachment ("Attach all"). */
+  onAttach: (a: ChatAttachment) => void
+}) {
   const hub = useHub()
   const [files, setFiles] = useState<CollectionFile[]>([])
   const [loading, setLoading] = useState(false)
@@ -103,6 +112,25 @@ export function KnowledgePopover({ conn }: { conn: Conn }) {
     }
   }
 
+  // "Attach all" — fetch each project document and add it to the composer as a
+  // document attachment (B4 input_file path). The user controls when to spend tokens.
+  async function attachAll(close: () => void): Promise<void> {
+    if (!files.length) return
+    setBusy(true)
+    setError(null)
+    try {
+      for (const f of files) {
+        const uri = await collectionFileDataUri(conn, f.id)
+        onAttach({ id: `coll:${f.id}`, name: f.name, kind: 'document', uri, mime: f.mime })
+      }
+      close()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Popover
       align="end"
@@ -122,7 +150,7 @@ export function KnowledgePopover({ conn }: { conn: Conn }) {
         />
       )}
     >
-      {() => (
+      {(close) => (
         <div className="w-72 p-2">
           <div className="mb-2 truncate text-xs font-medium text-muted">
             Project knowledge{projectName ? ` · ${projectName}` : ''}
@@ -210,9 +238,19 @@ export function KnowledgePopover({ conn }: { conn: Conn }) {
                 </ul>
               )}
               {files.length > 0 ? (
-                <p className="mt-2 text-[10px] leading-snug text-muted">
-                  Grok searches these documents on grok-4 models.
-                </p>
+                <>
+                  <button
+                    onClick={() => void attachAll(close)}
+                    disabled={busy}
+                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-accent-fg outline-none transition-colors hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                  >
+                    {busy ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
+                    Attach all to message ({files.length})
+                  </button>
+                  <p className="mt-1.5 text-[10px] leading-snug text-muted">
+                    Adds these documents to your next message so Grok can read them (grok-4).
+                  </p>
+                </>
               ) : null}
             </>
           )}

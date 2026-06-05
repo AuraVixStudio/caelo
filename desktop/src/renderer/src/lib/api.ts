@@ -1,6 +1,8 @@
 // Klient backendu grok-core: REST + WebSocket czatu.
 // baseUrl i token pochodzą z handshake'u (window.grok.getCore()).
 
+import { blobToDataUri } from './files'
+
 export interface Conn {
   baseUrl: string
   token: string
@@ -420,13 +422,14 @@ export const selectProject = (
 ): Promise<{ current_project_id: string | null; project: HubProject | null }> =>
   api(c, '/projects/current', { method: 'POST', body: JSON.stringify({ project_id: projectId }) })
 
-// --- Project collections (M10-B5): persistent knowledge / file_search ---
+// --- Project knowledge (M10-B5): documents stored locally per project, attached
+// to a message on demand ("Attach all"). xAI has no server-side vector stores. ---
 export interface CollectionFile {
   id: string
   project_id: string
-  vector_store_id: string
-  file_id: string
   name: string
+  path: string
+  mime: string
   bytes: number
   created_at: number
 }
@@ -436,8 +439,7 @@ export const listCollection = (
 ): Promise<{ files: CollectionFile[]; project_id: string | null; has_collection: boolean }> =>
   api(c, '/collections')
 
-/** Upload a document (data-URI) to the active project's collection. Indexing on the
- *  xAI side can take a while, so give it a generous timeout. */
+/** Save a document (data-URI) to the active project's knowledge (stored locally). */
 export const uploadCollectionFile = (
   c: Conn,
   name: string,
@@ -451,6 +453,16 @@ export const uploadCollectionFile = (
 
 export const deleteCollectionFile = (c: Conn, id: string): Promise<{ ok: boolean }> =>
   api(c, `/collections/files/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+/** Fetch a project document's bytes as a data-URI, to attach it to a message. */
+export async function collectionFileDataUri(c: Conn, id: string): Promise<string> {
+  const res = await fetch(c.baseUrl + `/collections/files/${encodeURIComponent(id)}/content`, {
+    headers: { Authorization: `Bearer ${c.token}` },
+    signal: AbortSignal.timeout(60_000)
+  })
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  return blobToDataUri(await res.blob())
+}
 
 // --- Workspace / files / git (mini-IDE) ---
 export interface TreeEntry {

@@ -518,7 +518,7 @@ export function ChatView({ conn }: { conn: Conn }) {
             <ModelSelect value={model} models={models} onChange={onModelChange} />
           </div>
           <div className="ml-auto flex items-center gap-1">
-            <KnowledgePopover conn={conn} />
+            <KnowledgePopover conn={conn} onAttach={att.add} />
             <Popover
               align="end"
               label="Live search"
