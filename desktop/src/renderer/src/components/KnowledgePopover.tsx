@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { FileText, Library, Loader2, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useState, type FormEvent } from 'react'
+import { FileText, Folder, Library, Loader2, Plus, Trash2 } from 'lucide-react'
 import {
   deleteCollectionFile,
   listCollection,
@@ -9,7 +9,9 @@ import {
 } from '../lib/api'
 import { fileToDataUri } from '../lib/files'
 import { useHub } from '../lib/hub'
+import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
+import { Input } from './ui/Input'
 import { Popover } from './ui/Popover'
 
 /**
@@ -23,6 +25,7 @@ export function KnowledgePopover({ conn }: { conn: Conn }) {
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [newProject, setNewProject] = useState('')
 
   const projectName = hub.projects.find((p) => p.id === hub.currentProjectId)?.name
 
@@ -68,6 +71,38 @@ export function KnowledgePopover({ conn }: { conn: Conn }) {
     }
   }
 
+  // No active project? Let the user create or pick one right here (the project
+  // switcher otherwise only lives in History) — then load its collection.
+  async function pickProject(id: string): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      await hub.selectProject(id)
+      await load()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createProject(e: FormEvent): Promise<void> {
+    e.preventDefault()
+    const n = newProject.trim()
+    if (!n) return
+    setBusy(true)
+    setError(null)
+    try {
+      await hub.createProject(n)
+      setNewProject('')
+      await load()
+    } catch (err) {
+      setError(String((err as Error)?.message || err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Popover
       align="end"
@@ -93,10 +128,43 @@ export function KnowledgePopover({ conn }: { conn: Conn }) {
             Project knowledge{projectName ? ` · ${projectName}` : ''}
           </div>
           {!hub.currentProjectId ? (
-            <p className="text-xs leading-snug text-muted">
-              Select or create a project to add documents Grok can search across every chat in
-              that project.
-            </p>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs leading-snug text-muted">
+                Documents live in a project. Pick one or create a project to add knowledge Grok can
+                search across its chats.
+              </p>
+              {hub.projects.length ? (
+                <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto">
+                  {hub.projects.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => void pickProject(p.id)}
+                      disabled={busy}
+                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-fg outline-none transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+                    >
+                      <Folder size={13} className="shrink-0 text-muted" />
+                      <span className="truncate">{p.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <form onSubmit={createProject} className="flex items-center gap-1">
+                <Input
+                  value={newProject}
+                  onChange={(e) => setNewProject(e.target.value)}
+                  placeholder="New project…"
+                  aria-label="New project name"
+                  className="h-8"
+                  disabled={busy}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  icon={busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  disabled={!newProject.trim() || busy}
+                />
+              </form>
+            </div>
           ) : (
             <>
               <label className="mb-2 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted outline-none transition-colors hover:border-accent hover:text-fg focus-within:ring-2 focus-within:ring-accent">
