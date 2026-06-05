@@ -311,9 +311,11 @@ def _unit_collections(checks: list) -> None:
 
     class _Resp:
         encoding = "utf-8"
+        text = ""
 
-        def __init__(self, body):
+        def __init__(self, body, status=200):
             self._b = body
+            self.status_code = status
 
         def raise_for_status(self):
             pass
@@ -408,6 +410,29 @@ def _unit_collections(checks: list) -> None:
             except ValidationError:
                 bad = True
             checks.append(("/collections upload non-data-URI rejected", bad))
+
+            # B5: błąd HTTP z xAI → CollectionUpstreamError(status) → trasa 502 z hintem.
+            from grok_core.collections_client import CollectionUpstreamError  # noqa: E402
+
+            def _post_404(url, **kw):
+                return _Resp({"error": "not found"}, status=404)
+
+            cc.requests = types.SimpleNamespace(post=_post_404, delete=_delete)
+            b.current_project_id = proj.id  # przywróć aktywny projekt (był None wyżej)
+            raised_status = None
+            try:
+                b.collection_upload(b"x", "z.pdf")
+            except CollectionUpstreamError as e:
+                raised_status = e.status
+            checks.append(("collections: xAI HTTP error -> CollectionUpstreamError(404)",
+                           raised_status == 404))
+            r502 = None
+            try:
+                coll_route.upload_collection_file(
+                    coll_route.UploadDocReq(name="z.pdf", data=data_uri), b=b)
+            except HTTPException as e:
+                r502 = e.status_code
+            checks.append(("/collections upload upstream error -> 502", r502 == 502))
         except Exception as exc:  # noqa: BLE001
             checks.append((f"collections: scenario ran ({exc})", False))
         finally:

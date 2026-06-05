@@ -31,12 +31,50 @@ TIMEOUT_UPLOAD = 180   # upload pliku (PDF/arkusz) bywa duży
 TIMEOUT_API = 60       # create store / attach / delete
 
 
+class CollectionUpstreamError(Exception):
+    """Błąd z endpointu vector store/files xAI — niesie **status HTTP** + krótki
+    fragment odpowiedzi (do logu serwera). Pozwala odróżnić „xAI nie wspiera kolekcji"
+    (404) od złego pola/`purpose` (400/422) czy auth (401/403). UI dostaje sam status
+    + krótki komunikat (nie surowe szczegóły xAI — P1-13)."""
+
+    def __init__(self, status: int, what: str, body: str = "") -> None:
+        super().__init__(f"{what} (HTTP {status})")
+        self.status = status
+        self.what = what
+        self.body = body
+
+
 def _auth_header(api_key: str) -> dict:
     return {"Authorization": f"Bearer {api_key}"}
 
 
 def _base() -> str:
     return config.API_BASE
+
+
+def _check(r, what: str, *, want_id: bool = True) -> Optional[str]:
+    """Wspólna obsługa odpowiedzi xAI: błąd HTTP / brak `id` → CollectionUpstreamError
+    z czytelnym statusem (i krótkim body do logu)."""
+    if r.status_code >= 400:
+        body = ""
+        try:
+            body = (r.text or "")[:400]
+        except Exception:
+            pass
+        raise CollectionUpstreamError(r.status_code, what, body)
+    if not want_id:
+        return None
+    try:
+        r.encoding = "utf-8"
+        data = r.json()
+    except Exception:
+        raise CollectionUpstreamError(r.status_code, f"{what}: non-JSON response",
+                                      (getattr(r, "text", "") or "")[:400])
+    fid = data.get("id") if isinstance(data, dict) else None
+    if not fid:
+        raise CollectionUpstreamError(r.status_code, f"{what}: response has no 'id'",
+                                      str(data)[:400])
+    return fid
 
 
 def upload_file(data: bytes, filename: str, api_key_provider: Callable[[], str],
@@ -47,9 +85,7 @@ def upload_file(data: bytes, filename: str, api_key_provider: Callable[[], str],
     files = {"file": (filename or "document", data)}
     r = requests.post(f"{_base()}/files", headers=_auth_header(api_key),
                       data={"purpose": purpose}, files=files, timeout=TIMEOUT_UPLOAD)
-    r.raise_for_status()
-    r.encoding = "utf-8"
-    return r.json()["id"]
+    return _check(r, "upload file")
 
 
 def create_vector_store(name: str, api_key_provider: Callable[[], str],
@@ -62,9 +98,7 @@ def create_vector_store(name: str, api_key_provider: Callable[[], str],
     headers = {**_auth_header(api_key), "Content-Type": "application/json"}
     r = requests.post(f"{_base()}/vector_stores", headers=headers, json=payload,
                       timeout=TIMEOUT_API)
-    r.raise_for_status()
-    r.encoding = "utf-8"
-    return r.json()["id"]
+    return _check(r, "create vector store")
 
 
 def add_file_to_store(vector_store_id: str, file_id: str,
@@ -74,7 +108,7 @@ def add_file_to_store(vector_store_id: str, file_id: str,
     headers = {**_auth_header(api_key), "Content-Type": "application/json"}
     r = requests.post(f"{_base()}/vector_stores/{vector_store_id}/files",
                       headers=headers, json={"file_id": file_id}, timeout=TIMEOUT_API)
-    r.raise_for_status()
+    _check(r, "attach file to vector store", want_id=False)
 
 
 def delete_file_from_store(vector_store_id: str, file_id: str,

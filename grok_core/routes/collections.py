@@ -18,15 +18,31 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from grok_core import validation as V
+from grok_core.collections_client import CollectionUpstreamError
 from grok_core.errors import upstream_error
 from grok_core.state import Backend, get_backend
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["collections"])
+
+
+def _hint_for_status(status: int) -> str:
+    """Krótka, pomocna wskazówka dla użytkownika na podstawie statusu xAI."""
+    if status == 404:
+        return ("xAI returned 404 — this key/endpoint may not support file collections "
+                "(vector stores / file_search).")
+    if status in (401, 403):
+        return "xAI rejected the request (auth). Server-side tools may require an API key, not OAuth."
+    if status in (400, 422):
+        return "xAI rejected the upload (bad request) — the vector-store API shape may differ."
+    return f"xAI rejected the upload (HTTP {status})."
 
 
 class UploadDocReq(BaseModel):
@@ -64,6 +80,10 @@ def upload_collection_file(req: UploadDocReq, b: Backend = Depends(get_backend))
         cf = b.collection_upload(raw, req.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except CollectionUpstreamError as exc:
+        # Surowe body tylko do logu (diagnostyka), do UI status + krótka wskazówka.
+        log.error("Collection upload failed: %s :: %s", exc, exc.body)
+        raise HTTPException(status_code=502, detail=_hint_for_status(exc.status))
     except Exception as exc:  # noqa: BLE001
         raise upstream_error(exc, "Could not add the document to the project collection")
     return {"file": cf.to_dict()}
