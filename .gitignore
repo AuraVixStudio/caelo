@@ -26,6 +26,9 @@ desktop/node_modules/
 desktop/out/
 desktop/dist/
 desktop/.vite/
+# Playwright E2E (P3-11): artefakty nieudanych testów + raport.
+desktop/test-results/
+desktop/playwright-report/
 
 # ── Dane użytkownika i sekrety (NIE commitować) ──
 # Jawne nazwy (dokumentują, które pliki istnieją) + SIATKA wzorców (P3-3): wcześniej

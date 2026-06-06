@@ -60,12 +60,19 @@ Testy end-to-end sterują **realną przeglądarką** nad `preview:web` (Vite na 
 sidecara**. Pokrywają powłokę: ładowanie/„Connected", nawigację po modułach (rail + `aria-current`)
 i paletę **Ctrl-K** ([`e2e/*.spec.ts`](e2e/), config [`playwright.config.ts`](playwright.config.ts)).
 
-Aktywacja (osobny tor — **nie** w `npm test`/`typecheck`/domyślnym CI):
+Biegną w **CI** (osobny job `e2e` w `ci.yml`) i lokalnie (`@playwright/test` jest w `devDependencies`):
 ```powershell
-npm install -D @playwright/test     # raz: devDep + lockfile
-npx playwright install chromium     # binaria przeglądarki (~130 MB, z CDN Playwrighta)
-npm run test:e2e                     # podnosi preview:web i uruchamia specy z e2e/
+npx playwright install chromium     # raz: binaria przeglądarki (~130 MB, z CDN Playwrighta)
+npm run test:e2e                     # podnosi preview:web i uruchamia specy z e2e/ (headless)
 ```
+> **Restrykcyjna sieć (TLS-interception blokuje CDN Playwrighta)?** Jeśli nie da się dociągnąć
+> buildu pasującego do `@playwright/test`, wskaż **pre-zainstalowaną** przeglądarkę:
+> `$env:E2E_CHROMIUM_PATH="…\ms-playwright\chromium-<v>\chrome-win64\chrome.exe"; npm run test:e2e`.
+> Config czyta tę zmienną opcjonalnie (domyślnie standardowe zachowanie — CI dociąga build sam).
+
+E2E jest **deterministyczne**: `workers: 1` (jeden współdzielony `preview:web`), a specy czekają na
+gotową powłokę przed interakcją (np. przed `Ctrl-K`). Przepływy z **danymi backendu** (send-to z realnymi
+danymi) wymagałyby mocka REST (`page.route()`) — to kolejny podetap; tu walidujemy nawigację/powłokę.
 
 > Przepływy z **danymi backendu** (send-to, przełączanie projektu z realnymi danymi) wymagają mocka
 > REST (`page.route()`); tu walidujemy nawigację/powłokę. Rozbudowa = kolejny podetap.

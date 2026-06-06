@@ -111,3 +111,32 @@ jobs:
 
       - name: Unit tests (Vitest)
         run: npm test
+
+  e2e:
+    # P3-11: testy E2E (Playwright) nad `preview:web` (Vite + atrapa window.caelo z
+    # lib/devMock) — renderer BEZ Electrona/sidecara. Walidują powłokę: ładowanie/
+    # "Connected", nawigację po rail (aria-current), paletę Ctrl-K. Osobny job: pobiera
+    # binaria przeglądarki (CI ma sieć — dociąga build pasujący do @playwright/test).
+    name: Frontend E2E (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright chromium (+ system deps)
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E (Playwright on preview:web + devMock)
+        run: npm run test:e2e

@@ -1,11 +1,10 @@
 # Plan naprawy słabych stron (Runda 3) — Caelo Desktop
 
-> **Status:** 🔄 W TRAKCIE (2026-06-06) — **6/8 zrobione: P1-15 ✅, P2-13 ✅, P2-14 ✅, P3-10 ✅, P3-12 ✅,
-> P3-14 ✅** (logowanie cichych `except`; dekompozycja `state.py` 691→378; `sandbox:true` + log no-token;
-> devDeps→lockfile; CI backendu na matrycy 3 OS; dokumentacja użytkownika + API) + **2 częściowo: P3-11 🔄**
-> (33 testy komponentów RTL/jsdom `npm test` 155/155 + scaffold E2E — brak aktywacji E2E) i **P3-13 🔄**
-> (framework pytest + adapter 8 suit + CI woła `pytest` — odłożony fizyczny rozbiór `api_smoke`).
-> Wynik **gruntownej analizy SWOT**
+> **Status:** 🔄 W TRAKCIE (2026-06-06) — **7/8 zrobione: P1-15 ✅, P2-13 ✅, P2-14 ✅, P3-10 ✅, P3-11 ✅,
+> P3-12 ✅, P3-14 ✅** (logowanie cichych `except`; dekompozycja `state.py` 691→378; `sandbox:true` + log
+> no-token; devDeps→lockfile; **33 testy komponentów + 3 E2E Playwright w CI**; CI backendu na matrycy 3 OS;
+> dokumentacja użytkownika + API) + **1 częściowo: P3-13 🔄** (framework pytest + adapter 8 suit + CI woła
+> `pytest` — odłożony fizyczny rozbiór `api_smoke`). Wynik **gruntownej analizy SWOT**
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
 > rozszerzalność/społeczność/subagenci). W odróżnieniu od rund 1–2 ten plan **NIE adresuje
@@ -208,7 +207,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   toolchainu dev (stare `glob`/`rimraf`/`inflight`/`tar` ciągnięte m.in. przez `electron-builder`/eslint) —
   to NIE trafia do paczki użytkownika; osobny, niski temat porządkowy (kandydat na nową pozycję P3).
 
-### [ ] P3-11 — Testy komponentów + E2E frontu dla krytycznych przepływów  🟢 WYSOKI ROI
+### [x] P3-11 — Testy komponentów + E2E frontu dla krytycznych przepływów  🟢 WYSOKI ROI
 - **Plik:** `desktop/test/` (12 plików Vitest, ~1082 linie — **wyłącznie czyste utilsy**); brak testów
   56 komponentów (m.in. `components/chat/ChatView.tsx` ~876, `components/code/AgentPanel.tsx:854`),
   brak E2E.
@@ -238,10 +237,17 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   [`desktop/e2e/`](../desktop/e2e/): 3 specy — ładowanie/„Connected", nawigacja po rail (`aria-current`),
   paleta Ctrl-K — na `preview:web` z `devMock`, bez Electrona/sidecara; skrypt `npm run test:e2e`). Scaffold
   jest **inertny** dla CI (poza `tsconfig`/`eslint`/`vitest` — nie psuje `npm ci`/typecheck/lint/test).
-  **Pozostaje do `[x]`:** (a) **aktywacja E2E** — `npm install -D @playwright/test` + `npx playwright install
-  chromium` + `npm run test:e2e` (binaria przeglądarki nieosiągalne w sandboxie), a potem job `e2e` w
-  `ci.yml`; (b) testy **ciężkich komponentów** (ChatView/AgentPanel/TeamView — harness mockujący
-  `window.caelo` + Hub + klient API). Aktywacja E2E udokumentowana w `desktop/README.md` (sekcja „E2E").
+  **✅ E2E AKTYWOWANE I ZWERYFIKOWANE (2026-06-06):** `@playwright/test ^1.56` + chromium zainstalowane
+  (na maszynie użytkownika); `npm run test:e2e` → **3/3 PASS** (app/navigation/command-palette, ~4 s, headless).
+  Po drodze naprawione: (1) niezgodność buildu chromium (CDN Playwrighta blokowany TLS-interception w
+  sandboxie) → config czyta opcjonalny **`E2E_CHROMIUM_PATH`** (pre-zainstalowana przeglądarka; domyślnie
+  standardowe dociąganie buildu w CI); (2) flaky `command-palette` (Ctrl-K wysłany przed podpięciem listenera)
+  → czekamy aż powłoka gotowa; (3) kontencja przy 3 workerach → `workers: 1` (jeden współdzielony `preview:web`).
+  **CI:** dodany job **`e2e`** w [`ci.yml`](../.github/workflows/ci.yml) (`npm ci` → `npx playwright install
+  --with-deps chromium` → `npm run test:e2e`) — DoD „≥3 E2E w CI" **spełniony**. Łącznie **33 testy
+  komponentów + 3 E2E**. **Poza zakresem (opcjonalnie dalej):** testy **ciężkich komponentów** (ChatView/
+  AgentPanel/TeamView — harness mockujący `window.caelo`+Hub+API) oraz E2E przepływów z danymi backendu
+  (mock REST `page.route()`) — nie są w DoD; bieżąca warstwa pokrywa prymitywy, paletę i powłokę/nawigację.
 
 ### [x] P3-12 — Walidacja cross-platform w PR CI (macOS/Linux + self-checki nie tylko Windows)  🟢 WYSOKI ROI
 - **Plik:** `.github/workflows/ci.yml` — backend job `runs-on: windows-latest` (linia 46), frontend job

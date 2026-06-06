@@ -9,9 +9,12 @@ import { defineConfig, devices } from '@playwright/test'
 // `npm run test:e2e`. NIE wpięte w `npm test` (Vitest) ani w `typecheck` — osobny tor.
 export default defineConfig({
   testDir: './e2e',
-  timeout: 30_000,
-  expect: { timeout: 7_000 },
-  fullyParallel: true,
+  timeout: 45_000,
+  expect: { timeout: 10_000 },
+  // Jeden współdzielony serwer `preview:web` → serializujemy (1 worker), by równoległe
+  // instancje przeglądarki nie rywalizowały o zasoby przy starcie (flaky `page.goto`).
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
@@ -19,7 +22,20 @@ export default defineConfig({
     baseURL: 'http://localhost:4599',
     trace: 'on-first-retry'
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        // Domyślnie Playwright używa swojego dociągniętego buildu (CI: `npx playwright
+        // install chromium`). W środowiskach, gdzie CDN Playwrighta jest niedostępny
+        // (TLS-interception), wskaż pre-zainstalowaną przeglądarkę przez E2E_CHROMIUM_PATH.
+        ...(process.env.E2E_CHROMIUM_PATH
+          ? { launchOptions: { executablePath: process.env.E2E_CHROMIUM_PATH } }
+          : {})
+      }
+    }
+  ],
   // Vite serwer podglądu renderera (port wymuszony w vite.preview.config.ts).
   webServer: {
     command: 'npm run preview:web',
