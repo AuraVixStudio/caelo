@@ -510,6 +510,7 @@ class PackageManager:
             data = json.loads(p.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
         except Exception:  # noqa: BLE001
+            log.warning("Could not read template meta %s", p, exc_info=True)
             return {}
 
     def _scan_templates(self, base: Path, *, builtin: bool) -> list[dict]:

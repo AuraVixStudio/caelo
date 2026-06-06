@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -265,6 +266,22 @@ def test_templates(d: Path) -> None:
     pm.install(data, consent=True)
     check("template installed to user dir",
           (d / "templates" / "daz-render-pipeline" / "template.json").is_file())
+
+    # P1-15: korupcja meta szablonu jest LOGOWANA (warning), nie połykana po cichu (→ {}).
+    bad = d / "templates" / "broken-tpl"
+    bad.mkdir(parents=True, exist_ok=True)
+    (bad / "template.json").write_text("{ this is not json", encoding="utf-8")
+    seen: list = []
+    handler = logging.Handler()
+    handler.emit = seen.append  # type: ignore[assignment]
+    mlog = logging.getLogger("caelo_core.packages.manager")
+    mlog.addHandler(handler)
+    try:
+        meta = PackageManager._read_template_meta(bad)
+    finally:
+        mlog.removeHandler(handler)
+    check("corrupt template meta logged, not swallowed (P1-15)",
+          meta == {} and any(r.levelno >= logging.WARNING for r in seen))
 
 
 def main() -> int:

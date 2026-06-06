@@ -1,7 +1,8 @@
 # Plan naprawy słabych stron (Runda 3) — Caelo Desktop
 
-> **Status:** 🔄 W TRAKCIE (2026-06-06) — **P3-10 ✅ i P3-12 ✅ zrobione i zweryfikowane** (`npm ci`/
-> typecheck/lint exit 0/test 122/122; CI backendu na matrycy 3 OS); pozostałe 6 pozycji 🔲 propozycja.
+> **Status:** 🔄 W TRAKCIE (2026-06-06) — **3/8 zrobione i zweryfikowane: P1-15 ✅, P3-10 ✅, P3-12 ✅**
+> (logowanie cichych `except` + asercja; `npm ci`/typecheck/lint exit 0/test 122/122; CI backendu na
+> matrycy 3 OS; self-checki packages 48/48 + brak regresji); pozostałe 5 pozycji 🔲 propozycja.
 > Wynik **gruntownej analizy SWOT**
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
@@ -52,7 +53,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 
 ## P1 — Diagnozowalność / obsługa błędów (najpierw)
 
-### [ ] P1-15 — Ciche `except Exception: pass/continue` bez logowania w ścieżkach danych/konfiguracji/rejestru  🟠 WYSOKIE
+### [x] P1-15 — Ciche `except Exception: pass/continue` bez logowania w ścieżkach danych/konfiguracji/rejestru  🟠 WYSOKIE
 - **Plik:** `caelo_core/packages/manager.py:325, 423, 434, 593` (bare, bez `noqa`/logu),
   `caelo_core/state.py:101, 164, 181, 379, 390, 420, 525, 532, 537, 572, 590, 594, 654`,
   `caelo_core/history_store.py:192, 645`. (Część miejsc ma już `# noqa: BLE001` jako celową
@@ -72,6 +73,25 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   bez logu LUB bez świadomego `# noqa: BLE001` z komentarzem „benign, bo …". Dodać asercję do
   `api_smoke.py`, że uszkodzony wpis rejestru produkuje wpis w logu (caplog/stub), nie ciszę.
 - **Szac. koszt:** 0.5–1 dzień.
+- **✅ Zrobione (2026-06-06):** **Korekta po lekturze faktycznego kodu — raport sondy audytowej był
+  zawyżony.** Większość wymienionych miejsc **już logowała** (`log.warning(..., exc_info=True)`):
+  `state.py` 101/150/164/181/297/379/390/420/480/525/532/537, `manager.py` 115/479/537,
+  `history_store.py` 159/186. Cztery „podejrzane" miejsca w `manager.py` (325/423/434/593) to
+  **`raise PackageError(...)`** — translacja błędu na czytelny wyjątek domenowy, NIE ciche połknięcie.
+  **Realne braki naprawione:**
+  1. `state.py` `save_media_bytes` (~590/594) — połykał błąd zapisu na dysk i `save_to_history` po cichu,
+     podczas gdy bliźniaczy `save_media_urls` loguje (asymetria „hardening selektywny", jak runda 2) →
+     dodano dwa `log.warning(..., exc_info=True)`.
+  2. `packages/manager.py` `_read_template_meta` (~512) — korupcja `template.json` dawała ciche `{}`
+     (użytkownik nie wiedział, czemu szablon „nie ma metadanych") → dodano `log.warning(..., exc_info=True)`.
+  **Benign cleanup uczynione świadomymi** (`# noqa: BLE001` + komentarz, semantyka bez zmian):
+  `history_store.py:192` (zamknięcie uszkodzonego połączenia — rodzic już zalogował powód) i `:645`
+  (`close()` przy wyłączaniu → `_log.debug`), `state.py` `_ws_origin_ok` (zniekształcony Origin → fail-closed,
+  bez logu by drive-by nie spamował). Pozostałe benign-z-`noqa` (`manager.py` 55/77/183 — fallbacki
+  importu/wersji/builtin-dir) zostawiono — `noqa: BLE001` jest tam świadomym markerem.
+  **Weryfikacja:** nowa asercja w [`packages_check.py`](../caelo_core/tools/packages_check.py) `test_templates`
+  (przechwyt logu: korupcja meta → `{}` **i** rekord ≥ WARNING) → **packages_check 48/48** (było 47);
+  bez regresji: `agent_selfcheck` OK, `history_check` OK, `api_smoke` OK.
 
 ---
 

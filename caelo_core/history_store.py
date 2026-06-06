@@ -189,7 +189,7 @@ class HistoryStore:
             if conn is not None:
                 try:
                     conn.close()
-                except Exception:
+                except Exception:  # noqa: BLE001 — zamknięcie uszkodzonego połączenia; powód zalogowano wyżej, bazę i tak odtwarzamy
                     pass
             self._backup_corrupt(path)
             return self._configure(sqlite3.connect(str(path), check_same_thread=False))
@@ -642,8 +642,8 @@ class HistoryStore:
         with self._lock:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 — zamknięcie bazy przy wyłączaniu sidecara; błąd nieistotny
+                _log.debug("History db close failed", exc_info=True)
 
 
 # --- leniwy singleton (B2 podepnie go pod Backend; tu wygodny dostęp) ---------

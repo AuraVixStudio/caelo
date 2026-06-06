@@ -588,11 +588,12 @@ class Backend:
             target.write_bytes(data)
             path = str(target)
         except Exception:
+            log.warning("Could not save media bytes to disk", exc_info=True)
             path = None
         try:
             self.history.save_to_history(mode, path or "", prompt)
         except Exception:
-            pass
+            log.warning("Failed to record media (bytes) in history", exc_info=True)
         # M9-B2: artefakt (np. audio TTS) + zdarzenie w historii huba.
         self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
                                     path=path, url=None)
@@ -651,7 +652,7 @@ def _ws_origin_ok(origin: Optional[str]) -> bool:
         return True
     try:
         return urlparse(origin).hostname in _WS_LOOPBACK_HOSTS
-    except Exception:
+    except Exception:  # noqa: BLE001 — zniekształcony Origin: fail-closed (odmów); bez logu, by drive-by nie spamował
         return False
 
 
