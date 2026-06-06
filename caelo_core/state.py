@@ -618,6 +618,26 @@ def require_workspace(b: "Backend" = Depends(get_backend)):
     return ws
 
 
+# --- P2-14: ślad audytowy dla dev opt-inu bez tokenu ---
+# Gdy aktywny CAELO_CORE_ALLOW_NO_TOKEN=1, KAŻDE żądanie jest serwowane bez
+# autoryzacji. server.py loguje to raz na starcie; tu logujemy też przy ruchu
+# (rate-limited, by nie zalać logu), aby świadomy tryb dev zostawiał ślad per-request.
+_NO_TOKEN_WARN_INTERVAL_S = 60.0
+_no_token_last_warn = 0.0
+
+
+def _warn_no_token(channel: str) -> None:
+    global _no_token_last_warn
+    now = time.monotonic()
+    if now - _no_token_last_warn >= _NO_TOKEN_WARN_INTERVAL_S:
+        _no_token_last_warn = now
+        log.warning(
+            "CAELO_CORE_ALLOW_NO_TOKEN=1: %s request served WITHOUT authentication "
+            "(dev opt-in). Do NOT use this outside a trusted local session.",
+            channel,
+        )
+
+
 def require_token(request: Request, authorization: Optional[str] = Header(default=None)) -> None:
     expected = getattr(request.app.state, "session_token", "")
     if not expected:
@@ -625,6 +645,7 @@ def require_token(request: Request, authorization: Optional[str] = Header(defaul
         # odmawiamy — chyba że jawny opt-in dev CAELO_CORE_ALLOW_NO_TOKEN=1. Wcześniej
         # REST było „otwarte" (dowolny lokalny proces mógł pisać pliki/wydawać quotę).
         if os.environ.get("CAELO_CORE_ALLOW_NO_TOKEN") == "1":
+            _warn_no_token("REST")  # P2-14: ślad per-request, nie tylko na starcie
             return
         raise HTTPException(status_code=401, detail="Server is running without a session token")
     if not authorization or not authorization.startswith("Bearer "):
@@ -663,5 +684,8 @@ def ws_authorized(ws: WebSocket) -> bool:
     expected = getattr(ws.app.state, "session_token", "")
     if not expected:
         # FAIL-CLOSED: bez tokenu odmawiamy, o ile nie ma jawnego opt-inu dev.
-        return os.environ.get("CAELO_CORE_ALLOW_NO_TOKEN") == "1"
+        if os.environ.get("CAELO_CORE_ALLOW_NO_TOKEN") == "1":
+            _warn_no_token("WS")  # P2-14: ślad per-request dla świadomego trybu dev
+            return True
+        return False
     return secrets.compare_digest(ws.query_params.get("token", ""), expected)

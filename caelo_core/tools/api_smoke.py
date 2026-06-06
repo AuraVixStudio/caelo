@@ -144,6 +144,29 @@ async def _ws_bad_token_rejected(port: int, path: str) -> bool:
         return True
 
 
+def _capture_no_token_warn(call) -> bool:
+    """P2-14: wywołaj `call()` w trybie CAELO_CORE_ALLOW_NO_TOKEN=1 i zwróć True, gdy
+    padł WARNING o tym trybie (ślad audytowy per-request). Rate-limiter zresetowany i
+    poziom loggera ustawiony na WARNING dla determinizmu; stan przywrócony w finally."""
+    import logging as _logging
+    from caelo_core import state as _state_mod
+    lg = _logging.getLogger("caelo_core.state")
+    old_lvl, _state_mod._no_token_last_warn = lg.level, 0.0
+    lg.setLevel(_logging.WARNING)
+    rec: list = []
+    h = _logging.Handler()
+    h.emit = rec.append  # type: ignore[assignment]
+    lg.addHandler(h)
+    os.environ["CAELO_CORE_ALLOW_NO_TOKEN"] = "1"
+    try:
+        call()
+    finally:
+        lg.removeHandler(h)
+        lg.setLevel(old_lvl)
+        os.environ.pop("CAELO_CORE_ALLOW_NO_TOKEN", None)
+    return any(r.levelno >= _logging.WARNING and "ALLOW_NO_TOKEN" in r.getMessage() for r in rec)
+
+
 def _unit_ws_auth(checks: list) -> None:
     """Deterministyczny test logiki autoryzacji WS (P0-8) — bez sieci, na atrapie."""
     import types
@@ -167,6 +190,8 @@ def _unit_ws_auth(checks: list) -> None:
     os.environ["CAELO_CORE_ALLOW_NO_TOKEN"] = "1"
     checks.append(("ws_auth: explicit opt-in allows no-token", ws_authorized(fake("", "x")) is True))
     os.environ.pop("CAELO_CORE_ALLOW_NO_TOKEN", None)
+    checks.append(("ws_auth: no-token serves WARNING log (P2-14)",
+                   _capture_no_token_warn(lambda: ws_authorized(fake("", "x")))))
 
     checks.append(("ws_auth: foreign origin rejected", ws_authorized(fake("secret", "secret", "https://evil.example")) is False))
     checks.append(("ws_auth: loopback origin ok", ws_authorized(fake("secret", "secret", "http://localhost:5173")) is True))
@@ -1201,6 +1226,8 @@ def _unit_rest_token_auth(checks: list) -> None:
     checks.append(("rest_auth: explicit opt-in allows no-token",
                    require_token(fake(""), None) is None))
     os.environ.pop("CAELO_CORE_ALLOW_NO_TOKEN", None)
+    checks.append(("rest_auth: no-token serves WARNING log (P2-14)",
+                   _capture_no_token_warn(lambda: require_token(fake(""), None))))
 
 
 def _unit_json_corrupt_backup(checks: list) -> None:

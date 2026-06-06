@@ -1,9 +1,9 @@
 # Plan naprawy słabych stron (Runda 3) — Caelo Desktop
 
-> **Status:** 🔄 W TRAKCIE (2026-06-06) — **3/8 zrobione i zweryfikowane: P1-15 ✅, P3-10 ✅, P3-12 ✅**
-> (logowanie cichych `except` + asercja; `npm ci`/typecheck/lint exit 0/test 122/122; CI backendu na
-> matrycy 3 OS; self-checki packages 48/48 + brak regresji); pozostałe 5 pozycji 🔲 propozycja.
-> Wynik **gruntownej analizy SWOT**
+> **Status:** 🔄 W TRAKCIE (2026-06-06) — **4/8 zrobione i zweryfikowane: P1-15 ✅, P2-14 ✅, P3-10 ✅,
+> P3-12 ✅** (logowanie cichych `except`; Electron `sandbox:true` + log no-token; `npm ci`/typecheck/lint
+> exit 0/test 122/122; CI backendu na matrycy 3 OS; self-checki packages 48/48, api_smoke/handshake OK,
+> build zielony — brak regresji); pozostałe 4 pozycje 🔲 propozycja. Wynik **gruntownej analizy SWOT**
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
 > rozszerzalność/społeczność/subagenci). W odróżnieniu od rund 1–2 ten plan **NIE adresuje
@@ -114,7 +114,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   czas stały) bez stawiania całego `Backend`.
 - **Szac. koszt:** 1–1.5 dnia.
 
-### [ ] P2-14 — Hartowanie defense-in-depth: Electron `sandbox: true` + log per-request furtki no-token  🟡 ŚREDNIE / NISKIE
+### [x] P2-14 — Hartowanie defense-in-depth: Electron `sandbox: true` + log per-request furtki no-token  🟡 ŚREDNIE / NISKIE
 - **Plik:** `desktop/src/main/index.ts` (`webPreferences.sandbox: false`, komentarz „kandydat P2-10");
   `caelo_core/state.py:626, 665` (`CAELO_CORE_ALLOW_NO_TOKEN`); `caelo_core/server.py:109` (log tylko
   na starcie).
@@ -130,6 +130,26 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   `api_smoke.py` potwierdza, że żądanie w trybie no-token zostawia wpis ostrzegawczy. Domyślne
   zachowanie (fail-closed) bez zmian.
 - **Szac. koszt:** 0.5–1 dzień (zależnie od weryfikacji `sandbox` w paczce).
+- **✅ Zrobione (2026-06-06):**
+  1. **`sandbox: true`** w [`desktop/src/main/index.ts`](../desktop/src/main/index.ts) `createWindow`
+     (`webPreferences`). Bezpieczne, bo preload ([`desktop/src/preload/index.ts`](../desktop/src/preload/index.ts))
+     używa **wyłącznie** `contextBridge` + `ipcRenderer` (+ `import type`, znika przy kompilacji) — cała
+     praca Node (spawn sidecara, dialog folderu, `shell.openPath`) jest w procesie main za IPC, nie w
+     preloadzie. Razem z `contextIsolation:true` + `nodeIntegration:false` = pełna izolacja renderera.
+  2. **Log per-request furtki** w [`state.py`](../caelo_core/state.py): helper `_warn_no_token(channel)`
+     (rate-limited, 1×/60 s, `time.monotonic`) wołany w `require_token` (REST) i `ws_authorized` (WS), gdy
+     aktywny `CAELO_CORE_ALLOW_NO_TOKEN=1` → WARNING „served WITHOUT authentication" przy ruchu, nie tylko
+     raz na starcie (`server.py`). Świadomy tryb dev zostawia ślad audytowy.
+  **Weryfikacja:** dwie nowe asercje w [`api_smoke.py`](../caelo_core/tools/api_smoke.py)
+  (`_capture_no_token_warn` + `ws_auth`/`rest_auth: no-token serves WARNING log (P2-14)`) → **api_smoke OK**;
+  fail-closed bez zmian (`handshake_check` 401/403/200 OK; `ws_auth`/`rest_auth` no-token→DENIED nadal PASS);
+  frontend `typecheck` czysty + `npm run build` zielony (preload bundluje się sandbox-zgodnie).
+  **Pozostała ręczna weryfikacja runtime** (poza tym środowiskiem — GUI Electron): odpalić `npm run dev`
+  / spakowaną apkę i potwierdzić, że okno działa z `sandbox:true` (most `window.caelo` + wybór folderu +
+  Voice/mic). Zmiana jest kanonicznym wzorcem sandbox-safe, więc ryzyko regresji minimalne; gdyby coś pękło
+  → cofnąć do `sandbox:false` z notatką (DoD dopuszcza udokumentowane odłożenie).
+  **Uwaga:** `caelo_audit.log` (wpis do JSONL) świadomie pominięto — sprzęgłoby `state.py` z `HookManager`;
+  rate-limited WARNING w logu serwera wystarcza. Audyt do pliku to kandydat na osobną pozycję, jeśli zajdzie potrzeba.
 
 ---
 

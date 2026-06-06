@@ -359,11 +359,12 @@ function createWindow(): void {
     title: 'Caelo',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      // sandbox=false: preload jest minimalny (4 mosty IPC), ale `contextIsolation`
-      // + `nodeIntegration:false` izolują renderer. Włączenie sandbox=true jest
-      // kandydatem (preload używa tylko contextBridge/ipcRenderer) — wymaga jednak
-      // weryfikacji w runtime spakowanej apki (P2-10).
-      sandbox: false,
+      // P2-14: sandbox=true — renderer w pełnym sandboksie Chromium. Preload jest
+      // zgodny (używa WYŁĄCZNIE contextBridge/ipcRenderer + `import type`, który znika
+      // przy kompilacji) — cała praca Node (spawn sidecara, dialog, shell.openPath)
+      // dzieje się w procesie main przez IPC, nie w preloadzie. Razem z
+      // contextIsolation + nodeIntegration:false = pełna izolacja renderera.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
