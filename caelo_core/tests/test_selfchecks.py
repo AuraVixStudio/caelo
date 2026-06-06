@@ -2,10 +2,9 @@
 
 Każdy samodzielny self-check (`tools/*_check.py`, `api_smoke`, `handshake_check`)
 biegnie jako OSOBNY test pytest: jego `main()` zwraca `0` (OK) / `1` (FAIL). Daje to
-discovery, `pytest -k <nazwa>`, jeden bieg i proste wpięcie w CI — BEZ przepisywania
-~2,5 tys. linii asercji (zachowujemy sprawdzoną siatkę bezpieczeństwa). Pełny,
-mechaniczny rozbiór `api_smoke.py` (2218 linii → `test_routes_*`) jest osobnym
-podetapem — patrz nota P3-13 w `docs/PLAN_NAPRAWY_3.md`.
+discovery, `pytest -k <nazwa>`, jeden bieg i proste wpięcie w CI. `api_smoke.main()`
+orkiestruje suitę rozbitą na `smoke_chat/media/routes/core` + `_smoke_common` (P3-13,
+każdy plik < 600 linii) — adapter woła ją niezmiennie przez `main()`.
 
 `sidecar_smoke` celowo pominięty — wymaga SPAKOWANEGO `.exe` (osobny krok wydania).
 Każda suita drukuje własne `[PASS]/[FAIL]`; pytest przechwytuje to i pokazuje przy błędzie.

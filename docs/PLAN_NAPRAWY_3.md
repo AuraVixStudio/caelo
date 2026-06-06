@@ -1,10 +1,11 @@
 # Plan naprawy słabych stron (Runda 3) — Caelo Desktop
 
-> **Status:** 🔄 W TRAKCIE (2026-06-06) — **7/8 zrobione: P1-15 ✅, P2-13 ✅, P2-14 ✅, P3-10 ✅, P3-11 ✅,
-> P3-12 ✅, P3-14 ✅** (logowanie cichych `except`; dekompozycja `state.py` 691→378; `sandbox:true` + log
-> no-token; devDeps→lockfile; **33 testy komponentów + 3 E2E Playwright w CI**; CI backendu na matrycy 3 OS;
-> dokumentacja użytkownika + API) + **1 częściowo: P3-13 🔄** (framework pytest + adapter 8 suit + CI woła
-> `pytest` — odłożony fizyczny rozbiór `api_smoke`). Wynik **gruntownej analizy SWOT**
+> **Status:** ✅ ZREALIZOWANY (2026-06-06) — **8/8: P1-15, P2-13, P2-14, P3-10, P3-11, P3-12, P3-13, P3-14**
+> (logowanie cichych `except`; dekompozycja `state.py` 691→378; `sandbox:true` + log no-token; devDeps→
+> lockfile; **33 testy komponentów + 3 E2E Playwright w CI**; CI backendu na matrycy 3 OS; dokumentacja
+> użytkownika + API 96 REST/6 WS; **pytest + rozbiór `api_smoke` 2246→6 plików <600**). Wynik **gruntownej
+> analizy SWOT** po M9–M17. **Aktywacje wymagające sieci** (zrobione na maszynie użytkownika): `npm install`
+> devDeps, `npx playwright install chromium`, `pip install -r requirements-dev.txt`.
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
 > rozszerzalność/społeczność/subagenci). W odróżnieniu od rund 1–2 ten plan **NIE adresuje
@@ -273,7 +274,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   pokazać zieleń na ubuntu/macos — jeśli jakiś check ujawni realną lukę POSIX, to zamierzony efekt
   (świadomy `skip` per-OS z komentarzem zamiast wyłączania OS).
 
-### [ ] P3-13 — Migracja self-checków do pytest (discovery) + rozbicie `api_smoke.py`  🟡 ŚREDNIE
+### [x] P3-13 — Migracja self-checków do pytest (discovery) + rozbicie `api_smoke.py`  🟡 ŚREDNIE
 - **Plik:** `caelo_core/tools/api_smoke.py` (2218 linii — monolit), plus pozostałe `*_check.py` jako
   samodzielne skrypty uruchamiane pojedynczo, **bez frameworka/discovery**.
 - **Problem:** jeden plik 2218 linii będzie akumulował nieutrzymywalne testy z każdą funkcją; brak
@@ -288,7 +289,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   żaden plik testowy > ~600 linii; CI woła `pytest` (z zachowaniem osobnych checków, które wymagają
   paczki — np. `sidecar_smoke`).
 - **Szac. koszt:** 2–3 dni (mechaniczne, ale obszerne).
-- **🔄 CZĘŚCIOWO ZROBIONE (2026-06-06) — framework pytest + CI ✅; rozbiór `api_smoke` ⏳:**
+- **✅ ZROBIONE (2026-06-06) — framework pytest + CI + rozbiór `api_smoke`:**
   Wprowadzono **runner pytest** ([`caelo_core/requirements-dev.txt`](../caelo_core/requirements-dev.txt)
   = `pytest>=8`) + [`caelo_core/tests/`](../caelo_core/tests/): `conftest.py` (bootstrap `sys.path` →
   korzeń repo) i `test_selfchecks.py` — **adapter** uruchamiający każdą z **8 suit** (`crossplatform/
@@ -300,10 +301,16 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   w sandboxie): wszystkie 8 suit importowalne z `main()` callable (to robi collection), wrapper
   `import_module→main()→rc==0` potwierdzony (`mcp_check` 24/24 → rc 0). **Aktywacja:** `pip install -r
   caelo_core/requirements-dev.txt` na maszynie z siecią, potem `pytest caelo_core/tests`.
-  **Odłożone (dlatego NIE `[x]`):** fizyczny **rozbiór `api_smoke.py` (2218 linii → `test_routes_*`/
-  `test_voice`/`test_collections`, każdy < ~600)** — to duży, czysto mechaniczny przepis, który ryzykuje
-  zepsucie sprawdzonej siatki bezpieczeństwa; świadomie zostawiony jako osobny podetap (adapter już daje
-  benefity frameworka bez tego ryzyka). DoD „żaden plik > ~600 linii" jeszcze niespełniony.
+  **Rozbiór `api_smoke.py` (2246 → 6 plików, każdy < 600) — ZROBIONE.** Ekstrakcja **1:1 przez `ast`**
+  (jednorazowy skrypt `_split_smoke.py`, `ast.get_source_segment` — zero transkrypcji ręcznej; obsłużone
+  też top-level `async def`, m.in. `_ws_check`), potem skrypt usunięty. Podział: `_smoke_common.py` (167 —
+  helpery harnessu HTTP/WS + stałe), `smoke_chat.py` (579 — responses/mcp-loop/chat-bridge/sse/timeouts),
+  `smoke_media.py` (416 — collections/voice/media-guard/live-routes), `smoke_routes.py` (523 — fs/git/
+  history/projects/agent/mcp/team), `smoke_core.py` (407 — ws/rest-auth/validation/settings/json-backup/
+  error-sanitize/packages/commands-skills), `api_smoke.py` (303 — importy + `main()` + bootstrap `sys.path`
+  na wypadek uruchomienia jako skrypt). **Weryfikacja:** `python api_smoke.py` → **RESULT: OK** (cały zestaw
+  asercji przechodzi); import modułowy (mechanizm pytest) działa dla `api_smoke` + 4 grup + `_smoke_common`.
+  DoD spełniony w całości: pytest discovery + CI woła `pytest` + żaden plik testowy > ~600 linii.
 
 ### [x] P3-14 — Dokumentacja użytkownika + referencja tras REST/WS  🟡 ŚREDNIE
 - **Plik:** `docs/` — 17 dokumentów `PLAN_*.md` to **doskonałe dokumenty projektowe, ale deweloperskie
