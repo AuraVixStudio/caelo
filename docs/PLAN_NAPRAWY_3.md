@@ -144,10 +144,11 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   (`_capture_no_token_warn` + `ws_auth`/`rest_auth: no-token serves WARNING log (P2-14)`) → **api_smoke OK**;
   fail-closed bez zmian (`handshake_check` 401/403/200 OK; `ws_auth`/`rest_auth` no-token→DENIED nadal PASS);
   frontend `typecheck` czysty + `npm run build` zielony (preload bundluje się sandbox-zgodnie).
-  **Pozostała ręczna weryfikacja runtime** (poza tym środowiskiem — GUI Electron): odpalić `npm run dev`
-  / spakowaną apkę i potwierdzić, że okno działa z `sandbox:true` (most `window.caelo` + wybór folderu +
-  Voice/mic). Zmiana jest kanonicznym wzorcem sandbox-safe, więc ryzyko regresji minimalne; gdyby coś pękło
-  → cofnąć do `sandbox:false` z notatką (DoD dopuszcza udokumentowane odłożenie).
+  **Weryfikacja runtime POTWIERDZONA NA ŻYWO (2026-06-06):** `npm run dev` startuje, okno renderuje się
+  z `sandbox:true`, status „Connected" (sidecar + token-auth OK), moduł Voice działa (most `window.caelo`).
+  *(Uwaga operacyjna: jednorazowo trzeba było przywrócić binarkę Electrona — `node node_modules/electron/install.js` —
+  bo wcześniejszy `npm ci` przy P3-10 jej nie pobrał przy wolnej sieci; to artefakt lokalny `node_modules`,
+  nie kodu — `dist/`/`path.txt` są gitignored.)*
   **Uwaga:** `caelo_audit.log` (wpis do JSONL) świadomie pominięto — sprzęgłoby `state.py` z `HookManager`;
   rate-limited WARNING w logu serwera wystarcza. Audyt do pliku to kandydat na osobną pozycję, jeśli zajdzie potrzeba.
 
