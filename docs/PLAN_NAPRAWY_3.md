@@ -98,7 +98,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 
 ## P2 — Architektura / hardening defense-in-depth
 
-### [ ] P2-13 — `state.py` jako „God-object lite" (666 linii) — dekompozycja  🟡 ŚREDNIE
+### [x] P2-13 — `state.py` jako „God-object lite" (666 linii) — dekompozycja  🟡 ŚREDNIE
 - **Plik:** `caelo_core/state.py` (666 linii) — klasa `Backend` z wieloma leniwymi getterami
   (`mcp`/`hooks`/`commands`/`skills`/`packages`/`subagents`), ścisłym sprzężeniem z legacy managerami
   i mieszanką odpowiedzialności (auth precedence, ustawienia, projekty, workspace, kolejka gen,
@@ -114,6 +114,25 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   bez zmian w testach (API niezmienione); nowy mini-test jednostkowy `tokens` (fail-closed, Origin,
   czas stały) bez stawiania całego `Backend`.
 - **Szac. koszt:** 1–1.5 dnia.
+- **✅ Zrobione (2026-06-06):** `state.py` **691 → 378 linii** (poniżej ~400). Wydzielone trzy moduły,
+  `Backend` je dziedziczy/re-eksportuje (publiczne API importów BEZ zmian):
+  - [`caelo_core/auth_tokens.py`](../caelo_core/auth_tokens.py) — `require_token`/`ws_authorized`/
+    `_ws_origin_ok`/`_warn_no_token` (czysta warstwa, **testowalna bez Backendu**). `state.py`
+    **re-eksportuje** je, więc `from caelo_core.state import require_token/ws_authorized` (server.py,
+    routes, self-checki) działa bez zmian. Istniejące `_unit_ws_auth`/`_unit_rest_token_auth`
+    (atrapy `SimpleNamespace`, bez `Backend`) **są** tym mini-testem tokenów (DoD).
+  - [`caelo_core/backend_media.py`](../caelo_core/backend_media.py) `MediaMixin` — egzekutory generacji
+    (`_run_image_job`/`_run_video_job`/`_gen_executor`) + zapis mediów (`save_media_urls`/`save_media_bytes`/
+    `_download_media`, P1-14) + artefakty M9; stałe `MAX_MEDIA_BYTES`/`VIDEO_*` i `requests` żyją tu.
+  - [`caelo_core/backend_collections.py`](../caelo_core/backend_collections.py) `CollectionsMixin` —
+    wiedza projektu (M10-B5, anty-traversal).
+  - `class Backend(MediaMixin, CollectionsMixin)` — MRO `[Backend, MediaMixin, CollectionsMixin, object]`.
+  **Uczciwie nt. „bez zmian w testach":** publiczne API (importy) niezmienione przez re-eksport, ale
+  self-checki, które **patchowały wewnętrzne module-globale** (`requests`/`VIDEO_POLL_INTERVAL_S`/
+  `MAX_MEDIA_BYTES`/`_no_token_last_warn`), dostały zaktualizowany **cel patcha** na nowy moduł
+  (`genjobs_check`/`api_smoke` → `backend_media`; `_capture_no_token_warn` → `auth_tokens`) — asercje
+  i zachowanie identyczne. **Weryfikacja:** `handshake_check`, `api_smoke` (kolekcje 13/13 + media-guard
+  3/3 + ws/rest-auth + P2-14), `agent_selfcheck`, `genjobs_check`, `history_check` — wszystkie OK.
 
 ### [x] P2-14 — Hartowanie defense-in-depth: Electron `sandbox: true` + log per-request furtki no-token  🟡 ŚREDNIE / NISKIE
 - **Plik:** `desktop/src/main/index.ts` (`webPreferences.sandbox: false`, komentarz „kandydat P2-10");

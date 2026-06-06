@@ -11,16 +11,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import secrets
-import time
-from datetime import datetime
-from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
-from fastapi import Depends, Header, HTTPException, Request, WebSocket
+from fastapi import Depends, HTTPException, Request
 
 # Legacy moduły z korzenia repo (sys.path ustawiony w caelo_core/__init__.py).
 import config  # type: ignore
@@ -28,22 +23,26 @@ from api_manager import APIManager  # type: ignore
 from history_manager import HistoryManager  # type: ignore
 from oauth_manager import OAuthManager  # type: ignore
 
-try:
-    import requests  # type: ignore
-except Exception:  # pragma: no cover
-    requests = None  # type: ignore
+# P2-13: warstwa autoryzacji wydzielona do auth_tokens.py (czysta, testowalna bez
+# Backendu). Re-eksport, by `from caelo_core.state import require_token/ws_authorized/
+# _ws_origin_ok` (server.py, routes, self-checki) działał bez zmian.
+from caelo_core.auth_tokens import (  # noqa: F401
+    _ws_origin_ok,
+    require_token,
+    ws_authorized,
+)
 
-# P1-14: twardy limit pobieranych mediów (anty-OOM / miękki DoS przy spoofie URL).
-MAX_MEDIA_BYTES = 256 * 1024 * 1024  # 256 MB (wideo bywa duże, ale nie nieograniczone)
+# P2-13: generacja/zapis mediów (MediaMixin) i wiedza projektu (CollectionsMixin)
+# wydzielone do osobnych modułów — Backend je dziedziczy, API instancji bez zmian.
+# Stałe (MAX_MEDIA_BYTES / VIDEO_*) i `requests` żyją teraz w backend_media.py
+# (self-checki patchują je tam: `caelo_core.backend_media`).
+from caelo_core.backend_collections import CollectionsMixin
+from caelo_core.backend_media import MediaMixin
 
-# M11-B3: polling zadań wideo po stronie workera (sekundy). Deadline chroni przed
-# zadaniem zaciętym w stanie nieterminalnym (analogicznie do POLL_DEADLINE w UI).
-VIDEO_POLL_INTERVAL_S = 5
-VIDEO_JOB_DEADLINE_S = 12 * 60
 
-
-class Backend:
-    """Reużyte managery legacy + logika kluczy, ustawień i zapisu mediów."""
+class Backend(MediaMixin, CollectionsMixin):
+    """Reużyte managery legacy + logika kluczy/ustawień/projektów. Generacja i zapis
+    mediów (MediaMixin) oraz wiedza projektu (CollectionsMixin) dziedziczone z mixinów."""
 
     # M9-B5: aktywny projekt (scope historii/artefaktów). Atrybut KLASOWY, by
     # instancje budowane przez __new__ (testy) też miały bezpieczny default None.
@@ -297,74 +296,6 @@ class Backend:
             except Exception:  # noqa: BLE001
                 log.warning("MCP shutdown failed", exc_info=True)
 
-    def _gen_executor(self, job, cancel) -> list:
-        """Wykonaj zadanie generacji → lista artifact_id (M9). Rzuca przy błędzie."""
-        if job.kind == "image":
-            return self._run_image_job(job, cancel)
-        if job.kind == "video":
-            return self._run_video_job(job, cancel)
-        raise ValueError(f"unknown gen job kind: {job.kind}")
-
-    def _run_image_job(self, job, cancel) -> list:
-        p = job.params
-        prompt = p.get("prompt", "")
-        n = int(p.get("n", 1) or 1)
-        ratio = p.get("aspect_ratio", "auto")
-        resolution = p.get("resolution", "1k")
-        model = p.get("model") or None
-        if job.op == "text2img":
-            urls = self.api.generate_image(prompt, n, ratio, resolution, model=model)
-            legacy_mode = "generate"
-        else:  # edit / variation — oba przez /images/edits (referencja + prompt)
-            images = list(p.get("images") or [])
-            if not images:
-                raise ValueError("edit/variation requires at least one reference image")
-            urls = self.api.edit_image_b64(prompt, images, n, ratio, resolution, model=model)
-            legacy_mode = "edit"
-        results = self.save_media_urls(urls, prompt, legacy_mode, ".png",
-                                       project_id=job.project_id,
-                                       meta_extra={"gen_op": job.op, "model": model or ""})
-        return [r["artifact_id"] for r in results if r.get("artifact_id")]
-
-    def _run_video_job(self, job, cancel) -> list:
-        from caelo_core.genjobs import GenJobCancelled
-
-        p = job.params
-        prompt = p.get("prompt", "")
-        model = p.get("model") or None
-        # Wybór wywołania xAI po operacji; dalej wspólna pętla pollingu.
-        if job.op == "edit":
-            request_id = self.api.edit_video_job(prompt, p["video"], model=model)
-        elif job.op == "extend":
-            request_id = self.api.extend_video_job(
-                prompt, p["video"], duration=int(p.get("duration") or 0) or None, model=model)
-        else:  # text2video / img2video
-            request_id = self.api.create_video_job(
-                prompt, int(p.get("duration", 6) or 6), p.get("resolution", "480p"),
-                p.get("aspect_ratio", "Original"), None, model=model,
-                image_data_uri=p.get("image"),
-            )
-        deadline = time.time() + VIDEO_JOB_DEADLINE_S
-        while True:
-            if cancel.is_set():
-                raise GenJobCancelled()
-            st = self.api.poll_video_status(request_id)
-            status = (st or {}).get("status")
-            if status == "done":
-                url = (st.get("video") or {}).get("url")
-                if not url:
-                    raise RuntimeError("video job finished without a URL")
-                results = self.save_media_urls([url], prompt, "video", ".mp4",
-                                               project_id=job.project_id,
-                                               meta_extra={"gen_op": job.op, "model": model or ""})
-                return [r["artifact_id"] for r in results if r.get("artifact_id")]
-            if status in ("failed", "expired"):
-                raise RuntimeError(f"video job {status}")
-            if time.time() > deadline:
-                raise RuntimeError("video job timed out (still rendering)")
-            # Czekaj, ale pozostań przerywalny: wait() wraca natychmiast po cancel.
-            cancel.wait(VIDEO_POLL_INTERVAL_S)
-
     def record_event(self, *, mode: str, text: str = "", artifact_id=None,
                      project_id=None, meta=None):
         """Dorzuć zdarzenie do wspólnej, przeszukiwalnej historii huba (M9-B2).
@@ -420,184 +351,8 @@ class Backend:
         except Exception:
             log.warning("Could not persist current project", exc_info=True)
 
-    # --- wiedza projektu (M10-B5: lokalne dokumenty, dołączane na żądanie) -------
-    # xAI nie wspiera serwerowych vector stores (`/v1/vector_stores` → 404), więc
-    # dokumenty „wiedzy projektu" trzymamy LOKALNIE i dołączamy do wiadomości jako
-    # input_file na żądanie (przycisk „Attach all" — ścieżka B4, sprawdzona).
-    def _project_docs_dir(self, project_id: str) -> Path:
-        d = Path(config.PROJECT_DOCS_DIR) / project_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def collection_upload(self, data: bytes, filename: str, mime: str = ""):
-        """Zapisz dokument LOKALNIE w wiedzy AKTYWNEGO projektu. Zwraca CollectionFile.
-        Brak aktywnego projektu → ValueError (wiedza jest per projekt)."""
-        pid = self.current_project_id
-        if not pid:
-            raise ValueError("No active project — select or create one first")
-        if self.history_store.get_project(pid) is None:
-            raise ValueError("Unknown project")
-        rid = secrets.token_hex(8)
-        safe = Path(filename or "document").name  # tylko nazwa, bez ścieżki
-        target = self._project_docs_dir(pid) / f"{rid}_{safe}"
-        target.write_bytes(data)
-        return self.history_store.add_collection_file(
-            project_id=pid, name=safe, path=str(target), mime=mime or "",
-            bytes=len(data or b""), id=rid)
-
-    def collection_files(self):
-        """Dokumenty wiedzy aktywnego projektu (pusta lista bez projektu)."""
-        pid = self.current_project_id
-        return self.history_store.list_collection_files(pid) if pid else []
-
-    def collection_file_path(self, file_row_id: str):
-        """Bezpieczna ścieżka pliku dokumentu (musi leżeć pod PROJECT_DOCS_DIR —
-        anty-traversal). None, gdy nie znaleziono / poza katalogiem."""
-        cf = self.history_store.get_collection_file(file_row_id)
-        if cf is None or not cf.path:
-            return None
-        try:
-            p = Path(cf.path).resolve()
-            base = Path(config.PROJECT_DOCS_DIR).resolve()
-            if base in p.parents and p.is_file():
-                return cf
-        except OSError:
-            return None
-        return None
-
-    def collection_remove(self, file_row_id: str) -> bool:
-        """Usuń dokument z wiedzy projektu (plik lokalny + rekord). False, gdy brak."""
-        cf = self.history_store.get_collection_file(file_row_id)
-        if cf is None:
-            return False
-        if cf.path:
-            try:
-                p = Path(cf.path).resolve()
-                base = Path(config.PROJECT_DOCS_DIR).resolve()
-                if base in p.parents and p.exists():
-                    p.unlink()
-            except OSError:
-                log.warning("Could not delete project doc %s", cf.path, exc_info=True)
-        self.history_store.remove_collection_file(file_row_id)
-        return True
-
-    @staticmethod
-    def _media_kind(legacy_mode: str, ext: str):
-        """Zmapuj legacy tryb zapisu ('generate'/'edit'/'video'/'tts') + rozszerzenie
-        na M9 (type, mode, mime). M9 mode ∈ {image, video, voice}."""
-        e = (ext or "").lower().lstrip(".")
-        audio_mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg",
-                      "m4a": "audio/mp4"}
-        image_mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                      "webp": "image/webp", "gif": "image/gif"}
-        if legacy_mode == "tts" or e in audio_mime:
-            return "audio", "voice", audio_mime.get(e, "audio/mpeg")
-        if legacy_mode == "video" or e in ("mp4", "mov", "webm"):
-            return "video", "video", "video/mp4"
-        return "image", "image", image_mime.get(e, "image/png")
-
-    def _record_media_artifact(self, *, legacy_mode: str, ext: str, prompt: str,
-                               path, url, project_id=None, meta_extra=None):
-        """M9-B2: zapisz wygenerowane medium jako artefakt + zdarzenie historii.
-        Wołane z `save_media_urls`/`save_media_bytes` (poza gorącą pętlą; błędy połykane).
-        `project_id` (M11): jawny scope (np. z `GenJob`) — None stempluje aktywnym.
-        Zwraca utworzony Artifact (albo None przy błędzie magazynu)."""
-        a_type, a_mode, mime = self._media_kind(legacy_mode, ext)
-        meta = {"prompt": prompt or "", "op": legacy_mode}
-        if url:
-            meta["url"] = url
-        if meta_extra:
-            meta.update(meta_extra)
-        art = self.add_artifact(type=a_type, mode=a_mode, mime=mime,
-                                path=path or "", meta=meta, project_id=project_id)
-        self.record_event(mode=a_mode, text=prompt or "",
-                          artifact_id=(art.id if art else None), project_id=project_id)
-        return art
-
-    # --- zapis mediów (auto-save jak ResultCard/_auto_save_video) ---
-    def save_media_urls(self, urls, prompt: str, mode: str, ext: str,
-                        download: bool = True, project_id=None,
-                        meta_extra=None) -> list:
-        out = []
-        save_dir = Path(self.history.get_save_path())
-        try:
-            save_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            log.warning("Could not create media save dir %s", save_dir, exc_info=True)
-        for url in urls:
-            path = None
-            if download and requests is not None:
-                try:
-                    path = self._download_media(url, save_dir, mode, ext)
-                except Exception:
-                    log.warning("Failed to download/save media from %s", url, exc_info=True)
-                    path = None
-            try:
-                self.history.save_to_history(mode, path or url, prompt)
-            except Exception:
-                log.warning("Failed to record media in history", exc_info=True)
-            # M9-B2: artefakt + zdarzenie we wspólnej, przeszukiwalnej historii huba.
-            # M11: zwracamy też artifact_id, by GenJob zarejestrował swoje wyjścia.
-            art = self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
-                                              path=path, url=url, project_id=project_id,
-                                              meta_extra=meta_extra)
-            out.append({"url": url, "path": path,
-                        "artifact_id": (art.id if art else None)})
-        return out
-
-    def _download_media(self, url: str, save_dir: Path, mode: str, ext: str) -> str:
-        """P1-14: pobranie mediów z xAI BEZPIECZNIE — tylko `https` (blokuje SSRF do
-        http/file/itp.), strumieniowo na dysk z TWARDYM limitem rozmiaru (bez
-        buforowania całości w pamięci). Zwraca ścieżkę pliku albo rzuca wyjątek."""
-        if urlparse(url).scheme != "https":
-            raise ValueError("refused non-https media URL")
-        fn = f"studio_{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
-        target = save_dir / fn
-        total = 0
-        try:
-            with requests.get(url, timeout=180, stream=True) as r:
-                r.raise_for_status()
-                cl = r.headers.get("Content-Length")
-                if cl and cl.isdigit() and int(cl) > MAX_MEDIA_BYTES:
-                    raise ValueError("media exceeds size cap")
-                with open(target, "wb") as f:
-                    for chunk in r.iter_content(65536):
-                        if not chunk:
-                            continue
-                        total += len(chunk)
-                        if total > MAX_MEDIA_BYTES:
-                            raise ValueError("media exceeds size cap")
-                        f.write(chunk)
-            return str(target)
-        except Exception:
-            try:
-                if target.exists():
-                    target.unlink()  # usuń częściowy plik
-            except OSError:
-                pass
-            raise
-
-    def save_media_bytes(self, data: bytes, prompt: str, mode: str, ext: str) -> dict:
-        """Zapis gotowych bajtów (np. audio z TTS) do folderu wyjściowego + historia."""
-        save_dir = Path(self.history.get_save_path())
-        path = None
-        try:
-            save_dir.mkdir(parents=True, exist_ok=True)
-            fn = f"studio_{mode}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}"
-            target = save_dir / fn
-            target.write_bytes(data)
-            path = str(target)
-        except Exception:
-            log.warning("Could not save media bytes to disk", exc_info=True)
-            path = None
-        try:
-            self.history.save_to_history(mode, path or "", prompt)
-        except Exception:
-            log.warning("Failed to record media (bytes) in history", exc_info=True)
-        # M9-B2: artefakt (np. audio TTS) + zdarzenie w historii huba.
-        self._record_media_artifact(legacy_mode=mode, ext=ext, prompt=prompt,
-                                    path=path, url=None)
-        return {"path": path}
+    # --- wiedza projektu / kolekcje → CollectionsMixin (backend_collections.py, P2-13) ---
+    # --- generacja i zapis mediów → MediaMixin (backend_media.py, P2-13) ---
 
 
 # --- zależności FastAPI ---
@@ -618,74 +373,6 @@ def require_workspace(b: "Backend" = Depends(get_backend)):
     return ws
 
 
-# --- P2-14: ślad audytowy dla dev opt-inu bez tokenu ---
-# Gdy aktywny CAELO_CORE_ALLOW_NO_TOKEN=1, KAŻDE żądanie jest serwowane bez
-# autoryzacji. server.py loguje to raz na starcie; tu logujemy też przy ruchu
-# (rate-limited, by nie zalać logu), aby świadomy tryb dev zostawiał ślad per-request.
-_NO_TOKEN_WARN_INTERVAL_S = 60.0
-_no_token_last_warn = 0.0
-
-
-def _warn_no_token(channel: str) -> None:
-    global _no_token_last_warn
-    now = time.monotonic()
-    if now - _no_token_last_warn >= _NO_TOKEN_WARN_INTERVAL_S:
-        _no_token_last_warn = now
-        log.warning(
-            "CAELO_CORE_ALLOW_NO_TOKEN=1: %s request served WITHOUT authentication "
-            "(dev opt-in). Do NOT use this outside a trusted local session.",
-            channel,
-        )
-
-
-def require_token(request: Request, authorization: Optional[str] = Header(default=None)) -> None:
-    expected = getattr(request.app.state, "session_token", "")
-    if not expected:
-        # P1-10: FAIL-CLOSED symetrycznie do WS (P0-8). Bez skonfigurowanego tokenu
-        # odmawiamy — chyba że jawny opt-in dev CAELO_CORE_ALLOW_NO_TOKEN=1. Wcześniej
-        # REST było „otwarte" (dowolny lokalny proces mógł pisać pliki/wydawać quotę).
-        if os.environ.get("CAELO_CORE_ALLOW_NO_TOKEN") == "1":
-            _warn_no_token("REST")  # P2-14: ślad per-request, nie tylko na starcie
-            return
-        raise HTTPException(status_code=401, detail="Server is running without a session token")
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = authorization[len("Bearer ") :].strip()
-    if not secrets.compare_digest(token, expected):  # P1-9: porównanie w czasie stałym
-        raise HTTPException(status_code=403, detail="Invalid token")
-
-
-# --- autoryzacja WebSocketów (P0-8) ---
-# WS nie mogą ustawić nagłówka Authorization → token w query. W przeciwieństwie do
-# REST (tryb otwarty bez tokenu), WS są FAIL-CLOSED: brak skonfigurowanego tokenu =
-# ODMOWA, chyba że jawny opt-in env CAELO_CORE_ALLOW_NO_TOKEN=1. Powód: /terminal to
-# pełna powłoka, a /agent/stream ma dostęp do plików i `run_command`.
-_WS_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
-
-
-def _ws_origin_ok(origin: Optional[str]) -> bool:
-    """Kontrola Origin (P0-8). Dopuszczamy: brak/`null` Origin (natywni klienci),
-    `file://` (Electron prod) oraz dowolny host pętli zwrotnej (dev renderer na
-    dowolnym porcie). Drive-by z zewnętrznej strony ma realny host → odrzucony."""
-    if not origin or origin == "null":
-        return True
-    if origin.startswith("file://"):
-        return True
-    try:
-        return urlparse(origin).hostname in _WS_LOOPBACK_HOSTS
-    except Exception:  # noqa: BLE001 — zniekształcony Origin: fail-closed (odmów); bez logu, by drive-by nie spamował
-        return False
-
-
-def ws_authorized(ws: WebSocket) -> bool:
-    """Autoryzuje WebSocket: kontrola Origin + token w query (czas stały)."""
-    if not _ws_origin_ok(ws.headers.get("origin")):
-        return False
-    expected = getattr(ws.app.state, "session_token", "")
-    if not expected:
-        # FAIL-CLOSED: bez tokenu odmawiamy, o ile nie ma jawnego opt-inu dev.
-        if os.environ.get("CAELO_CORE_ALLOW_NO_TOKEN") == "1":
-            _warn_no_token("WS")  # P2-14: ślad per-request dla świadomego trybu dev
-            return True
-        return False
-    return secrets.compare_digest(ws.query_params.get("token", ""), expected)
+# Warstwa autoryzacji (require_token / ws_authorized / _ws_origin_ok / _warn_no_token)
+# wydzielona do `caelo_core/auth_tokens.py` (P2-13) — czysta, testowalna bez Backendu.
+# Re-eksport jest na górze tego modułu, więc istniejące importy działają bez zmian.

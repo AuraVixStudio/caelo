@@ -288,7 +288,7 @@ def _unit_backend_image_executor(checks: list) -> None:
     """Realny `Backend._run_image_job` — reużywa api + save_media_urls → artefakty M9.
     Mockujemy api (URL-e) i pobieranie (state.requests). Edit honoruje referencje."""
     import caelo_core.history_store as HS
-    import caelo_core.state as state_mod
+    import caelo_core.backend_media as state_mod  # P2-13: requests/VIDEO_POLL_INTERVAL_S tutaj
     from caelo_core.genjobs import GenJob
 
     with tempfile.TemporaryDirectory() as d:
@@ -351,7 +351,7 @@ def _unit_backend_video_executor(checks: list) -> None:
     """Realny `Backend._run_video_job` — submit + poll do done → artefakt; cancel
     przerywa pętlę pollingu (GenJobCancelled)."""
     import caelo_core.history_store as HS
-    import caelo_core.state as state_mod
+    import caelo_core.backend_media as state_mod  # P2-13: requests/VIDEO_POLL_INTERVAL_S tutaj
     from caelo_core.genjobs import GenJob, GenJobCancelled
 
     with tempfile.TemporaryDirectory() as d:

@@ -149,9 +149,9 @@ def _capture_no_token_warn(call) -> bool:
     padł WARNING o tym trybie (ślad audytowy per-request). Rate-limiter zresetowany i
     poziom loggera ustawiony na WARNING dla determinizmu; stan przywrócony w finally."""
     import logging as _logging
-    from caelo_core import state as _state_mod
-    lg = _logging.getLogger("caelo_core.state")
-    old_lvl, _state_mod._no_token_last_warn = lg.level, 0.0
+    from caelo_core import auth_tokens as _auth_mod  # P2-13: auth wydzielony ze state.py
+    lg = _logging.getLogger("caelo_core.auth_tokens")
+    old_lvl, _auth_mod._no_token_last_warn = lg.level, 0.0
     lg.setLevel(_logging.WARNING)
     rec: list = []
     h = _logging.Handler()
@@ -1293,7 +1293,8 @@ def _unit_media_download_guard(checks: list) -> None:
     from pathlib import Path
 
     sys.path.insert(0, REPO_DIR)
-    import caelo_core.state as state_mod  # noqa: E402
+    import caelo_core.state as state_mod  # noqa: E402  (Backend)
+    import caelo_core.backend_media as media_mod  # noqa: E402  # P2-13: requests/limit tutaj
 
     class _Resp:
         def __init__(self, chunks, headers=None):
@@ -1318,11 +1319,11 @@ def _unit_media_download_guard(checks: list) -> None:
     def fake_get(url, **kw):
         calls["n"] += 1
         if "BIG" in url:
-            return _Resp([b"x"], headers={"Content-Length": str(state_mod.MAX_MEDIA_BYTES + 1)})
+            return _Resp([b"x"], headers={"Content-Length": str(media_mod.MAX_MEDIA_BYTES + 1)})
         return _Resp([b"abc", b"def"])
 
-    orig = state_mod.requests
-    state_mod.requests = types.SimpleNamespace(get=fake_get)
+    orig = media_mod.requests
+    media_mod.requests = types.SimpleNamespace(get=fake_get)
     try:
         b = state_mod.Backend.__new__(state_mod.Backend)  # bez __init__ (bez I/O)
         with tempfile.TemporaryDirectory() as d:
@@ -1348,7 +1349,7 @@ def _unit_media_download_guard(checks: list) -> None:
                 capped = True
             checks.append(("media guard: oversize (Content-Length) refused", capped))
     finally:
-        state_mod.requests = orig
+        media_mod.requests = orig
 
 
 def _unit_fs_routes(checks: list) -> None:
