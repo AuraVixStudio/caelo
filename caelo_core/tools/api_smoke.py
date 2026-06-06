@@ -1741,6 +1741,88 @@ def _unit_mcp_routes(checks: list) -> None:
             b._mcp.shutdown()
 
 
+def _unit_packages(checks: list) -> None:
+    """M16: trasy /packages — eksport→inspect→install (za zgodą), brak auto-run,
+    szablony, odinstalowanie. Backend bez __init__ (manager na temp configu)."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from caelo_core.commands import CommandRegistry  # noqa: E402
+    from caelo_core.mcp.manager import McpManager  # noqa: E402
+    from caelo_core.packages.manager import PackageManager  # noqa: E402
+    from caelo_core.routes import packages as pr  # noqa: E402
+    from caelo_core.state import Backend  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        b = Backend.__new__(Backend)
+        b._packages = PackageManager(
+            d / "caelo_packages.json", d / "skills", d / "templates",
+            command_registry=CommandRegistry(d / "caelo_commands.json", d / "commands"),
+            mcp_manager=McpManager(d / "caelo_mcp.json"), app_version="1.1")
+        try:
+            # szablony wbudowane widoczne
+            tids = {t["id"] for t in pr.list_templates(b=b)["templates"]}
+            checks.append(("/packages/templates lists builtins",
+                           {"renpy-vn-starter", "daz-render-pipeline"} <= tids))
+
+            # eksport komendy → pakiet
+            b._packages._commands.add_command(
+                {"name": "greet", "template": "Hi {input}", "target": "chat"})
+            ex = pr.export_package(pr.ExportReq(type="command", ref="greet"), b=b)
+            checks.append(("/packages/export produces .caelopkg + base64",
+                           ex["filename"].endswith(".caelopkg") and bool(ex["data_b64"])))
+
+            # inspect (bez instalacji) zwraca integralność + manifest
+            rep = pr.inspect_package(pr.InspectReq(data_b64=ex["data_b64"]), b=b)["report"]
+            checks.append(("/packages/inspect integrity + no install",
+                           rep["integrity_ok"] is True and rep["manifest"]["type"] == "command"
+                           and not pr.list_packages(b=b)["packages"]))
+
+            # install bez zgody → 400
+            no_consent = False
+            try:
+                pr.install_package(pr.InstallReq(data_b64=ex["data_b64"], consent=False), b=b)
+            except HTTPException as e:
+                no_consent = e.status_code == 400
+            checks.append(("/packages/install without consent -> 400", no_consent))
+
+            # install za zgodą → zarejestrowane
+            b._packages._commands.remove_command("greet")
+            res = pr.install_package(pr.InstallReq(data_b64=ex["data_b64"], consent=True), b=b)
+            checks.append(("/packages/install with consent records package",
+                           res["installed"]["id"] == "greet"
+                           and b._packages._commands.get("greet") is not None))
+
+            # registry parse (in-process, bez sieci)
+            entries = b._packages.parse_registry(
+                {"packages": [{"id": "greet", "type": "command", "version": "2.0.0",
+                               "url": "https://x/greet.caelopkg"}]})
+            ups = b._packages.check_updates(entries)
+            greet_up = next((u for u in ups if u["id"] == "greet"), {})
+            checks.append(("/packages updates: has_update flagged",
+                           greet_up.get("has_update") is True))
+
+            # odinstalowanie
+            checks.append(("/packages DELETE uninstalls",
+                           pr.uninstall_package("greet", type="command", b=b)["ok"] is True
+                           and not pr.list_packages(b=b)["packages"]))
+
+            # zła nazwa base64 → 400
+            bad_b64 = False
+            try:
+                pr.inspect_package(pr.InspectReq(data_b64="!!notbase64!!"), b=b)
+            except HTTPException as e:
+                bad_b64 = e.status_code == 400
+            checks.append(("/packages/inspect bad base64 -> 400", bad_b64))
+        except Exception as exc:  # noqa: BLE001
+            checks.append((f"packages routes: scenario ran ({exc})", False))
+        finally:
+            b._packages._mcp.shutdown()
+
+
 def _unit_team_routes(checks: list) -> None:
     """M17 (F2/F4/F5): trasy /agent/team — role/limity, scalenia (apply/reject/diff,
     konflikt), przebiegi. Backend bez __init__ (rejestr + magazyn na temp)."""
@@ -2111,6 +2193,9 @@ def main() -> int:
 
         # M14-B4/B6: rejestr komend slash + biblioteka skilli (in-process).
         _unit_commands_skills(checks)
+
+        # M16: trasy /packages (marketplace — eksport/inspect/install/szablony).
+        _unit_packages(checks)
 
         # M17: trasy zespołu (role/limity/scalenia/przebiegi) — in-process.
         _unit_team_routes(checks)

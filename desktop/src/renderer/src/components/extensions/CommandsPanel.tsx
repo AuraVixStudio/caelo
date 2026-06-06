@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Share2, Trash2 } from 'lucide-react'
 import {
   addCommand,
+  exportPackage,
   listCommands,
   removeCommand,
   type Conn,
   type SlashCommand
 } from '../../lib/api'
+import { downloadBase64 } from '../../lib/packages'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
@@ -48,6 +50,16 @@ export function CommandsPanel({ conn }: { conn: Conn }) {
     }
   }
 
+  // M16-4: export a command as a shareable .caelopkg bundle.
+  async function onExport(cmdName: string): Promise<void> {
+    try {
+      const r = await exportPackage(conn, { type: 'command', ref: cmdName })
+      downloadBase64(r.filename, r.data_b64)
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
       {error ? <p className="text-sm text-error">{error}</p> : null}
@@ -65,15 +77,24 @@ export function CommandsPanel({ conn }: { conn: Conn }) {
                 </div>
                 <p className="mt-0.5 truncate text-xs text-muted">{c.description}</p>
               </div>
-              {!c.builtin ? (
+              <div className="flex shrink-0 items-center gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => removeCommand(conn, c.name).then(reload).catch(() => undefined)}
-                  icon={<Trash2 size={14} />}
-                  aria-label="Remove command"
+                  onClick={() => onExport(c.name)}
+                  icon={<Share2 size={14} />}
+                  aria-label="Export command"
                 />
-              ) : null}
+                {!c.builtin ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeCommand(conn, c.name).then(reload).catch(() => undefined)}
+                    icon={<Trash2 size={14} />}
+                    aria-label="Remove command"
+                  />
+                ) : null}
+              </div>
             </div>
           ))}
         </div>

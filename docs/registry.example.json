@@ -1,0 +1,39 @@
+{
+  "_comment": "Example Caelo package registry index (M16-3). Host a file like this in a git repo and point Caelo at its raw URL (Marketplace → Browse → Registry URL). Each 'url' is a raw download link to a .caelopkg bundle. See docs/PACKAGES.md.",
+  "registry_version": 1,
+  "packages": [
+    {
+      "id": "renpy-new-scene",
+      "type": "skill",
+      "name": "Ren'Py — New Scene",
+      "version": "1.0.0",
+      "author": "Caelo",
+      "description": "Scaffold a new Ren'Py visual-novel scene (label, dialogue, choices, transitions).",
+      "url": "https://raw.githubusercontent.com/grooverpty/caelo-packages/main/skills/renpy-new-scene-1.0.0.caelopkg",
+      "source": "https://github.com/grooverpty/caelo-packages",
+      "requires": { "app": ">=1.0" }
+    },
+    {
+      "id": "daz-export-webm",
+      "type": "skill",
+      "name": "DAZ — Export Render to WebM",
+      "version": "1.0.0",
+      "author": "Caelo",
+      "description": "Encode a DAZ Studio image-sequence render into a web-ready WebM (VP9) clip.",
+      "url": "https://raw.githubusercontent.com/grooverpty/caelo-packages/main/skills/daz-export-webm-1.0.0.caelopkg",
+      "source": "https://github.com/grooverpty/caelo-packages",
+      "requires": { "app": ">=1.0" }
+    },
+    {
+      "id": "renpy-vn-starter",
+      "type": "template",
+      "name": "Ren'Py — Visual Novel Starter",
+      "version": "1.0.0",
+      "author": "Caelo",
+      "description": "A minimal Ren'Py project: one character, an intro scene with a branching choice, and a tidy game/ layout.",
+      "url": "https://raw.githubusercontent.com/grooverpty/caelo-packages/main/templates/renpy-vn-starter-1.0.0.caelopkg",
+      "source": "https://github.com/grooverpty/caelo-packages",
+      "requires": { "app": ">=1.0" }
+    }
+  ]
+}

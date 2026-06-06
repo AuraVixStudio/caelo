@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Package contribution guide
+    url: https://github.com/grooverpty/grok_desktop_app/blob/main/docs/PACKAGES.md
+    about: How to build, export, publish, and submit a Caelo package to the registry.
+  - name: Discussions
+    url: https://github.com/grooverpty/grok_desktop_app/discussions
+    about: Ask questions, show off packages, or propose featured/curated entries.
+  - name: Security vulnerability (private)
+    url: https://github.com/grooverpty/grok_desktop_app/security/advisories/new
+    about: Report a vulnerability in Caelo itself privately (NOT for third-party packages).

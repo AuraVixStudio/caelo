@@ -207,6 +207,33 @@ isolation/roles/no-escalation/worktree/cascade/budget/merge/cost), `api_smoke.py
 `_unit_team_routes`). **Live delegation verified on the user's machine** (sandbox blocks xAI); don't
 regress P0-1…P0-8 / M5–M6 / M13 / M14.
 
+**Community packages = marketplace (M16, see [`docs/PLAN_M16_SPOLECZNOSC.md`](docs/PLAN_M16_SPOLECZNOSC.md)
++ [`docs/PACKAGES.md`](docs/PACKAGES.md)):** the M14 artifacts (skills/commands/MCP-configs/templates)
+become **shareable, versioned packages** — distribution over M14, **zero hosted infrastructure** (git/
+GitHub registry). A package is **`.caelopkg` = a ZIP** (`zipfile`, no new deps) with `manifest.json`
+(name/version/type/author/`requires`/declared **permissions**/`source`/**sha256 integrity**) + `payload/`.
+[`caelo_core/packages/`](caelo_core/packages/): `manifest.py` (validate/version-compare/`requirement_satisfied`/
+`compute_integrity`/Zip-Slip-safe names) + `manager.py` `PackageManager` (build/export, **`inspect`** =
+consent card with no install, **`install(consent=True)`**, registry parse/fetch, templates, `check_updates`).
+**Security = the M14 regime, import runs NOTHING:** skills install **disabled** (not injected), MCP servers
+install **disabled** (`enabled=False` so autostart skips them; start stays a separate gated action),
+commands are just prompt templates, templates only write files via "New project". `install` refuses without
+explicit consent AND on integrity mismatch (tamper); hard caps on size/files + Zip-Slip rejection. Secrets
+(`authorization`/`env`) are **stripped on export**. Built-in **project templates** (`packages/templates/builtin/`
+Ren'Py VN starter + DAZ pipeline, packaged via the spec like builtin skills) instantiate into a chosen dir →
+`set_workspace` → an M9-B5 project (no overwrite of existing files). New state: `caelo_packages.json` (installed
+registry) + `templates/` (user templates) — both gitignored. Routes [`routes/packages.py`](caelo_core/routes/packages.py):
+`/packages` (list), `/inspect`, `/install`, `DELETE /{id}`, `/export`, `/registry`, `/updates`, `/templates`,
+`/templates/{id}/new-project`; lazy `backend.packages` (injects `commands`+`mcp` so installs hit the same
+registries as M14). Renderer: **Extensions → Marketplace** tab ([`components/extensions/Marketplace.tsx`](desktop/src/renderer/src/components/extensions/Marketplace.tsx):
+Browse/Installed/Import/Templates + **ConsentCard**) + **Share/Export** buttons on the Skills/Commands/MCP/
+Templates panels (`lib/packages.ts` for base64 ↔ file). Community ops: `.github/ISSUE_TEMPLATE/`
+(package-submission + package-report), `docs/PACKAGES.md`, `docs/registry.example.json`. Selfchecks:
+[`caelo_core/tools/packages_check.py`](caelo_core/tools/packages_check.py) (**47/47**: round-trip, consent,
+tamper, Zip-Slip/limits, registry, updates, templates) + `api_smoke.py` `_unit_packages`. **Real network
+registry/install verified on the user's machine** (sandbox blocks the net); don't regress P0-1…P0-8 / M5–M6 /
+M13 / M14.
+
 ## Commands
 
 All paths below are relative to the repo root. The frontend npm scripts run from `desktop/`.
@@ -241,6 +268,7 @@ sets. Vitest tests live in `desktop/test/` (outside the tsconfig include, so the
 caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py   # handshake + /health + token auth
 caelo_core\.venv\Scripts\python caelo_core\tools\api_smoke.py         # REST + WS routes + token enforcement
 caelo_core\.venv\Scripts\python caelo_core\tools\agent_selfcheck.py   # agent tools + loop (mocked LLM)
+caelo_core\.venv\Scripts\python caelo_core\tools\packages_check.py    # M16: marketplace (format/consent/registry/templates)
 caelo_core\.venv\Scripts\python caelo_core\tools\sidecar_smoke.py     # packaged-sidecar smoke (after pack:sidecar)
 ```
 To run a single suite, run just that one script. They use mocks where xAI is needed.
@@ -294,6 +322,10 @@ run external copy would use its own `config.py`, hence its own data dir.)
   `load_json_or_backup`; caught by the `grok_*.json` net. Built-in roles live in code, not here.
 - `worktrees/<runN>/<agent_id>/` (M17) — isolated copies of the workspace for mutating subagents
   (like the M13 checkpoint copy, no git). Discarded on merge/reject; gitignored (dev `DATA_DIR` = repo).
+- `caelo_packages.json` (M16) — registry of installed community packages (id/type/version/integrity/
+  permissions). Own file; atomic writes + `load_json_or_backup`; caught by the `caelo_*.json` net.
+- `templates/<id>/` (M16) — user-installed project templates. Built-in templates live in
+  `caelo_core/packages/templates/builtin/` (packaged via the spec, read-only), NOT here. Gitignored.
 
 All five JSON readers go through **`config.load_json_or_backup`** (P1-11): a corrupt file is moved to
 `<name>.corrupt` and logged, not silently wiped. The API key is **stored but never returned** by

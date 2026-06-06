@@ -122,6 +122,23 @@ SKILLS_DIR = DATA_DIR / "skills"                 # M14-B6: lokalne pakiety skill
 # M13, bez gita) trzymane POZA workspace (nie brudzą drzewa usera); sprzątane po scaleniu/odrzuceniu.
 SUBAGENTS_FILE = DATA_DIR / "caelo_subagents.json"  # M17-F4: definicje ról + limity zespołu
 WORKTREES_DIR = DATA_DIR / "worktrees"             # M17-B3: izolowane kopie workspace per subagent
+# M16 (społeczność / marketplace) — warstwa dystrybucji nad M14. Pakiety (.caelopkg =
+# ZIP z manifest.json) skilli/komend/konfiguracji-MCP/szablonów: eksport, bezpieczny
+# import za zgodą (declared permissions + integralność sha256), registry oparte o git.
+# Własny plik rejestru zainstalowanych pakietów (atomowo + load_json_or_backup, jak M14)
+# i katalog zainstalowanych szablonów projektów (wbudowane leżą w pakiecie, read-only).
+PACKAGES_FILE = DATA_DIR / "caelo_packages.json"  # M16-1: rejestr zainstalowanych pakietów
+TEMPLATES_DIR = DATA_DIR / "templates"            # M16-5: zainstalowane szablony projektów (<id>/)
+# Domyślny indeks registry społeczności (git/GitHub, zero infrastruktury). Surowy JSON
+# z listą pakietów + linkami do manifestów/źródeł. Nadpisywalny w UI (pole „registry URL").
+PACKAGES_REGISTRY_URL = (
+    "https://raw.githubusercontent.com/grooverpty/caelo-packages/main/registry.json"
+)
+# Twarde limity importu (anty-zip-bomba / anty-OOM, w duchu MAX_MEDIA_BYTES). Pakiet to
+# tekstowe artefakty (skille/komendy/szablony) — nie potrzebuje być duży.
+MAX_PACKAGE_BYTES = 8 * 1024 * 1024        # rozmiar pliku .caelopkg
+MAX_PACKAGE_UNPACKED_BYTES = 32 * 1024 * 1024  # suma rozpakowanych payloadów (zip-bomba)
+MAX_PACKAGE_FILES = 512                     # liczba plików w payloadzie
 
 
 def atomic_write_text(path, text: str) -> None:

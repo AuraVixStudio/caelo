@@ -73,3 +73,6 @@ project_docs/
 # M17: izolowane worktree subagentów (config.WORKTREES_DIR). W dev DATA_DIR = korzeń
 # repo, więc bez tego kopie workspace wyciekłyby do commita.
 worktrees/
+# M16: zainstalowane szablony projektów użytkownika (config.TEMPLATES_DIR). Wbudowane
+# szablony leżą w caelo_core/packages/templates/builtin/ (wersjonowane, NIE tu).
+/templates/

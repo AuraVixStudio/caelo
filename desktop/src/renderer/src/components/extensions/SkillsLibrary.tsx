@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Share2, Trash2 } from 'lucide-react'
 import {
   createSkill,
   deleteSkill,
+  exportPackage,
   getSkill,
   listSkills,
   setSkillEnabled,
   type Conn,
   type SkillInfo
 } from '../../lib/api'
+import { downloadBase64 } from '../../lib/packages'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
@@ -60,6 +62,16 @@ export function SkillsLibrary({ conn }: { conn: Conn }) {
       setNewId('')
       setNewName('')
       reload()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    }
+  }
+
+  // M16-4: export a skill as a shareable .caelopkg bundle.
+  async function onExport(id: string): Promise<void> {
+    try {
+      const r = await exportPackage(conn, { type: 'skill', ref: id })
+      downloadBase64(r.filename, r.data_b64)
     } catch (e) {
       setError(String((e as Error)?.message || e))
     }
@@ -127,6 +139,13 @@ export function SkillsLibrary({ conn }: { conn: Conn }) {
                   />
                   Enabled
                 </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onExport(s.id)}
+                  icon={<Share2 size={14} />}
+                  aria-label="Export skill"
+                />
                 {!s.builtin ? (
                   <Button
                     variant="ghost"

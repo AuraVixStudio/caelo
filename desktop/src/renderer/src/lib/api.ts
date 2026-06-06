@@ -816,6 +816,127 @@ export const addCommand = (
 export const removeCommand = (c: Conn, name: string): Promise<{ ok: boolean }> =>
   api(c, `/commands/${encodeURIComponent(name)}`, { method: 'DELETE' })
 
+// --- M16: Community packages / marketplace ----------------------------------------
+
+export type PackageType = 'skill' | 'command' | 'mcp' | 'template'
+
+export interface PackagePermissions {
+  tools: string[]
+  starts_process: boolean
+  writes_files: boolean
+  network: boolean
+}
+
+export interface PackageManifest {
+  schema: number
+  id: string
+  name: string
+  version: string
+  type: PackageType
+  author: string
+  description: string
+  requires: { app: string; model?: string }
+  permissions: PackagePermissions
+  source: string
+  integrity: string
+}
+
+/** Report from /packages/inspect — the consent card (M16-2). No install happens. */
+export interface PackageReport {
+  manifest: PackageManifest
+  integrity_ok: boolean
+  compatible: boolean
+  risk: 'low' | 'medium' | 'high'
+  warnings: string[]
+  payload_names: string[]
+  already_installed: boolean
+  source_url?: string
+}
+
+export interface InstalledPackage {
+  id: string
+  type: PackageType
+  name: string
+  version: string
+  author: string
+  source: string
+  requires: { app: string; model?: string }
+  permissions: PackagePermissions
+  integrity: string
+  installed_at: string
+}
+
+export interface RegistryEntry {
+  id: string
+  type: PackageType
+  name: string
+  version: string
+  author: string
+  description: string
+  url: string
+  source: string
+  requires: Record<string, unknown>
+  installed: boolean
+  installed_version: string | null
+  has_update: boolean
+  compatible: boolean
+}
+
+export interface PackageUpdate {
+  id: string
+  type: PackageType
+  name: string
+  installed_version: string
+  latest_version: string | null
+  has_update: boolean
+  compatible: boolean
+  url: string | null
+}
+
+export interface TemplateInfo {
+  id: string
+  name: string
+  description: string
+  version: string
+  builtin: boolean
+  file_count: number
+}
+
+export const listPackages = (c: Conn): Promise<{ packages: InstalledPackage[] }> =>
+  api(c, '/packages')
+export const inspectPackage = (
+  c: Conn,
+  body: { data_b64?: string; url?: string }
+): Promise<{ report: PackageReport }> =>
+  api(c, '/packages/inspect', { method: 'POST', body: JSON.stringify(body) })
+export const installPackage = (
+  c: Conn,
+  body: { data_b64?: string; url?: string; consent: boolean }
+): Promise<{ installed: InstalledPackage }> =>
+  api(c, '/packages/install', { method: 'POST', body: JSON.stringify(body), timeoutMs: 60_000 })
+export const uninstallPackage = (c: Conn, id: string, type?: PackageType): Promise<{ ok: boolean }> =>
+  api(c, `/packages/${encodeURIComponent(id)}${type ? `?type=${type}` : ''}`, { method: 'DELETE' })
+export const exportPackage = (
+  c: Conn,
+  body: { type: PackageType; ref: string }
+): Promise<{ filename: string; data_b64: string; bytes: number }> =>
+  api(c, '/packages/export', { method: 'POST', body: JSON.stringify(body) })
+export const getRegistry = (c: Conn, url?: string): Promise<{ packages: RegistryEntry[] }> =>
+  api(c, `/packages/registry${url ? `?url=${encodeURIComponent(url)}` : ''}`, { timeoutMs: 60_000 })
+export const getPackageUpdates = (c: Conn, url?: string): Promise<{ updates: PackageUpdate[] }> =>
+  api(c, `/packages/updates${url ? `?url=${encodeURIComponent(url)}` : ''}`, { timeoutMs: 60_000 })
+export const listTemplates = (c: Conn): Promise<{ templates: TemplateInfo[] }> =>
+  api(c, '/packages/templates')
+export const newProjectFromTemplate = (
+  c: Conn,
+  tid: string,
+  body: { dest: string; name?: string }
+): Promise<{ template: { id: string; name: string; dest: string; created: string[]; skipped: string[] }; project: { id: string; name: string } | null }> =>
+  api(c, `/packages/templates/${encodeURIComponent(tid)}/new-project`, {
+    method: 'POST',
+    body: JSON.stringify(body)
+  })
+
 // --- M17: Subagent teams (roles / limits / worktree merges / runs) ---------------
 export interface TeamRole {
   id: string

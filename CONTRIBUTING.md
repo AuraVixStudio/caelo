@@ -92,6 +92,16 @@ A red check blocks merge.
 By submitting a contribution you agree it is licensed under the project's
 [Apache-2.0 license](LICENSE) and the terms of the [CLA](CLA.md).
 
+## Sharing packages (skills, commands, MCP configs, templates)
+
+Caelo has a community marketplace (M16): skills, slash commands, MCP server configs,
+and project templates can be exported as a single `.caelopkg` file and shared, or
+listed in a git-based registry. To build and publish one, or to submit it to the
+registry, see [`docs/PACKAGES.md`](docs/PACKAGES.md). Two issue templates exist —
+**Package submission** and **Report a problematic package** — under *New issue*.
+Packages run under the same security regime as the rest of the app (declared
+permissions, explicit consent, no auto-run).
+
 ## Code of Conduct
 
 Participation in this project is governed by our

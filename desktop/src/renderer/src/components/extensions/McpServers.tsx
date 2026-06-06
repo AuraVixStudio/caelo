@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Play, Plug, RefreshCw, Square, Trash2 } from 'lucide-react'
+import { Play, Plug, RefreshCw, Share2, Square, Trash2 } from 'lucide-react'
 import {
   addMcpServer,
+  exportPackage,
   listMcpServers,
   removeMcpServer,
   setMcpEnabled,
@@ -11,6 +12,7 @@ import {
   type McpServerInfo,
   type McpServerInput
 } from '../../lib/api'
+import { downloadBase64 } from '../../lib/packages'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
@@ -76,6 +78,16 @@ export function McpServers({ conn }: { conn: Conn }) {
       setUrl('')
       setAuth('')
       reload()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    }
+  }
+
+  // M16-4: export a server config as a shareable .caelopkg (secrets are stripped).
+  async function onExport(id: string): Promise<void> {
+    try {
+      const r = await exportPackage(conn, { type: 'mcp', ref: id })
+      downloadBase64(r.filename, r.data_b64)
     } catch (e) {
       setError(String((e as Error)?.message || e))
     }
@@ -193,6 +205,13 @@ export function McpServers({ conn }: { conn: Conn }) {
                     />
                     Enabled
                   </label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onExport(s.id)}
+                    icon={<Share2 size={14} />}
+                    aria-label="Export server"
+                  />
                   <Button
                     variant="ghost"
                     size="sm"

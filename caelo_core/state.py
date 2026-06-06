@@ -76,6 +76,8 @@ class Backend:
         # M14-B4/B6: rejestr komend slash + biblioteka skilli — leniwe (per proces).
         self._commands = None
         self._skills = None
+        # M16: menedżer pakietów społeczności (marketplace) — leniwy (per proces).
+        self._packages = None
         # M17: rejestr ról subagentów (leniwy) + magazyn oczekujących scaleń worktree
         # (per workspace, jak checkpointy) + ostatnie raporty przebiegów zespołu.
         self._subagents = None
@@ -271,6 +273,20 @@ class Backend:
         if getattr(self, "_skills", None) is None:
             self._skills = SkillManager(config.SKILLS_DIR)
         return self._skills
+
+    # --- M16: pakiety społeczności / marketplace ---------------------------------
+    @property
+    def packages(self):
+        """Leniwy `PackageManager`: eksport/import pakietów `.caelopkg` (skille/komendy/
+        MCP/szablony), registry git i aktualizacje. Zależności (komendy/MCP) wstrzyknięte,
+        by instalacja trafiała do tych samych rejestrów co M14 (jeden reżim zgody)."""
+        from caelo_core.packages import PackageManager
+
+        if getattr(self, "_packages", None) is None:
+            self._packages = PackageManager(
+                config.PACKAGES_FILE, config.SKILLS_DIR, config.TEMPLATES_DIR,
+                command_registry=self.commands, mcp_manager=self.mcp)
+        return self._packages
 
     def shutdown(self) -> None:
         """Sprzątanie na zamknięciu sidecara: ubij podprocesy serwerów MCP (tree-kill)."""

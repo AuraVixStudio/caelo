@@ -46,6 +46,7 @@ from caelo_core.routes import (
     mcp,
     media,
     models,
+    packages,
     permissions,
     projects,
     settings,
@@ -178,6 +179,7 @@ def create_app(
     app.include_router(hooks.router, dependencies=guard)  # M14-B5: hooki + audyt
     app.include_router(commands.router, dependencies=guard)  # M14-B4: komendy slash
     app.include_router(skills.router, dependencies=guard)  # M14-B6: biblioteka skilli
+    app.include_router(packages.router, dependencies=guard)  # M16: marketplace pakietów
     # WebSockety same weryfikują token z query (nagłówków nie da się ustawić w WS).
     app.include_router(chat.router)
     app.include_router(agent.router)

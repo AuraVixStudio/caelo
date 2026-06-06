@@ -46,6 +46,11 @@ hiddenimports += collect_submodules("caelo_core")
 # bierze. BUILTIN_DIR rozwiązuje się względem __file__ (→ <bundle>/caelo_core/skills/builtin).
 datas += collect_data_files("caelo_core", includes=["skills/builtin/**/*.md"])
 
+# M16-5: wbudowane szablony projektów (template.json + drzewo files/) — też pliki DANYCH.
+# Dowolne rozszerzenia (.rpy/.sh/.md/.json/…), więc bierzemy cały podkatalog builtin.
+datas += collect_data_files(
+    "caelo_core", includes=["packages/templates/builtin/**/*"])
+
 # Legacy moduły z korzenia repo: caelo_core/__init__.py dokłada korzeń do sys.path
 # DOPIERO w czasie działania, więc statyczna analiza PyInstallera ich nie widzi —
 # deklarujemy je jawnie (pathex=['.'] pozwala je znaleźć przy budowie).

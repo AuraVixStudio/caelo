@@ -1,0 +1,6 @@
+{
+  "name": "Ren'Py — Visual Novel Starter",
+  "version": "1.0.0",
+  "author": "Caelo",
+  "description": "A minimal Ren'Py visual-novel project: one character, an intro scene with a branching choice, and a tidy game/ layout to grow from."
+}
