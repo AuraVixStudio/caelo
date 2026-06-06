@@ -364,7 +364,6 @@ export function Voice({ conn }: { conn: Conn }) {
           {ttsError ? <p className="mt-4 text-sm text-error">{ttsError}</p> : null}
           {ttsAudio ? (
             <div className="mt-6 flex flex-wrap items-center gap-3">
-              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
               <audio src={ttsAudio.dataUrl} controls autoPlay className="w-full max-w-md" />
               {ttsAudio.path ? (
                 <Button

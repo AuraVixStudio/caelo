@@ -39,11 +39,18 @@ jobs:
           # dla repo osobistego / publicznego skan jest darmowy.
 
   backend:
-    # Aplikacja celuje głównie w Windows (cmd.exe, pywinpty, tree-kill `taskkill`),
-    # a self-checki spawnują sidecar i weryfikują zachowania zależne od platformy —
-    # więc CI backendu biegnie na Windows, tak jak środowisko docelowe.
-    name: Backend self-checks (Windows)
-    runs-on: windows-latest
+    # P3-12: self-checki backendu biegną na MATRYCY 3 OS. Kod ma świadome rozgałęzienia
+    # per-OS (shell=False+shlex na POSIX vs cmd.exe `shell=True`, killpg vs taskkill,
+    # ścieżki DATA_DIR, skaner metaznaków P0-10) — crossplatform_check.py bada je wprost,
+    # więc walidujemy je na KAŻDYM PR, a nie dopiero przy wydaniu (release.yml). pywinpty
+    # instaluje się tylko na Windows (marker w requirements.txt); pozostałe checki nie
+    # wymagają PTY. fail-fast: false → awaria jednego OS nie maskuje pozostałych.
+    name: Backend self-checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
     env:
       # stdout/stderr jako UTF-8 — testy operują na polskich znakach (anty-mojibake).
       PYTHONUTF8: "1"
@@ -109,14 +116,9 @@ jobs:
       - name: Typecheck (tsc — node + web)
         run: npm run typecheck
 
-      # NOTE (M15-3 / M8): eslint+vitest są skonfigurowane i mają testy, ale ich
-      # devDeps nie są jeszcze w package.json/lock (dodanie wymaga `npm install -D`
-      # na maszynie z siecią, by zaktualizować package-lock — inaczej `npm ci`
-      # powyżej by padło). Do tego czasu dociągamy toolchain efemerycznie (bez
-      # zapisu do lockfile), żeby PR i tak przechodził przez lint i testy.
-      - name: Install lint/test toolchain (ephemeral)
-        run: npm install --no-save --no-package-lock eslint@^9 typescript-eslint@^8 eslint-plugin-react-hooks@^5 globals@^16 vitest@^3
-
+      # P3-10: eslint/typescript-eslint/eslint-plugin-react-hooks/globals/vitest są teraz
+      # w devDependencies (package.json) i w package-lock.json, więc `npm ci` powyżej je
+      # instaluje — efemeryczny `npm install --no-save` został usunięty.
       - name: Lint (ESLint — react-hooks)
         run: npm run lint
 
