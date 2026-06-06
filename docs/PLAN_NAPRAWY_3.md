@@ -1,9 +1,9 @@
 # Plan naprawy słabych stron (Runda 3) — Caelo Desktop
 
-> **Status:** 🔄 W TRAKCIE (2026-06-06) — **4/8 zrobione i zweryfikowane: P1-15 ✅, P2-14 ✅, P3-10 ✅,
-> P3-12 ✅** (logowanie cichych `except`; Electron `sandbox:true` + log no-token; `npm ci`/typecheck/lint
-> exit 0/test 122/122; CI backendu na matrycy 3 OS; self-checki packages 48/48, api_smoke/handshake OK,
-> build zielony — brak regresji); pozostałe 4 pozycje 🔲 propozycja. Wynik **gruntownej analizy SWOT**
+> **Status:** 🔄 W TRAKCIE (2026-06-06) — **5/8 zrobione i zweryfikowane: P1-15 ✅, P2-14 ✅, P3-10 ✅,
+> P3-12 ✅, P3-14 ✅** (logowanie cichych `except`; Electron `sandbox:true` + log no-token; devDeps→lockfile;
+> CI backendu na matrycy 3 OS; dokumentacja użytkownika + referencja API 96 REST/6 WS); pozostałe 3 pozycje
+> (P2-13, P3-11, P3-13) 🔲 propozycja. Wynik **gruntownej analizy SWOT**
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
 > rozszerzalność/społeczność/subagenci). W odróżnieniu od rund 1–2 ten plan **NIE adresuje
@@ -243,7 +243,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   paczki — np. `sidecar_smoke`).
 - **Szac. koszt:** 2–3 dni (mechaniczne, ale obszerne).
 
-### [ ] P3-14 — Dokumentacja użytkownika + referencja tras REST/WS  🟡 ŚREDNIE
+### [x] P3-14 — Dokumentacja użytkownika + referencja tras REST/WS  🟡 ŚREDNIE
 - **Plik:** `docs/` — 17 dokumentów `PLAN_*.md` to **doskonałe dokumenty projektowe, ale deweloperskie
   i po polsku**; brak przewodnika użytkownika i referencji API. `README.md` pełni podwójną rolę.
 - **Problem:** brak „on-ramp" dla użytkownika i kontrybutora: jak zacząć czat, jak używać agenta/
@@ -256,6 +256,21 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 - **Weryfikacja (DoD):** `USER_GUIDE.md` pokrywa wszystkie 9 modułów; `API.md` listuje każdą trasę z
   `routes/*`; oba zlinkowane z indeksu. Krótki „Getting Started" w README wskazuje na guide.
 - **Szac. koszt:** 1.5–2 dni.
+- **✅ Zrobione (2026-06-06):**
+  1. **[`docs/USER_GUIDE.md`](USER_GUIDE.md)** (EN, zgodnie z regułą języka user-facing) — Getting Started
+     (instalacja/auth/precedence), **wszystkie 9 modułów** (Chat, Code/agent, Image, Video, Gallery, Voice,
+     History, Extensions, Settings), kluczowe koncepcje (Projekty, Send-to, permission gate, prywatność/koszty)
+     i Troubleshooting.
+  2. **[`docs/API.md`](API.md)** (EN) — referencja **96 tras REST + 6 WS** pogrupowana po domenach (auth,
+     models/settings, media/genjobs, voice, fs/git, history/artifacts, projects/collections, agent/team,
+     mcp/hooks/commands/skills, packages), model autoryzacji (Bearer/token w query, fail-closed, CORS),
+     handshake, tabela protokołów ramek WS + snippet do **regeneracji** listy (introspekcja `app.routes`).
+  **Osadzenie w faktach (nie zmyślone):** lista tras wygenerowana **introspekcją** `create_app().routes`
+  (`APIRoute`/`APIWebSocketRoute`) — dokładnie **96 REST + 6 WS**; opisy spot-checkowane względem docstringów
+  (np. `/auth/login` = OAuth PKCE, `/artifacts/{id}/input-block` = send-to bus). **Podlinkowane:**
+  `docs/README.md` (dwa nowe wiersze tabeli + „Jak czytać"), główny [`README.md`](../README.md) (wskaźnik po
+  Quickstarcie „New to the app?" + sekcja Documentation). **Pozostaje opcjonalnie** (nie w DoD): hosting na
+  GitHub Pages.
 
 ---
 

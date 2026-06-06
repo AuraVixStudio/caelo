@@ -5,17 +5,20 @@ Instrukcje dla asystenta/architektura w pigułce: [`../CLAUDE.md`](../CLAUDE.md)
 
 | Dokument | Co zawiera | Status |
 |---|---|---|
+| [`USER_GUIDE.md`](USER_GUIDE.md) | **Przewodnik użytkownika (EN)** — krok po kroku przez wszystkie 9 modułów (Chat, Code/agent, Image, Video, Gallery, Voice, History, Extensions, Settings) + kluczowe koncepcje (projekty, send-to, koszty, prywatność) i troubleshooting. Pierwszy przystanek dla użytkownika końcowego. | ✅ |
+| [`API.md`](API.md) | **Referencja API backendu (EN)** — pełna lista **96 tras REST + 6 WS** pogrupowana po domenach, model autoryzacji (Bearer/token w query, fail-closed), handshake, protokoły ramek WS + snippet do regeneracji listy. Dla deweloperów/integratorów. | ✅ |
 | [`REBUILD_PLAN.md`](REBUILD_PLAN.md) | Plan przebudowy customtkinter → Electron + Python sidecar: decyzje, architektura, **Fazy 0–8** (datowane statusy) oraz **§13 „Faza 9"** rekonsolidująca aktualny stan (moduły, stack, pełna lista endpointów). | Fazy 0–8 ✅ |
 | [`MODYFIKACJE.md`](MODYFIKACJE.md) | **Żywa specyfikacja** nadbudowy na Fazach 0–8: scalenie Generator+Edit → **Image**, **Video** edit/extend, moduł **Voice** (TTS/STT/realtime), załączniki w Chat/Code, poprawki UI. Tu szukaj kontraktów tych modułów. | ✅ |
 | [`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md) | Plan napraw/hardeningu do jakości produkcyjnej (**runda 1**) — **P0** (bezpieczeństwo agenta) · **P1** (stabilność/dane) · **P2** (jakość/wydajność frontu) · **P3** (testy/CI/pakowanie/dok.). Każdy punkt ma `[x]` + datowaną notatkę. | ✅ ZREALIZOWANY |
 | [`PLAN_NAPRAWY_2.md`](PLAN_NAPRAWY_2.md) | Plan napraw/rozwoju (**runda 2**) z niezależnego przeglądu kodu — luki rezydualne nieprzeniesione w rundzie 1: kolejka WS agenta (P0-9), skaner metaznaków na POSIX (P0-10), env terminala (P0-11), REST fail-open (P1-10), wybiórczy atomic write (P1-11), perystencja rozmów (P2-8), brak ESLinta/testów tras (P3-7…P3-9). ID i kamienie (M5–M8) kontynuują rundę 1. | ✅ ZREALIZOWANY (M5–M8) |
-| [`PLAN_NAPRAWY_3.md`](PLAN_NAPRAWY_3.md) | Plan naprawy słabych stron (**runda 3**) z **analizy SWOT** po M9–M17 — **dług utrzymaniowy, nie luki krytyczne** (brak P0): logowanie cichych `except` (P1-15), dekompozycja `state.py` (P2-13), `sandbox: true`/log no-token (P2-14), devDeps→lockfile (P3-10), testy komponentów+E2E frontu (P3-11), cross-platform PR CI (P3-12), pytest+rozbicie `api_smoke.py` (P3-13), dokumentacja użytkownika (P3-14). Kamień **M18**. | 🔄 W TRAKCIE (P1-15 ✅, P2-14 ✅, P3-10 ✅, P3-12 ✅) |
+| [`PLAN_NAPRAWY_3.md`](PLAN_NAPRAWY_3.md) | Plan naprawy słabych stron (**runda 3**) z **analizy SWOT** po M9–M17 — **dług utrzymaniowy, nie luki krytyczne** (brak P0): logowanie cichych `except` (P1-15), dekompozycja `state.py` (P2-13), `sandbox: true`/log no-token (P2-14), devDeps→lockfile (P3-10), testy komponentów+E2E frontu (P3-11), cross-platform PR CI (P3-12), pytest+rozbicie `api_smoke.py` (P3-13), dokumentacja użytkownika (P3-14). Kamień **M18**. | 🔄 W TRAKCIE (P1-15 ✅, P2-14 ✅, P3-10 ✅, P3-12 ✅, P3-14 ✅) |
 
 ## Jak czytać
 
 1. **Nowy w projekcie?** → [`../README.md`](../README.md) (architektura, moduły, szybki start), potem [`../CLAUDE.md`](../CLAUDE.md) (zasady i pułapki — m.in. dlaczego rdzeń xAI zostaje w korzeniu repo).
-2. **Co to za moduł / endpoint?** → `REBUILD_PLAN.md` §13 (skrót) lub `MODYFIKACJE.md` (szczegóły media/głos).
-3. **Stan napraw / co już utwardzone?** → `PLAN_NAPRAWY.md` (runda 1 ✅) i `PLAN_NAPRAWY_2.md` (runda 2 ✅) — bezpieczeństwo/stabilność zrealizowane. **Dług utrzymaniowy / co dalej (testy, CI cross-platform, dokumentacja user)** → `PLAN_NAPRAWY_3.md` (runda 3, propozycja z analizy SWOT — bez P0).
+2. **Użytkownik — jak korzystać z modułu?** → `USER_GUIDE.md` (krok po kroku, EN).
+3. **Deweloper — jaka trasa / endpoint?** → `API.md` (96 REST + 6 WS), a kontekst projektowy → `REBUILD_PLAN.md` §13 lub `MODYFIKACJE.md` (szczegóły media/głos).
+4. **Stan napraw / co już utwardzone?** → `PLAN_NAPRAWY.md` (runda 1 ✅) i `PLAN_NAPRAWY_2.md` (runda 2 ✅) — bezpieczeństwo/stabilność zrealizowane. **Dług utrzymaniowy / co dalej (testy, CI cross-platform, dokumentacja user)** → `PLAN_NAPRAWY_3.md` (runda 3, propozycja z analizy SWOT — bez P0).
 
 ## Powiązane README (poza `docs/`)
 
