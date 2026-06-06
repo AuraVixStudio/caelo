@@ -57,8 +57,10 @@ komponentów funkcyjnych (ChatView, AgentPanel, TeamView — wymagają harnessu 
 
 Testy end-to-end sterują **realną przeglądarką** nad `preview:web` (Vite na :4599 z atrapą
 `window.caelo` z [`lib/devMock`](src/renderer/src/lib/devMock.ts)) — renderer **bez Electrona i bez
-sidecara**. Pokrywają powłokę: ładowanie/„Connected", nawigację po modułach (rail + `aria-current`)
-i paletę **Ctrl-K** ([`e2e/*.spec.ts`](e2e/), config [`playwright.config.ts`](playwright.config.ts)).
+sidecara**. Pokrywają ([`e2e/*.spec.ts`](e2e/), config [`playwright.config.ts`](playwright.config.ts)):
+**powłokę** (ładowanie/„Connected", nawigacja po rail + `aria-current`, paleta **Ctrl-K**) oraz
+**przepływ z danymi backendu** — switcher projektu listujący `GET /projects` i przełączający przez
+`POST /projects/current`, z backendem zmockowanym przez `page.route()` ([`e2e/_mock.ts`](e2e/_mock.ts)).
 
 Biegną w **CI** (osobny job `e2e` w `ci.yml`) i lokalnie (`@playwright/test` jest w `devDependencies`):
 ```powershell
@@ -71,11 +73,9 @@ npm run test:e2e                     # podnosi preview:web i uruchamia specy z e
 > Config czyta tę zmienną opcjonalnie (domyślnie standardowe zachowanie — CI dociąga build sam).
 
 E2E jest **deterministyczne**: `workers: 1` (jeden współdzielony `preview:web`), a specy czekają na
-gotową powłokę przed interakcją (np. przed `Ctrl-K`). Przepływy z **danymi backendu** (send-to z realnymi
-danymi) wymagałyby mocka REST (`page.route()`) — to kolejny podetap; tu walidujemy nawigację/powłokę.
-
-> Przepływy z **danymi backendu** (send-to, przełączanie projektu z realnymi danymi) wymagają mocka
-> REST (`page.route()`); tu walidujemy nawigację/powłokę. Rozbudowa = kolejny podetap.
+gotową powłokę/moduł przed interakcją (np. na nagłówek modułu lub przed `Ctrl-K`). Mock REST
+([`_mock.ts`](e2e/_mock.ts)) przechwytuje `http://127.0.0.1:9/**` (baseUrl z devMock) i odpowiada JSON-em
+per ścieżka; testy nadpisują wybrane endpointy. Kolejne przepływy (np. send-to) dodaje się analogicznie.
 
 ## Pakowanie (instalator .exe — Faza 7)
 Dwa artefakty: **spakowany sidecar** (PyInstaller onedir) + **instalator Electrona** (electron-builder NSIS).

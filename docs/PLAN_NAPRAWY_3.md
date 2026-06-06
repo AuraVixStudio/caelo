@@ -245,10 +245,12 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   standardowe dociąganie buildu w CI); (2) flaky `command-palette` (Ctrl-K wysłany przed podpięciem listenera)
   → czekamy aż powłoka gotowa; (3) kontencja przy 3 workerach → `workers: 1` (jeden współdzielony `preview:web`).
   **CI:** dodany job **`e2e`** w [`ci.yml`](../.github/workflows/ci.yml) (`npm ci` → `npx playwright install
-  --with-deps chromium` → `npm run test:e2e`) — DoD „≥3 E2E w CI" **spełniony**. Łącznie **33 testy
-  komponentów + 3 E2E**. **Poza zakresem (opcjonalnie dalej):** testy **ciężkich komponentów** (ChatView/
-  AgentPanel/TeamView — harness mockujący `window.caelo`+Hub+API) oraz E2E przepływów z danymi backendu
-  (mock REST `page.route()`) — nie są w DoD; bieżąca warstwa pokrywa prymitywy, paletę i powłokę/nawigację.
+  --with-deps chromium` → `npm run test:e2e`) — DoD „≥3 E2E w CI" **spełniony**. **Dodano też E2E przepływu
+  z danymi backendu** (poza DoD): switcher projektu listujący `GET /projects` i przełączający
+  `POST /projects/current`, backend zmockowany przez `page.route()` ([`e2e/_mock.ts`](../desktop/e2e/_mock.ts)
+  + [`project-switch.spec.ts`](../desktop/e2e/project-switch.spec.ts)) → **4 E2E**, lokalnie 4/4 (×2). Łącznie
+  **33 testy komponentów + 4 E2E**. **Poza zakresem (opcjonalnie dalej):** testy **ciężkich komponentów**
+  (ChatView/AgentPanel/TeamView — harness mockujący `window.caelo`+Hub+API) — nie w DoD.
 
 ### [x] P3-12 — Walidacja cross-platform w PR CI (macOS/Linux + self-checki nie tylko Windows)  🟢 WYSOKI ROI
 - **Plik:** `.github/workflows/ci.yml` — backend job `runs-on: windows-latest` (linia 46), frontend job
