@@ -60,11 +60,16 @@ Nadbudowa — media / głos (patrz [`../docs/MODYFIKACJE.md`](../docs/MODYFIKACJ
 - `GET /models` — dodatkowo: `image`, `voices`, `default_image`, `default_voice`, `realtime_model`
 
 ## Self-checki
+
+Uruchamiane przez **pytest** (P3-13) — każda suita to osobny test parametryczny:
 ```bash
-# handshake + /health + autoryzacja /whoami
-caelo_core/.venv/Scripts/python caelo_core/tools/handshake_check.py
-# trasy Fazy 1 (REST + WS + egzekwowanie tokenu)
-caelo_core/.venv/Scripts/python caelo_core/tools/api_smoke.py
-# silnik agenta Fazy 4 (narzędzia + sandbox + pętla z mockiem)
-caelo_core/.venv/Scripts/python caelo_core/tools/agent_selfcheck.py
+caelo_core/.venv/Scripts/pip install -r caelo_core/requirements-dev.txt  # raz: pytest
+caelo_core/.venv/Scripts/python -m pytest caelo_core/tests -v            # wszystkie suity
+caelo_core/.venv/Scripts/python -m pytest caelo_core/tests -k api_smoke  # jedna (-k)
+```
+Każda suita biegnie też jako samodzielny skrypt (ma `main()`):
+```bash
+caelo_core/.venv/Scripts/python caelo_core/tools/handshake_check.py   # handshake + /whoami
+caelo_core/.venv/Scripts/python caelo_core/tools/api_smoke.py         # REST + WS + token
+caelo_core/.venv/Scripts/python caelo_core/tools/agent_selfcheck.py   # agent (mock LLM)
 ```

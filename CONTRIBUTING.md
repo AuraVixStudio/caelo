@@ -41,11 +41,15 @@ The main process finds Python in this order: `CAELO_CORE_PYTHON` env →
 
 ## Checks you must run (and that CI runs)
 
-Caelo has no pytest — each backend self-check is a self-contained suite. Run from
-the **repo root** (the sidecar imports the shared core via `python -m caelo_core`):
+Each backend self-check is a self-contained suite (mock xAI; no network). Run them
+all via **pytest** from the **repo root** (the sidecar imports the shared core via
+`python -m caelo_core`):
 
 ```powershell
 # Backend (mock xAI; no network needed)
+caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt   # one-time: pytest
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v             # all suites at once
+# …or run a single suite as a standalone script (each tools/*_check.py has a main()):
 caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py      # handshake + /health + token auth
 caelo_core\.venv\Scripts\python caelo_core\tools\api_smoke.py            # REST + WS routes + token/CORS
 caelo_core\.venv\Scripts\python caelo_core\tools\agent_selfcheck.py      # agent tools + loop + sandbox

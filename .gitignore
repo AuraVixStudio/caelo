@@ -1,6 +1,7 @@
 # ── Python (caelo_core sidecar) ──
 __pycache__/
 *.pyc
+.pytest_cache/
 .venv/
 caelo_core/.venv/
 grok_core/.venv/        # legacy (sprzed rebrandu M15) — na wszelki wypadek

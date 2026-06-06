@@ -1,10 +1,11 @@
 # Plan naprawy słabych stron (Runda 3) — Caelo Desktop
 
-> **Status:** 🔄 W TRAKCIE (2026-06-06) — **5/8 zrobione i zweryfikowane: P1-15 ✅, P2-14 ✅, P3-10 ✅,
-> P3-12 ✅, P3-14 ✅** (logowanie cichych `except`; Electron `sandbox:true` + log no-token; devDeps→lockfile;
-> CI backendu na matrycy 3 OS; dokumentacja użytkownika + referencja API 96 REST/6 WS) + **P3-11 🔄 częściowo**
-> (33 testy komponentów RTL/jsdom: `npm test` 155/155 + scaffold E2E Playwright — brakuje aktywacji E2E/CI);
-> pozostałe 2 pozycje (P2-13, P3-13) 🔲 propozycja. Wynik **gruntownej analizy SWOT**
+> **Status:** 🔄 W TRAKCIE (2026-06-06) — **6/8 zrobione: P1-15 ✅, P2-13 ✅, P2-14 ✅, P3-10 ✅, P3-12 ✅,
+> P3-14 ✅** (logowanie cichych `except`; dekompozycja `state.py` 691→378; `sandbox:true` + log no-token;
+> devDeps→lockfile; CI backendu na matrycy 3 OS; dokumentacja użytkownika + API) + **2 częściowo: P3-11 🔄**
+> (33 testy komponentów RTL/jsdom `npm test` 155/155 + scaffold E2E — brak aktywacji E2E) i **P3-13 🔄**
+> (framework pytest + adapter 8 suit + CI woła `pytest` — odłożony fizyczny rozbiór `api_smoke`).
+> Wynik **gruntownej analizy SWOT**
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
 > rozszerzalność/społeczność/subagenci). W odróżnieniu od rund 1–2 ten plan **NIE adresuje
@@ -281,6 +282,22 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   żaden plik testowy > ~600 linii; CI woła `pytest` (z zachowaniem osobnych checków, które wymagają
   paczki — np. `sidecar_smoke`).
 - **Szac. koszt:** 2–3 dni (mechaniczne, ale obszerne).
+- **🔄 CZĘŚCIOWO ZROBIONE (2026-06-06) — framework pytest + CI ✅; rozbiór `api_smoke` ⏳:**
+  Wprowadzono **runner pytest** ([`caelo_core/requirements-dev.txt`](../caelo_core/requirements-dev.txt)
+  = `pytest>=8`) + [`caelo_core/tests/`](../caelo_core/tests/): `conftest.py` (bootstrap `sys.path` →
+  korzeń repo) i `test_selfchecks.py` — **adapter** uruchamiający każdą z **8 suit** (`crossplatform/
+  mcp/genjobs/history/packages/agent_selfcheck/handshake/api_smoke`) jako osobny **test parametryczny**
+  (`main()` → 0/1). Daje discovery, `pytest -k <suita>`, jeden bieg. **CI** ([`ci.yml`](../.github/workflows/ci.yml)):
+  7 osobnych kroków self-checków zastąpione jednym `python -m pytest caelo_core/tests` (+ dochodzi
+  `packages_check`, którego w CI nie było). Dokumentacja zaktualizowana (`README.md`, `caelo_core/README.md`,
+  `CONTRIBUTING.md` — „no pytest" → pytest). **Weryfikacja mechanizmu BEZ pytest** (rejestr pip zablokowany
+  w sandboxie): wszystkie 8 suit importowalne z `main()` callable (to robi collection), wrapper
+  `import_module→main()→rc==0` potwierdzony (`mcp_check` 24/24 → rc 0). **Aktywacja:** `pip install -r
+  caelo_core/requirements-dev.txt` na maszynie z siecią, potem `pytest caelo_core/tests`.
+  **Odłożone (dlatego NIE `[x]`):** fizyczny **rozbiór `api_smoke.py` (2218 linii → `test_routes_*`/
+  `test_voice`/`test_collections`, każdy < ~600)** — to duży, czysto mechaniczny przepis, który ryzykuje
+  zepsucie sprawdzonej siatki bezpieczeństwa; świadomie zostawiony jako osobny podetap (adapter już daje
+  benefity frameworka bez tego ryzyka). DoD „żaden plik > ~600 linii" jeszcze niespełniony.
 
 ### [x] P3-14 — Dokumentacja użytkownika + referencja tras REST/WS  🟡 ŚREDNIE
 - **Plik:** `docs/` — 17 dokumentów `PLAN_*.md` to **doskonałe dokumenty projektowe, ale deweloperskie

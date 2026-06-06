@@ -68,28 +68,15 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install --upgrade pip && pip install -r caelo_core/requirements.txt
 
-      # Każdy skrypt to samodzielny zestaw asercji (kod wyjścia != 0 => fail).
-      # Uruchamiane z korzenia repo (sidecar startowany jako `python -m caelo_core`).
-      - name: Handshake + /health + token auth
-        run: python caelo_core/tools/handshake_check.py
+      # P3-13: self-checki biegną przez pytest (discovery + jeden bieg). Każda suita
+      # (tools/*_check.py, api_smoke, handshake_check) to osobny test parametryczny —
+      # jej main() zwraca 0 (OK) / 1 (FAIL); uruchamiane z korzenia repo (sidecar startuje
+      # jako `python -m caelo_core`). sidecar_smoke pominięty — wymaga spakowanego .exe (release).
+      - name: Install dev/test deps (pytest)
+        run: pip install -r caelo_core/requirements-dev.txt
 
-      - name: REST + WS routes + token/CORS + unit logic (api_smoke)
-        run: python caelo_core/tools/api_smoke.py
-
-      - name: Agent tools + loop + sandbox (agent_selfcheck)
-        run: python caelo_core/tools/agent_selfcheck.py
-
-      - name: Cross-platform PTY / tree-kill / paths (crossplatform_check)
-        run: python caelo_core/tools/crossplatform_check.py
-
-      - name: MCP client (mock stdio server)
-        run: python caelo_core/tools/mcp_check.py
-
-      - name: Generation queue lifecycle (genjobs_check)
-        run: python caelo_core/tools/genjobs_check.py
-
-      - name: SQLite hub backbone (history_check)
-        run: python caelo_core/tools/history_check.py
+      - name: Self-checks via pytest (handshake/api_smoke/agent/crossplatform/mcp/genjobs/history/packages)
+        run: python -m pytest caelo_core/tests -v
 
   frontend:
     name: Frontend typecheck + lint + tests

@@ -147,8 +147,16 @@ Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 
 ## Backend self-checks
 
-There is no pytest; each script is a self-contained suite (mocks where xAI is
-needed). Run from the **repo root**:
+Each script in `caelo_core/tools/` is a self-contained suite (mocks where xAI is
+needed). Run them all via **pytest** (P3-13) from the **repo root**:
+
+```powershell
+caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt   # one-time: pytest
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v             # all suites
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -k api_smoke   # one suite (-k filter)
+```
+
+Each suite is also runnable directly as a standalone script:
 
 ```powershell
 caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py      # handshake + /health + token auth
