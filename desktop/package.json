@@ -14,6 +14,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint": "eslint src",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "pack:sidecar": "powershell -ExecutionPolicy Bypass -File ../build_sidecar.ps1",
     "pack:sidecar:unix": "bash ../build_sidecar.sh",
     "dist": "npm run build && electron-builder --win",

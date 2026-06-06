@@ -3,8 +3,8 @@
 > **Status:** 🔄 W TRAKCIE (2026-06-06) — **5/8 zrobione i zweryfikowane: P1-15 ✅, P2-14 ✅, P3-10 ✅,
 > P3-12 ✅, P3-14 ✅** (logowanie cichych `except`; Electron `sandbox:true` + log no-token; devDeps→lockfile;
 > CI backendu na matrycy 3 OS; dokumentacja użytkownika + referencja API 96 REST/6 WS) + **P3-11 🔄 częściowo**
-> (warstwa testów komponentów RTL/jsdom: `npm test` 148/148 — brakuje E2E); pozostałe 2 pozycje (P2-13, P3-13)
-> 🔲 propozycja. Wynik **gruntownej analizy SWOT**
+> (33 testy komponentów RTL/jsdom: `npm test` 155/155 + scaffold E2E Playwright — brakuje aktywacji E2E/CI);
+> pozostałe 2 pozycje (P2-13, P3-13) 🔲 propozycja. Wynik **gruntownej analizy SWOT**
 > aplikacji (backend `caelo_core` + rdzeń xAI, frontend Electron/React, bezpieczeństwo, praktyki
 > inżynierskie) przeprowadzonej **po** domknięciu kamieni M9–M17 (czat/twórczość/głos/agent-zaufanie/
 > rozszerzalność/społeczność/subagenci). W odróżnieniu od rund 1–2 ten plan **NIE adresuje
@@ -208,17 +208,20 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   `jest-dom ^6`, `user-event ^14`, `jsdom ^29` w `package.json`+lockfile) i config
   ([`vitest.config.ts`](../desktop/vitest.config.ts)): `@vitejs/plugin-react` (auto-JSX), `include` `.tsx`,
   `globals: true` (auto-cleanup RTL). jsdom **tylko** w `test/components/` (docblock per-plik) → **122 testy
-  utili nietknięte**. **+26 testów komponentów** ([`desktop/test/components/`](../desktop/test/components/)):
+  utili nietknięte**. **+33 testy komponentów** ([`desktop/test/components/`](../desktop/test/components/)):
   prymitywy UI (Button 6, Input/Textarea 5, Badge 2, Select 2, IconButton 4, Slider 2, Card 2 —
-  render+interakcja: klik/onChange/disabled/aria/warianty) i **kontekst motywu** (ThemeProvider/useTheme 3
-  — `setTheme` przełącza klasę `.dark` + persist localStorage; `_matchMedia` stub). **Weryfikacja:**
-  `npm test` **148/148** (122+26), `typecheck` czysty, `lint` exit 0; biegnie w CI przez `npm test`.
-  **Pozostaje (osobny podetap, dlatego NIE `[x]`):** (a) testy **ciężkich komponentów** (ChatView/
-  AgentPanel/TeamView — wymagają harnessu mockującego `window.caelo` + kontekst Hub + klienta API);
-  (b) **E2E** (Playwright na `preview:web` z `devMock` lub spakowanej apce) dla send-to / przełączania
-  projektu / zatwierdzeń agenta — wymaga działającej apki + binariów przeglądarki, więc poza warstwą
-  jednostkową/CI bez osobnego kroku. DoD `≥3 E2E` jeszcze niespełniony. Strategia: `desktop/README.md`
-  (sekcja „Testy (Vitest)").
+  render+interakcja: klik/onChange/disabled/aria/warianty), **kontekst motywu** (ThemeProvider/useTheme 3
+  — `setTheme` przełącza klasę `.dark` + persist localStorage; `_matchMedia` stub) i **paleta komend**
+  (`CommandPalette` 7 — Ctrl-K: filtr/Enter/Escape/klik/empty-state). **Weryfikacja:** `npm test`
+  **155/155** (122+33), `typecheck` czysty, `lint` exit 0; biegnie w CI przez `npm test`.
+  **E2E — scaffold DOSTARCZONY** ([`desktop/playwright.config.ts`](../desktop/playwright.config.ts) +
+  [`desktop/e2e/`](../desktop/e2e/): 3 specy — ładowanie/„Connected", nawigacja po rail (`aria-current`),
+  paleta Ctrl-K — na `preview:web` z `devMock`, bez Electrona/sidecara; skrypt `npm run test:e2e`). Scaffold
+  jest **inertny** dla CI (poza `tsconfig`/`eslint`/`vitest` — nie psuje `npm ci`/typecheck/lint/test).
+  **Pozostaje do `[x]`:** (a) **aktywacja E2E** — `npm install -D @playwright/test` + `npx playwright install
+  chromium` + `npm run test:e2e` (binaria przeglądarki nieosiągalne w sandboxie), a potem job `e2e` w
+  `ci.yml`; (b) testy **ciężkich komponentów** (ChatView/AgentPanel/TeamView — harness mockujący
+  `window.caelo` + Hub + klient API). Aktywacja E2E udokumentowana w `desktop/README.md` (sekcja „E2E").
 
 ### [x] P3-12 — Walidacja cross-platform w PR CI (macOS/Linux + self-checki nie tylko Windows)  🟢 WYSOKI ROI
 - **Plik:** `.github/workflows/ci.yml` — backend job `runs-on: windows-latest` (linia 46), frontend job

@@ -48,12 +48,27 @@ npm test -- Button       # pojedynczy plik/wzorzec
 Wymaga dev-zależności RTL: `@testing-library/react`, `@testing-library/jest-dom`,
 `@testing-library/user-event`, `jsdom` (w `devDependencies`).
 
-> **Strategia (P3-11):** najpierw prymitywy i konteksty — reużywane przez każdy ekran, więc wysoki
-> zwrot z regresji — deterministycznie i bez sieci (xAI zawsze mockowane). **Do zrobienia osobno:**
-> testy ciężkich komponentów funkcyjnych (ChatView, AgentPanel, TeamView — wymagają mockowania
-> `window.caelo` + kontekstu Hub) oraz **E2E** (Playwright na `preview:web` z `devMock` lub na
-> spakowanej apce) dla przepływów send-to / przełączania projektu / zatwierdzeń agenta — te wymagają
-> działającej apki/binariów przeglądarki, więc są poza zakresem warstwy jednostkowej.
+Warstwa jednostkowa pokrywa prymitywy UI, kontekst motywu oraz **paletę komend** (`CommandPalette`
+— filtr/Enter/Escape/klik), deterministycznie i bez sieci. **Do zrobienia osobno:** testy ciężkich
+komponentów funkcyjnych (ChatView, AgentPanel, TeamView — wymagają harnessu mockującego
+`window.caelo` + kontekst Hub + klienta API).
+
+## E2E (Playwright)
+
+Testy end-to-end sterują **realną przeglądarką** nad `preview:web` (Vite na :4599 z atrapą
+`window.caelo` z [`lib/devMock`](src/renderer/src/lib/devMock.ts)) — renderer **bez Electrona i bez
+sidecara**. Pokrywają powłokę: ładowanie/„Connected", nawigację po modułach (rail + `aria-current`)
+i paletę **Ctrl-K** ([`e2e/*.spec.ts`](e2e/), config [`playwright.config.ts`](playwright.config.ts)).
+
+Aktywacja (osobny tor — **nie** w `npm test`/`typecheck`/domyślnym CI):
+```powershell
+npm install -D @playwright/test     # raz: devDep + lockfile
+npx playwright install chromium     # binaria przeglądarki (~130 MB, z CDN Playwrighta)
+npm run test:e2e                     # podnosi preview:web i uruchamia specy z e2e/
+```
+
+> Przepływy z **danymi backendu** (send-to, przełączanie projektu z realnymi danymi) wymagają mocka
+> REST (`page.route()`); tu walidujemy nawigację/powłokę. Rozbudowa = kolejny podetap.
 
 ## Pakowanie (instalator .exe — Faza 7)
 Dwa artefakty: **spakowany sidecar** (PyInstaller onedir) + **instalator Electrona** (electron-builder NSIS).
