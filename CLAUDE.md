@@ -234,6 +234,21 @@ tamper, Zip-Slip/limits, registry, updates, templates) + `api_smoke.py` `_unit_p
 registry/install verified on the user's machine** (sandbox blocks the net); don't regress P0-1…P0-8 / M5–M6 /
 M13 / M14.
 
+**Quality round (M18, SWOT remediation — see [`docs/PLAN_NAPRAWY_3.md`](docs/PLAN_NAPRAWY_3.md), 8/8 done):**
+a maintenance round (no P0) hardening testability/maintainability after M9–M17. **Structural fact:** `state.py`
+was **decomposed** (691→378 lines) — the **auth layer** moved to [`caelo_core/auth_tokens.py`](caelo_core/auth_tokens.py)
+(`require_token`/`ws_authorized`/`_ws_origin_ok`/`_warn_no_token`, testable without `Backend`; **re-exported**
+from `state.py` so `from caelo_core.state import require_token/ws_authorized` still works), **media/generation**
+to [`backend_media.py`](caelo_core/backend_media.py) `MediaMixin` (incl. `MAX_MEDIA_BYTES`/`VIDEO_*`/`requests`
+— self-checks patch them at `caelo_core.backend_media`, not `state`), and **project knowledge** to
+[`backend_collections.py`](caelo_core/backend_collections.py) `CollectionsMixin` — `class Backend(MediaMixin,
+CollectionsMixin)`. **Tests:** backend self-checks now run via **pytest** ([`caelo_core/tests/`](caelo_core/tests/),
+P3-13) and `api_smoke.py` is split into `_smoke_common.py` + `smoke_{chat,media,routes,core}.py` (each <600
+lines). Frontend gained **React Testing Library** component tests (`desktop/test/components/`) + **Playwright
+E2E** (`desktop/e2e/`, over `preview:web`+`devMock`). Electron now runs with **`sandbox: true`** (P2-14) and the
+no-token dev escape logs per-request. Don't regress these; the `state`/`auth_tokens`/`backend_media` re-export
+boundary keeps the public import API stable.
+
 ## Commands
 
 All paths below are relative to the repo root. The frontend npm scripts run from `desktop/`.
@@ -249,29 +264,34 @@ npm run dev                     # Electron + Vite HMR; main process spawns the s
 Electron finds Python in this order: `CAELO_CORE_PYTHON` env → `caelo_core/.venv/Scripts/python.exe`
 → system `python`. Override: `$env:CAELO_CORE_PYTHON = "C:\path\python.exe"; npm run dev`.
 
-**Type-check the frontend (primary check) + ESLint + Vitest:**
+**Type-check the frontend (primary check) + ESLint + Vitest + E2E:**
 ```powershell
 cd desktop; npm run typecheck   # tsc for both node (main/preload) and web (renderer)
-# One-time activation of lint/test (M8 was authored offline, so the devDeps are NOT in package.json —
-# adding them there without updating package-lock.json would break CI's `npm ci`). Install them:
-npm install -D eslint typescript-eslint eslint-plugin-react-hooks globals vitest
-npm run lint                    # P3-7: ESLint flat config (eslint.config.mjs), react-hooks rules only
-npm test                        # P3-9: Vitest unit tests for pure renderer utils (desktop/test/)
+npm run lint                    # ESLint flat config (eslint.config.mjs), react-hooks rules only
+npm test                        # Vitest: pure renderer utils + React component tests (desktop/test/)
+npm run test:e2e                # Playwright E2E over preview:web + devMock (needs `npx playwright install chromium`)
 ```
-ESLint is **deliberately narrow** — only `react-hooks` rules (the real gap), not the full recommended
-sets. Vitest tests live in `desktop/test/` (outside the tsconfig include, so they don't affect
-`typecheck`). The configs + tests are committed and ready; only the `npm install -D` above is pending
-(it updates `package.json` + `package-lock.json` together, keeping `npm ci` happy).
+ESLint is **deliberately narrow** — only `react-hooks` rules, not the full recommended sets. Vitest tests
+live in `desktop/test/` (outside the tsconfig include, so they don't affect `typecheck`): **pure utils**
+(`test/*.test.ts`, node env) + **React component tests** (`test/components/*.test.tsx`, jsdom via per-file
+`// @vitest-environment jsdom` docblock — React Testing Library, P3-11). **E2E** specs live in `desktop/e2e/`
+(Playwright over `preview:web`+`devMock`; `_mock.ts` stubs the backend via `page.route()`; restricted
+networks set `E2E_CHROMIUM_PATH`). All lint/test/E2E devDeps (`eslint`/`vitest`/`@testing-library/*`/
+`@playwright/test`) are now in `package.json`+lockfile (M18: P3-10/P3-11), so `npm ci` installs them.
 
-**Backend self-checks (this repo's "tests" — no pytest; each script is a self-contained suite):**
+**Backend self-checks (this repo's "tests"): run all via pytest (M18: P3-13), or each script standalone.**
 ```powershell
+caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt   # one-time: pytest
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v             # all 8 suites (discovery)
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -k api_smoke   # one suite (-k filter)
+# …or run any suite standalone (each tools/*_check.py + api_smoke/handshake_check has a main()):
 caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py   # handshake + /health + token auth
-caelo_core\.venv\Scripts\python caelo_core\tools\api_smoke.py         # REST + WS routes + token enforcement
 caelo_core\.venv\Scripts\python caelo_core\tools\agent_selfcheck.py   # agent tools + loop (mocked LLM)
-caelo_core\.venv\Scripts\python caelo_core\tools\packages_check.py    # M16: marketplace (format/consent/registry/templates)
-caelo_core\.venv\Scripts\python caelo_core\tools\sidecar_smoke.py     # packaged-sidecar smoke (after pack:sidecar)
+caelo_core\.venv\Scripts\python caelo_core\tools\sidecar_smoke.py     # packaged-sidecar smoke (after pack:sidecar; NOT in pytest)
 ```
-To run a single suite, run just that one script. They use mocks where xAI is needed.
+`api_smoke` is split into `_smoke_common.py` + `smoke_{chat,media,routes,core}.py` (M18: P3-13, each < 600
+lines); `api_smoke.main()` orchestrates them. The pytest adapter (`caelo_core/tests/test_selfchecks.py`)
+wraps every suite (`sidecar_smoke` excluded — needs the packaged exe). They use mocks where xAI is needed.
 
 **Run the backend standalone (from the repo root, not from `caelo_core/`):**
 ```powershell
