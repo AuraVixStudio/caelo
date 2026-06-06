@@ -20,9 +20,40 @@ npm run dev      # Electron + Vite HMR; proces główny spawnuje `python -m cael
 - `npm run dev` — tryb deweloperski (Electron + Vite HMR)
 - `npm run build` — produkcyjny build (main + preload + renderer → `out/`)
 - `npm run typecheck` — sprawdzenie typów (node + web)
+- `npm run lint` — ESLint (reguły `react-hooks`)
+- `npm test` — Vitest (utile + komponenty; zob. niżej)
 - `npm run pack:sidecar` — buduje sidecar PyInstaller (`../build_sidecar.ps1` → `../dist/caelo-core`)
 - `npm run dist` — instalator NSIS (zakłada zbudowany sidecar w `../dist/caelo-core`)
 - `npm run dist:full` — pełny pipeline: sidecar → frontend build → instalator NSIS
+
+## Testy (Vitest)
+
+Dwie warstwy, obie pod `npm test`, leżą w `test/` (POZA `tsconfig` → nie wpływają na `npm run typecheck`):
+
+- **Czyste utile** (`test/*.test.ts`, środowisko `node`, domyślne) — logika stanu i transformacje bez
+  DOM: agentTrust (maszyna stanów plan/undo/checkpoint), attachments (most send-to ↔ API), audioCost,
+  commands (paleta), genjobs (kolejka), hubQuery, searchState (etykiety wyszukiwania/cytaty), sendTo,
+  slashCommands, storage, teamView (M17), voice.
+- **Komponenty React** (`test/components/*.test.tsx`, środowisko `jsdom` przez docblock
+  `// @vitest-environment jsdom` w każdym pliku → node pozostaje domyślny, utile nietknięte) — render +
+  interakcja na **React Testing Library**: prymitywy UI (Button, Input/Textarea, Badge, Select,
+  IconButton, Slider, Card) oraz kontekst motywu (ThemeProvider/useTheme — `setTheme` przełącza klasę
+  `.dark` i persistuje do localStorage; matchMedia stubowany w `test/components/_matchMedia.ts`).
+
+```powershell
+npm test                 # cała kolekcja (utile + komponenty)
+npm test -- Button       # pojedynczy plik/wzorzec
+```
+
+Wymaga dev-zależności RTL: `@testing-library/react`, `@testing-library/jest-dom`,
+`@testing-library/user-event`, `jsdom` (w `devDependencies`).
+
+> **Strategia (P3-11):** najpierw prymitywy i konteksty — reużywane przez każdy ekran, więc wysoki
+> zwrot z regresji — deterministycznie i bez sieci (xAI zawsze mockowane). **Do zrobienia osobno:**
+> testy ciężkich komponentów funkcyjnych (ChatView, AgentPanel, TeamView — wymagają mockowania
+> `window.caelo` + kontekstu Hub) oraz **E2E** (Playwright na `preview:web` z `devMock` lub na
+> spakowanej apce) dla przepływów send-to / przełączania projektu / zatwierdzeń agenta — te wymagają
+> działającej apki/binariów przeglądarki, więc są poza zakresem warstwy jednostkowej.
 
 ## Pakowanie (instalator .exe — Faza 7)
 Dwa artefakty: **spakowany sidecar** (PyInstaller onedir) + **instalator Electrona** (electron-builder NSIS).
