@@ -29,6 +29,15 @@
 > `PLAN_M13_AGENT_ZAUFANIE.md`, `PLAN_M14_ROZSZERZALNOSC.md`, `PLAN_M16_SPOLECZNOSC.md`,
 > `PLAN_M17_SUBAGENCI.md`, `PLAN_M19_PARYTET_GROK_CLI.md` + `PLAN_M19_TIER1.md` + `PLAN_M19_TIER2.md` +
 > `PLAN_M19_TIER3.md`.
+> ✅ **M20** (runda feedbacku: ogólne skille builtin zamiast VN, przełącznik projektu w czacie,
+> komendy + @-pliki w composerze Code, generowanie obrazów/wideo w czacie — `chat_media_tools`;
+> opisane w `../CLAUDE.md`).
+> ✅ **M21** (sesje kodu: zapis i **wznawianie sesji agenta** w trybie Code — wspólny magazyn
+> `agent/sessions.py` v2, ramka WS `session`, REST `/agent/sessions`, menu „Sessions" + filtr po
+> projekcie/folderze i tekstem — `PLAN_M21_SESJE_KODU.md`).
+> ✅ **M22** (projekty czatu: **rozdzielenie od workspace'ów Code** przez `projects.kind` chat/code +
+> instrukcje per projekt + rename/delete + wiedza w przełączniku + grupowanie rozmów —
+> `PLAN_M22_PROJEKTY_CZATU.md`).
 
 ---
 

@@ -15,9 +15,11 @@ import {
 } from 'react'
 import {
   createProject as apiCreateProject,
+  deleteProject as apiDeleteProject,
   listCommands,
   listProjects,
   selectProject as apiSelectProject,
+  updateProject as apiUpdateProject,
   type Conn,
   type HubProject,
   type InputBlock,
@@ -77,6 +79,8 @@ interface HubState {
   projectsLoading: boolean
   selectProject: (id: string | null) => Promise<void>
   createProject: (name: string, root?: string) => Promise<void>
+  updateProject: (id: string, patch: { name?: string; instructions?: string }) => Promise<void>
+  deleteProject: (id: string) => Promise<void>
   reloadProjects: () => void
 
   // --- Komendy slash (M14-F3): wspólne dla palety i composera ---
@@ -172,6 +176,25 @@ export function HubProvider({
     [conn, reloadProjects]
   )
 
+  const updateProject = useCallback(
+    async (id: string, patch: { name?: string; instructions?: string }) => {
+      if (!conn) return
+      await apiUpdateProject(conn, id, patch)
+      reloadProjects()
+    },
+    [conn, reloadProjects]
+  )
+
+  const deleteProject = useCallback(
+    async (id: string) => {
+      if (!conn) return
+      const r = await apiDeleteProject(conn, id)
+      setCurrentProjectId(r.current_project_id) // backend czyści aktywny, jeśli go dotyczył
+      reloadProjects()
+    },
+    [conn, reloadProjects]
+  )
+
   const value = useMemo<HubState>(
     () => ({
       navigate,
@@ -200,6 +223,8 @@ export function HubProvider({
       projectsLoading,
       selectProject,
       createProject,
+      updateProject,
+      deleteProject,
       reloadProjects,
       slashCommands,
       reloadCommands,
@@ -220,6 +245,8 @@ export function HubProvider({
       projectsLoading,
       selectProject,
       createProject,
+      updateProject,
+      deleteProject,
       reloadProjects,
       slashCommands,
       reloadCommands,

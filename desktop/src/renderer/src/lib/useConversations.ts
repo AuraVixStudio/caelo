@@ -21,7 +21,7 @@ export function useConversations(): {
   saveError: string | null
   setActiveId: (id: string) => void
   patchActive: (updater: (c: Conversation) => Conversation) => void
-  createChat: () => void
+  createChat: (projectId?: string | null) => void
   deleteChat: (id: string) => void
 } {
   const [convos, setConvos] = useState<Conversation[]>([])
@@ -59,8 +59,8 @@ export function useConversations(): {
     setConvos((prev) => prev.map((c) => (c.id === activeId ? updater(c) : c)))
   }
 
-  function createChat(): void {
-    const c = newConversation()
+  function createChat(projectId?: string | null): void {
+    const c = newConversation(projectId)
     setConvos((prev) => [c, ...prev])
     setActiveId(c.id)
   }

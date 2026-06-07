@@ -8,6 +8,9 @@ export interface Conversation {
   id: string
   title: string
   created: number
+  /** M22: projekt czatu, do którego należy rozmowa. Brak/undefined = bez projektu
+   *  (widoczna pod „All projects"). Stare rozmowy (przed M22) nie mają tego pola. */
+  project_id?: string | null
   messages: ChatMessage[]
 }
 
@@ -70,8 +73,18 @@ function uid(): string {
   return 'c_' + Math.floor(performance.now()).toString(36) + Math.floor(performance.now() * 7).toString(36)
 }
 
-export function newConversation(): Conversation {
-  return { id: uid(), title: 'New chat', created: Date.now(), messages: [] }
+export function newConversation(projectId?: string | null): Conversation {
+  return { id: uid(), title: 'New chat', created: Date.now(), project_id: projectId ?? null, messages: [] }
+}
+
+/** M22: rozmowy należące do projektu czatu. `projectId === null` → „All projects"
+ *  (cała lista). Inaczej tylko rozmowy z `project_id === projectId`. CZYSTA funkcja. */
+export function conversationsForProject(
+  convos: Conversation[],
+  projectId: string | null
+): Conversation[] {
+  if (!projectId) return convos
+  return convos.filter((c) => c.project_id === projectId)
 }
 
 /** Tytuł rozmowy z pierwszej wiadomości użytkownika (jak w legacy ChatStore). */

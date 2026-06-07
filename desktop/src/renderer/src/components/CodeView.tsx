@@ -336,6 +336,7 @@ export function CodeView({ conn }: { conn: Conn }) {
             models={models}
             onModelChange={onModelChange}
             onFilesChanged={ws.onFilesChanged}
+            onOpenWorkspace={(p) => void ws.selectWorkspace(p)}
           />
         </Panel>
 

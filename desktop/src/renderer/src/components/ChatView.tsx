@@ -22,7 +22,6 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
-  Sparkles,
   Square,
   Volume2,
   X
@@ -54,12 +53,12 @@ import { conversationToMarkdown, downloadText, safeFilename } from '../lib/expor
 import { appendDictation, useDictation } from '../lib/useDictation'
 import { useTts } from '../lib/useTts'
 import { AttachButton, AttachmentChips } from './Attachments'
-import { KnowledgePopover } from './KnowledgePopover'
 import { ProjectSwitcher } from './ProjectSwitcher'
-import { titleFromText } from '../lib/storage'
+import { conversationsForProject, titleFromText } from '../lib/storage'
 import { cn } from '../lib/cn'
 import { Markdown } from './Markdown'
 import { Button } from './ui/Button'
+import { BrandMark } from './ui/BrandMark'
 import { IconButton } from './ui/IconButton'
 import { EffortSelect } from './ui/EffortSelect'
 import { ModelSelect } from './ui/ModelSelect'
@@ -286,9 +285,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
   return (
     <div className="group relative">
       <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted">
-        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-accent/15 text-accent">
-          <Sparkles size={12} />
-        </span>
+        <BrandMark size={20} />
         Caelo
         {basedOnDocument ? (
           <span
@@ -630,7 +627,8 @@ export function ChatView({ conn }: { conn: Conn }) {
   }
 
   function newChat(): void {
-    convo.createChat()
+    // M22: nowa rozmowa należy do aktywnego projektu czatu (lub „bez projektu").
+    convo.createChat(hub.currentProjectId)
     setInput('')
   }
 
@@ -716,7 +714,8 @@ export function ChatView({ conn }: { conn: Conn }) {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-2">
-          {convo.convos.map((c) => {
+          {/* M22: lista rozmów zawężona do aktywnego projektu czatu („All projects" = wszystkie). */}
+          {conversationsForProject(convo.convos, hub.currentProjectId).map((c) => {
             const isActive = c.id === convo.activeId
             return (
               <div
@@ -777,8 +776,7 @@ export function ChatView({ conn }: { conn: Conn }) {
               disabled={messages.length === 0}
               onClick={exportChat}
             />
-            <ProjectSwitcher />
-            <KnowledgePopover conn={conn} onAttach={att.add} />
+            <ProjectSwitcher conn={conn} onAttach={att.add} />
             <Popover
               align="end"
               label="Live search"
@@ -911,9 +909,7 @@ export function ChatView({ conn }: { conn: Conn }) {
 
         {messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
-              <Sparkles size={26} />
-            </div>
+            <BrandMark size={60} className="mb-5" />
             <h2 className="text-xl font-semibold">Start a conversation</h2>
             <p className="mt-1.5 text-sm text-muted">
               Streaming chat powered by xAI models via the local backend.
@@ -1015,7 +1011,7 @@ export function ChatView({ conn }: { conn: Conn }) {
               onChange={(e) => setInput(e.target.value)}
               onInput={autoGrow}
               onKeyDown={onKeyDown}
-              placeholder="Message Caelo…"
+              placeholder="Type a message…"
               rows={1}
               className="max-h-52 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed text-fg outline-none placeholder:text-muted"
             />

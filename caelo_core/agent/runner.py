@@ -19,6 +19,7 @@ wewnętrzne `assistant_done` nie nadpiszą odpowiedzi orkiestratora — jak dot�
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Callable, List, Optional
 
 import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
@@ -40,7 +41,8 @@ class AgentRunner:
                  stop: Stop, tool_names: Optional[set] = None,
                  max_iters: Optional[int] = None, allow_delegate: bool = True,
                  initial_history: Optional[List[dict]] = None,
-                 reasoning_effort: Optional[str] = None) -> None:
+                 reasoning_effort: Optional[str] = None,
+                 session_id: Optional[str] = None) -> None:
         self.backend = backend
         self._emit_transport = emit
         self.request_approval = request_approval
@@ -63,10 +65,36 @@ class AgentRunner:
         self._max_iters = max_iters
         self._allow_delegate = allow_delegate
         self._initial_history = initial_history
+        # M21: id trwałej sesji (WS ją generuje na połączeniu; headless zapisuje sam,
+        # więc tworzy runner bez session_id → `_persist_session` jest no-opem). Gdy
+        # ustawione, każda tura zapisuje pełną historię do `agent/sessions.py`.
+        self._session_id = session_id
 
     @property
     def last_assistant(self) -> str:
         return self._last_assistant
+
+    @property
+    def current_session_id(self) -> Optional[str]:
+        """Id trwałej sesji prowadzonej przez ten runner (None = sesja nieutrwalana)."""
+        return self._session_id
+
+    def new_session(self, session_id: Optional[str] = None) -> str:
+        """M21: rozpocznij NOWĄ sesję — porzuć bieżącą `AgentSession` (świeża historia),
+        wygeneruj/ustaw id. Zwraca aktywne `session_id`. Workspace/projekt bez zmian."""
+        self._session = None
+        self._initial_history = None
+        self._last_assistant = ""
+        self._session_id = session_id or secrets.token_urlsafe(8)
+        return self._session_id
+
+    def resume_session(self, session_id: str, history: List[dict]) -> None:
+        """M21: wznów sesję `session_id` z zapisaną historią — wstrzyknięta przed
+        1. turą (`_ensure_session`), więc model kontynuuje z pełnym kontekstem."""
+        self._session = None
+        self._initial_history = list(history or [])
+        self._last_assistant = ""
+        self._session_id = session_id
 
     @property
     def history(self) -> List[dict]:
@@ -176,4 +204,26 @@ class AgentRunner:
                     meta={"prompt": text, "model": model,
                           "workspace": wsp.root.as_posix() if wsp else None},
                 )
+            # M21: utrwal PEŁNĄ sesję (do wznowienia) — osobno od M9 (wyszukiwalny log).
+            # No-op gdy runner nie prowadzi trwałej sesji (np. headless zapisuje sam).
+            self._persist_session(model)
         return self._last_assistant
+
+    def _persist_session(self, model: str) -> None:
+        """M21: zapisz historię bieżącej sesji do `agent/sessions.py` (best-effort,
+        nigdy nie wywraca tury). Stempluje project_id aktywnego projektu (M9-B5)."""
+        if not self._session_id or self._session is None:
+            return
+        try:
+            from caelo_core.agent import sessions
+
+            wsp = self.backend.get_workspace()
+            sessions.save(
+                id=self._session_id,
+                cwd=wsp.root.as_posix() if wsp else "",
+                history=self._session.history,
+                project_id=getattr(self.backend, "current_project_id", None),
+                model=model,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("Could not persist agent session", exc_info=True)

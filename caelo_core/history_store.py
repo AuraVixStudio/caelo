@@ -87,19 +87,23 @@ class HistoryEvent:
 
 @dataclass
 class Project:
-    """Projekt — wspólny scope historii/artefaktów dla wszystkich trybów (M9-B5).
-    `root` wiąże projekt z workspace'em kodu (most z `recent_workspaces`); puste
-    `root` = projekt bez folderu (np. czysto czatowy). `vector_store_id` (M10-B5) =
-    kolekcja xAI z dokumentami projektu (file_search w wielu rozmowach)."""
+    """Projekt (M9-B5; M22: rozdzielony na `kind`). `kind='chat'` = projekt czatu
+    (kontener wiedzy/instrukcji/historii, bez folderu); `kind='code'` = workspace Code
+    wyprowadzony z `root` (most z `recent_workspaces`). `instructions` (M22) = system
+    prompt doklejany do rozmów projektu czatu. `vector_store_id` (M10-B5) = relikt
+    (xAI nie ma serwerowych vector stores — wiedza jest lokalna)."""
     id: str
     name: str
     root: str = ""
     created_at: float = 0.0
     vector_store_id: Optional[str] = None
+    kind: str = "chat"
+    instructions: str = ""
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "root": self.root,
-                "created_at": self.created_at, "vector_store_id": self.vector_store_id}
+                "created_at": self.created_at, "vector_store_id": self.vector_store_id,
+                "kind": self.kind, "instructions": self.instructions}
 
 
 @dataclass
@@ -280,6 +284,14 @@ class HistoryStore:
             pcols = {r["name"] for r in self._conn.execute("PRAGMA table_info(projects)")}
             if "vector_store_id" not in pcols:
                 self._conn.execute("ALTER TABLE projects ADD COLUMN vector_store_id TEXT")
+            # M22: rozdzielenie projektów czatu od workspace'ów Code. `kind` ('chat'|'code')
+            # to trwały dyskryminator; `instructions` = system prompt per projekt czatu.
+            if "kind" not in pcols:
+                self._conn.execute("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'")
+                # Backfill: dotychczasowe projekty z folderem (`root`) to workspace'y Code.
+                self._conn.execute("UPDATE projects SET kind = 'code' WHERE root != ''")
+            if "instructions" not in pcols:
+                self._conn.execute("ALTER TABLE projects ADD COLUMN instructions TEXT NOT NULL DEFAULT ''")
             ccols = {r["name"] for r in self._conn.execute("PRAGMA table_info(collection_files)")}
             if "path" not in ccols:
                 self._conn.execute("ALTER TABLE collection_files ADD COLUMN path TEXT NOT NULL DEFAULT ''")
@@ -510,15 +522,18 @@ class HistoryStore:
     # --- projekty (M9-B5) -----------------------------------------------------
 
     def add_project(self, *, name: str, root: str = "", id: Optional[str] = None,
-                    created_at: Optional[float] = None) -> Project:
+                    created_at: Optional[float] = None, kind: str = "chat",
+                    instructions: str = "") -> Project:
         proj = Project(
             id=id or uuid.uuid4().hex, name=name, root=root or "",
             created_at=time.time() if created_at is None else float(created_at),
+            kind=kind or "chat", instructions=instructions or "",
         )
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO projects (id, name, root, created_at) VALUES (?, ?, ?, ?)",
-                (proj.id, proj.name, proj.root, proj.created_at),
+                "INSERT INTO projects (id, name, root, created_at, kind, instructions) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (proj.id, proj.name, proj.root, proj.created_at, proj.kind, proj.instructions),
             )
         return proj
 
@@ -538,20 +553,71 @@ class HistoryStore:
             ).fetchone()
         return self._row_to_project(row) if row else None
 
-    def ensure_project_for_root(self, root: str, name: Optional[str] = None) -> Project:
-        """Idempotentnie: zwróć projekt dla `root` albo go utwórz (most z workspace)."""
+    def ensure_project_for_root(self, root: str, name: Optional[str] = None,
+                                kind: str = "code") -> Project:
+        """Idempotentnie: zwróć projekt dla `root` albo go utwórz (most z workspace).
+        M22: domyślnie `kind='code'` — workspace Code nie jest projektem czatu."""
         existing = self.get_project_by_root(root)
         if existing is not None:
             return existing
         nm = name or (Path(root).name if root else "") or root or "Project"
-        return self.add_project(name=nm, root=root)
+        return self.add_project(name=nm, root=root, kind=kind)
 
-    def list_projects(self) -> list[Project]:
+    def list_projects(self, kind: Optional[str] = None) -> list[Project]:
+        """M22: `kind` filtruje typ projektu ('chat'|'code'); None = wszystkie."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM projects ORDER BY created_at DESC"
-            ).fetchall()
+            if kind is None:
+                rows = self._conn.execute(
+                    "SELECT * FROM projects ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM projects WHERE kind = ? ORDER BY created_at DESC", (kind,)
+                ).fetchall()
         return [self._row_to_project(r) for r in rows]
+
+    def update_project(self, project_id: str, *, name: Optional[str] = None,
+                       instructions: Optional[str] = None) -> Optional[Project]:
+        """M22: zmień nazwę i/lub instrukcje projektu. Zwraca zaktualizowany Project
+        (None gdy nie istnieje). Pomija pola = None (brak nadpisania)."""
+        sets, params = [], []
+        if name is not None:
+            sets.append("name = ?")
+            params.append(name)
+        if instructions is not None:
+            sets.append("instructions = ?")
+            params.append(instructions)
+        if sets:
+            params.append(project_id)
+            with self._lock, self._conn:
+                self._conn.execute(
+                    f"UPDATE projects SET {', '.join(sets)} WHERE id = ?", params
+                )
+        return self.get_project(project_id)
+
+    def delete_project(self, project_id: str) -> Optional[Project]:
+        """M22: usuń projekt i WSZYSTKO, co na nim wisi (brak FK → ręczny cascade w
+        jednej transakcji): zdarzenia historii, artefakty, zadania generacji, pliki
+        kolekcji. Zwraca skasowany Project (None gdy nie istniał) — caller sprząta
+        pliki dokumentów na dysku. Embeddingi czyścimy po skasowanych zdarzeniach."""
+        proj = self.get_project(project_id)
+        if proj is None:
+            return None
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM event_embeddings WHERE event_id IN "
+                "(SELECT id FROM history_events WHERE project_id = ?)", (project_id,)
+            )
+            self._conn.execute(
+                "DELETE FROM history_fts WHERE event_id IN "
+                "(SELECT id FROM history_events WHERE project_id = ?)", (project_id,)
+            )
+            self._conn.execute("DELETE FROM history_events WHERE project_id = ?", (project_id,))
+            self._conn.execute("DELETE FROM artifacts WHERE project_id = ?", (project_id,))
+            self._conn.execute("DELETE FROM gen_jobs WHERE project_id = ?", (project_id,))
+            self._conn.execute("DELETE FROM collection_files WHERE project_id = ?", (project_id,))
+            self._conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        return proj
 
     # --- kolekcje projektu (M10-B5: file_search) ------------------------------
 
@@ -746,7 +812,9 @@ class HistoryStore:
         keys = row.keys()
         return Project(id=row["id"], name=row["name"], root=row["root"],
                        created_at=row["created_at"],
-                       vector_store_id=row["vector_store_id"] if "vector_store_id" in keys else None)
+                       vector_store_id=row["vector_store_id"] if "vector_store_id" in keys else None,
+                       kind=row["kind"] if "kind" in keys else "chat",
+                       instructions=row["instructions"] if "instructions" in keys else "")
 
     @staticmethod
     def _row_to_collection_file(row: sqlite3.Row) -> CollectionFile:

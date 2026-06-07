@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/og-banner.png" alt="Caelo — every mode under one sky" width="640" />
+</p>
+
 # Caelo
 
 **Caelo** is an independent, open-source **desktop client for the xAI Grok API**,

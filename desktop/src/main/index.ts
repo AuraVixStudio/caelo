@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import { spawn, execFileSync, ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -38,6 +38,14 @@ let stableTimer: ReturnType<typeof setTimeout> | null = null
 /** Katalog główny repo (monorepo) — w dev main jest w desktop/out/main. */
 function repoRoot(): string {
   return resolve(__dirname, '..', '..', '..')
+}
+
+/** Ikona okna/paska zadań. W spakowanej aplikacji ikonę nosi sam plik .exe/.app
+ *  (electron-builder z build/icon.*), więc liczy się głównie w dev oraz na Linuksie.
+ *  build/ nie trafia do paczki — zwróć ścieżkę tylko, gdy plik istnieje. */
+function windowIcon(): string | undefined {
+  const png = join(__dirname, '..', '..', 'build', 'icon.png') // desktop/out/main -> desktop/build
+  return existsSync(png) ? png : undefined
 }
 
 /** Wybór interpretera Pythona dla sidecara w trybie dev. */
@@ -357,6 +365,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#0f1323',
     title: 'Caelo',
+    icon: windowIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // P2-14: sandbox=true — renderer w pełnym sandboksie Chromium. Preload jest
@@ -489,6 +498,11 @@ function initAutoUpdate(): void {
 
 app.whenReady().then(() => {
   if (process.platform === 'win32') app.setAppUserModelId('com.caelo.desktop')
+  // Usuń pasek menu aplikacji (File/Edit/View/Window) na Windows/Linux — niepotrzebny
+  // (nawigacja jest w UI). Skróty edycji w polach tekstowych działają i bez menu
+  // (obsługuje je Chromium). Na macOS zostawiamy domyślne menu systemowe, bo jego
+  // brak łamie standardowe skróty (Cmd+Q, kopiuj/wklej w menu aplikacji).
+  if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
   startCore()
   createWindow()
   initAutoUpdate() // M15-8: sprawdź aktualizacje (no-op w dev / bez electron-updater)

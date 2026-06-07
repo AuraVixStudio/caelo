@@ -5,9 +5,11 @@ Protokół (JSON):
     {"type":"workspace","path":"C:/..."}          # ustaw katalog roboczy
     {"type":"message","text":"...","model":"...","mode":"ask","effort":"high"}  # nowa tura agenta (effort: M19-B9, opcjonalny)
     {"type":"approval","id":"<call_id>","decision":"accept|reject|always"}
+    {"type":"session","id":"<sid>"|null}          # M21: wznów sesję (id) / nowa (null)
     {"type":"stop"}
   serwer -> klient:
     {"type":"workspace","path":"..."}
+    {"type":"session","id":"<sid>"}               # M21: aktywne id trwałej sesji
     {"type":"text","full":"..."}                  # strumień tekstu modelu
     {"type":"tool_call","id","name","args"}
     {"type":"approval_request","id","name","detail":{kind,diff|command|binary,...}}
@@ -38,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import json
+import secrets
 import threading
 from typing import Optional
 
@@ -97,8 +100,10 @@ async def agent_stream(ws: WebSocket) -> None:
 
         # M19-§0: wspólne okablowanie sesji (leniwa AgentSession + TeamManager +
         # delegacja + zapis tury). Ten sam runner obsłuży headless (B1) i ACP (B2).
+        # M21: każde połączenie zaczyna od świeżej trwałej sesji (id generowane tu);
+        # runner utrwala pełną historię po każdej turze, a klient może ją wznowić.
         runner = AgentRunner(backend, emit=emit, request_approval=request_approval,
-                             stop=stop_event.is_set)
+                             stop=stop_event.is_set, session_id=secrets.token_urlsafe(8))
 
         def run_turn(text: str, model: str, images: list, mode: str = "ask",
                      reasoning_effort: Optional[str] = None) -> None:
@@ -110,6 +115,9 @@ async def agent_stream(ws: WebSocket) -> None:
             finally:
                 state["busy"] = False
                 emit({"type": "done"})
+
+        # M21: powiadom klienta o aktywnym id sesji (UI śledzi je do listy/wznawiania).
+        await stream.send({"type": "session", "id": runner.current_session_id})
 
         try:
             while True:
@@ -155,6 +163,24 @@ async def agent_stream(ws: WebSocket) -> None:
                     if slot:
                         slot["decision"] = msg.get("decision", "reject")
                         slot["event"].set()
+                elif mtype == "session":
+                    # M21: wznów zapisaną sesję (id) lub zacznij nową (null). Odrzuć
+                    # w trakcie tury — podmiana historii pod biegnącym agentem byłaby
+                    # niespójna (klient i tak blokuje Open/New gdy busy).
+                    if state["busy"]:
+                        await stream.send({"type": "error", "error": "Agent is busy"})
+                        continue
+                    sid = msg.get("id")
+                    if sid:
+                        from caelo_core.agent import sessions
+                        data = sessions.load(str(sid))
+                        if not data:
+                            await stream.send({"type": "error", "error": "Session not found"})
+                            continue
+                        runner.resume_session(str(sid), data.get("history") or [])
+                        await stream.send({"type": "session", "id": str(sid)})
+                    else:
+                        await stream.send({"type": "session", "id": runner.new_session()})
                 elif mtype == "stop":
                     stop_event.set()
         except WebSocketDisconnect:

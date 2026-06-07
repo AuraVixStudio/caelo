@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode
+} from 'react'
 import {
   AlertTriangle,
   Check,
@@ -10,14 +18,17 @@ import {
   History,
   ListChecks,
   Loader2,
+  MessagesSquare,
   Mic,
   Pencil,
   Play,
   Plug,
+  Plus,
   Search,
   ShieldCheck,
   Square,
   Terminal,
+  Trash2,
   Undo2,
   Zap
 } from 'lucide-react'
@@ -25,10 +36,14 @@ import { AgentConnection, type AgentEvent, type ApprovalDetail } from '../../lib
 import {
   agentUndo,
   applyTeamMerge,
+  deleteAgentSession,
   fsFiles,
+  getAgentSession,
+  listAgentSessions,
   listCheckpoints,
   listTeamMerges,
   rejectTeamMerge,
+  type AgentSessionMeta,
   type ChatAttachment,
   type CheckpointInfo,
   type Conn,
@@ -58,6 +73,7 @@ import {
   type PlanPhase
 } from '../../lib/agentTrust'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
+import { filterSessions, historyToEntries, sessionsForWorkspace } from '../../lib/agentSession'
 import { detectSuggest, fuzzyFiles, applyFileSuggest } from '../../lib/composerSuggest'
 import { filterSlashCommands, expandTemplate, matchSlash } from '../../lib/slashCommands'
 import { useHub } from '../../lib/hub'
@@ -110,7 +126,8 @@ export function AgentPanel({
   model,
   models,
   onModelChange,
-  onFilesChanged
+  onFilesChanged,
+  onOpenWorkspace
 }: {
   conn: Conn
   workspacePath: string | null
@@ -118,8 +135,12 @@ export function AgentPanel({
   models: string[]
   onModelChange: (m: string) => void
   onFilesChanged: () => void
+  // M21: wznowienie sesji z innego katalogu → przełącz workspace (selectWorkspace).
+  onOpenWorkspace?: (path: string) => void
 }) {
   const [entries, setEntries] = useState<Entry[]>([])
+  // M21: id aktywnej trwałej sesji (serwer ustala je ramką `session`).
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   // M12-F1: dyktowanie promptu agenta (2. tryb po czacie) — wspólny hook STT.
   const dictation = useDictation(conn, (t) => setInput((prev) => appendDictation(prev, t)))
@@ -364,6 +385,10 @@ export function AgentPanel({
         ])
         break
       }
+      case 'session':
+        // M21: aktywne id trwałej sesji (po połączeniu / wznowieniu / nowej sesji).
+        setSessionId(e.id)
+        break
       case 'workspace':
         break // potwierdzenie ustawienia katalogu — obsługiwane po stronie CodeView
       default:
@@ -473,6 +498,38 @@ export function AgentPanel({
     }
   }
 
+  // M21: zacznij nową sesję — czyść transkrypt; serwer nada nowe id. Blokada w trakcie tury.
+  function newSession(): void {
+    if (busy) return
+    setEntries([])
+    curAssistant.current = null
+    setTeamNodes({})
+    setTeamReport(null)
+    setPlanPhase('idle')
+    agentRef.current?.setSession(null)
+  }
+
+  // M21: otwórz zapisaną sesję — odtwórz transkrypt z historii i zwiąż backend (resume z
+  // pełnym kontekstem). Sesja z innego katalogu → przełącz workspace. Blokada w trakcie tury.
+  async function openSession(meta: AgentSessionMeta): Promise<void> {
+    if (busy || !connected) return
+    try {
+      const full = await getAgentSession(conn, meta.id)
+      const cwd = full.cwd || meta.cwd
+      const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
+      if (cwd && (!workspacePath || norm(cwd) !== norm(workspacePath))) onOpenWorkspace?.(cwd)
+      setEntries(historyToEntries(full.history))
+      curAssistant.current = null
+      setTeamNodes({})
+      setTeamReport(null)
+      setPlanPhase('idle')
+      setSessionId(meta.id)
+      agentRef.current?.setSession(meta.id)
+    } catch {
+      pushInfo('Could not open the session.', 'warn')
+    }
+  }
+
   function focusCaret(pos: number): void {
     requestAnimationFrame(() => {
       const el = taRef.current
@@ -561,6 +618,38 @@ export function AgentPanel({
         <div className="ml-1 min-w-0 flex-1">
           <ModelSelect value={model} models={models} onChange={onModelChange} />
         </div>
+        <Popover
+          align="end"
+          label="Sessions"
+          trigger={({ toggle, open, triggerProps }) => (
+            <IconButton
+              label="Saved sessions"
+              icon={<MessagesSquare size={18} />}
+              active={open}
+              tooltip={!open}
+              tooltipSide="bottom-end"
+              onClick={toggle}
+              {...triggerProps}
+            />
+          )}
+        >
+          {(close) => (
+            <SessionsMenu
+              conn={conn}
+              workspacePath={workspacePath}
+              activeId={sessionId}
+              busy={busy}
+              onNew={() => {
+                newSession()
+                close()
+              }}
+              onOpen={(m) => {
+                void openSession(m)
+                close()
+              }}
+            />
+          )}
+        </Popover>
         <Popover
           align="end"
           label="Checkpoints"
@@ -892,6 +981,165 @@ function CheckpointsMenu({
               >
                 Undo to here
               </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function fmtTime(epochSeconds: number): string {
+  if (!epochSeconds) return ''
+  try {
+    return new Date(epochSeconds * 1000).toLocaleString()
+  } catch {
+    return ''
+  }
+}
+
+// M21: lista zapisanych sesji agenta z filtrem po projekcie. Sesje zapisują się
+// automatycznie po każdej turze (backend); tu można je wznowić, zacząć nową lub usunąć.
+function SessionsMenu({
+  conn,
+  workspacePath,
+  activeId,
+  busy,
+  onNew,
+  onOpen
+}: {
+  conn: Conn
+  workspacePath: string | null
+  activeId: string | null
+  busy: boolean
+  onNew: () => void
+  onOpen: (meta: AgentSessionMeta) => void
+}) {
+  const [sessions, setSessions] = useState<AgentSessionMeta[]>([])
+  const [loading, setLoading] = useState(true)
+  const [scope, setScope] = useState<'project' | 'all'>(workspacePath ? 'project' : 'all')
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+
+  // Pobieramy WSZYSTKIE sesje; zawężenie „this project" robimy po stronie klienta —
+  // bieżący projekt w module Code wynika z OTWARTEGO FOLDERU (folder = projekt:
+  // set_workspace → ensure_project_for_root), nie z (bywa nieaktualny) hub.currentProjectId.
+  const refresh = useCallback((): void => {
+    setLoading(true)
+    void listAgentSessions(conn)
+      .then((r) => setSessions(r.sessions))
+      .catch(() => setSessions([]))
+      .finally(() => setLoading(false))
+  }, [conn])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  async function remove(id: string): Promise<void> {
+    setDeleting(id)
+    try {
+      await deleteAgentSession(conn, id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+    } catch {
+      /* ignore */
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const scoped = scope === 'project' ? sessionsForWorkspace(sessions, workspacePath) : sessions
+  const shown = filterSessions(scoped, query)
+
+  return (
+    <div className="flex w-80 flex-col gap-2">
+      <div className="flex items-center justify-between px-1 pt-1">
+        <span className="text-xs font-semibold text-muted">Sessions</span>
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<Plus size={13} />}
+          disabled={busy}
+          onClick={onNew}
+        >
+          New
+        </Button>
+      </div>
+      {workspacePath ? (
+        <div className="flex gap-1 px-1">
+          {(['project', 'all'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScope(s)}
+              className={cn(
+                'rounded-md px-2 py-0.5 text-[11px] transition-colors',
+                scope === s ? 'bg-surface-3 text-fg' : 'text-muted hover:bg-surface-2'
+              )}
+            >
+              {s === 'project' ? 'This project' : 'All projects'}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {!loading && sessions.length > 0 ? (
+        <div className="relative px-1">
+          <Search
+            size={13}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+          />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter sessions…"
+            aria-label="Filter sessions"
+            spellCheck={false}
+            className="w-full rounded-md border border-border bg-surface-2 py-1 pl-7 pr-2 text-xs text-fg outline-none focus:border-accent"
+          />
+        </div>
+      ) : null}
+      {loading ? (
+        <div className="px-1 pb-1 text-xs text-muted">Loading…</div>
+      ) : sessions.length === 0 ? (
+        <div className="px-1 pb-1 text-xs text-muted">
+          No saved sessions yet. Sessions are saved automatically as you work with the agent.
+        </div>
+      ) : shown.length === 0 ? (
+        <div className="px-1 pb-1 text-xs text-muted">
+          {query ? `No sessions match “${query}”.` : 'No sessions for this project yet.'}
+        </div>
+      ) : (
+        <div className="flex max-h-72 flex-col gap-1 overflow-auto">
+          {shown.map((s) => (
+            <div
+              key={s.id}
+              className={cn(
+                'flex items-center gap-2 rounded-lg px-2.5 py-1.5',
+                s.id === activeId ? 'bg-accent/10' : 'bg-surface-2'
+              )}
+            >
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onOpen(s)}
+                title={s.cwd || s.title}
+                className="min-w-0 flex-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <div className="truncate text-[13px] text-fg">{s.title}</div>
+                <div className="text-[11px] text-muted">
+                  {s.message_count} msg · {fmtTime(s.updated_at)}
+                </div>
+              </button>
+              <button
+                type="button"
+                aria-label="Delete session"
+                disabled={deleting === s.id}
+                onClick={() => void remove(s.id)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted outline-none transition-colors hover:bg-surface-3 hover:text-error focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
           ))}
         </div>

@@ -50,6 +50,7 @@ from caelo_core.routes import (
     packages,
     permissions,
     projects,
+    sessions,
     settings,
     skills,
     system,
@@ -175,6 +176,7 @@ def create_app(
     app.include_router(collections.router, dependencies=guard)
     app.include_router(permissions.router, dependencies=guard)
     app.include_router(agent_api.router, dependencies=guard)  # M13-B5: checkpoints/undo/CAELO.md
+    app.include_router(sessions.router, dependencies=guard)  # M21: trwałe sesje agenta (lista/odczyt/kasowanie)
     app.include_router(team.router, dependencies=guard)  # M17: subagenci (role/scalenia/przebiegi)
     app.include_router(mcp.router, dependencies=guard)  # M14-B1: serwery MCP
     app.include_router(lsp.router, dependencies=guard)  # M19-B3: serwery LSP (intel kodu)

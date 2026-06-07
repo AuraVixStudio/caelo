@@ -324,6 +324,52 @@ def _unit_projects_routes(checks: list) -> None:
             # select istniejący ponownie ustawia aktywny
             proj_route.select_project(proj_route.SelectProjectReq(project_id=pid), b=b)
             checks.append(("/projects/current re-selects existing", b.current_project_id == pid))
+
+            # M22: nowo utworzony projekt to projekt CZATU (kind='chat').
+            checks.append(("/projects create makes a chat project",
+                           proj_route.list_projects(b=b)["projects"][0]["kind"] == "chat"))
+
+            # M22: workspace Code (kind='code') NIE pojawia się na liście czatu.
+            code_proj = store.ensure_project_for_root("/ws/code-x", name="code-x")  # kind='code'
+            chat_ids = {p["id"] for p in proj_route.list_projects(b=b)["projects"]}
+            checks.append(("/projects list excludes code workspaces",
+                           code_proj.kind == "code" and code_proj.id not in chat_ids))
+
+            # M22: zdarzenia mode='code' stemplowane projektem workspace, nie projektem czatu.
+            b._code_project_id = code_proj.id
+            b.record_event(mode="code", text="agent turn")
+            checks.append(("record_event(mode=code) stamps code project, not chat",
+                           len(store.list_events(project_id=code_proj.id)) == 1
+                           and len(store.list_events(project_id=pid)) == 1))  # pid: tylko nota czatu
+
+            # M22: PATCH — rename + instrukcje (źródło wstrzyknięcia w czacie).
+            up = proj_route.update_project(pid, proj_route.UpdateProjectReq(
+                name="Alpha2", instructions="Always answer in Polish."), b=b)
+            checks.append(("/projects PATCH renames + sets instructions",
+                           up["project"]["name"] == "Alpha2"
+                           and up["project"]["instructions"] == "Always answer in Polish."))
+            checks.append(("current_project() exposes instructions (chat injection source)",
+                           b.current_project().instructions == "Always answer in Polish."))
+
+            up404 = False
+            try:
+                proj_route.update_project("nope", proj_route.UpdateProjectReq(name="x"), b=b)
+            except HTTPException as e:
+                up404 = e.status_code == 404
+            checks.append(("/projects PATCH unknown -> 404", up404))
+
+            # M22: DELETE kaskaduje (zdarzenia projektu znikają) i czyści aktywny.
+            de = proj_route.delete_project(pid, b=b)
+            checks.append(("/projects DELETE cascades + clears active",
+                           de["ok"] and b.current_project_id is None
+                           and store.get_project(pid) is None
+                           and len(store.list_events(project_id=pid)) == 0))
+            del404 = False
+            try:
+                proj_route.delete_project("nope", b=b)
+            except HTTPException as e:
+                del404 = e.status_code == 404
+            checks.append(("/projects DELETE unknown -> 404", del404))
         except Exception as exc:  # noqa: BLE001
             checks.append((f"projects routes: scenario ran ({exc})", False))
         finally:
@@ -642,3 +688,70 @@ def _unit_team_routes(checks: list) -> None:
         b.record_team_report({"run": 1, "totals": {"subagents": 2}})
         checks.append(("/team/runs reports recorded run",
                        tr.list_runs(b=b)["runs"][0]["totals"]["subagents"] == 2))
+
+
+def _unit_sessions_routes(checks: list) -> None:
+    """M21: trasy /agent/sessions (lista + filtr po projekcie / odczyt / 404 / delete)
+    — in-process. Magazyn (`agent/sessions.py`) czyta DATA_DIR live → temp dir; pokrywa
+    też stary headless format (bez project_id/title)."""
+    import json
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+    from fastapi import HTTPException  # noqa: E402
+    from caelo_core.agent import sessions as S  # noqa: E402
+    from caelo_core.routes import sessions as sr  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        orig = config.DATA_DIR
+        config.DATA_DIR = Path(d)  # sessions_dir() czyta DATA_DIR live
+        try:
+            S.save(id="s1", cwd="/ws/a", project_id="p1", model="grok-build-0.1",
+                   history=[{"role": "user", "content": "hello A"},
+                            {"role": "assistant", "content": "hi"}])
+            S.save(id="s2", cwd="/ws/b", project_id="p2",
+                   history=[{"role": "user", "content": "hello B"}])
+            # stary headless format (bez v/project_id/title) — loader musi go znieść
+            (Path(d) / "sessions").mkdir(parents=True, exist_ok=True)
+            (Path(d) / "sessions" / "old.json").write_text(
+                json.dumps({"id": "old", "cwd": "/ws/c",
+                            "history": [{"role": "user", "content": "legacy task"}]}),
+                encoding="utf-8")
+
+            allr = sr.list_sessions(project_id=None)["sessions"]
+            checks.append(("/agent/sessions lists all", len(allr) == 3))
+
+            p1 = sr.list_sessions(project_id="p1")["sessions"]
+            checks.append(("/agent/sessions filters by project",
+                           len(p1) == 1 and p1[0]["id"] == "s1"))
+            checks.append(("/agent/sessions meta has title + message_count",
+                           p1[0]["title"] == "hello A" and p1[0]["message_count"] == 2))
+
+            full = sr.get_session("s1")
+            checks.append(("/agent/sessions/{id} returns history",
+                           len(full["history"]) == 2 and full["project_id"] == "p1"))
+
+            old = sr.get_session("old")
+            checks.append(("/agent/sessions/{id} tolerates old format",
+                           old["project_id"] is None and old["title"] == "legacy task"))
+
+            got404 = False
+            try:
+                sr.get_session("nope")
+            except HTTPException as e:
+                got404 = e.status_code == 404
+            checks.append(("/agent/sessions/{id} unknown -> 404", got404))
+
+            res = sr.delete_session("s2")
+            checks.append(("/agent/sessions delete removes file",
+                           res["ok"] is True and not (Path(d) / "sessions" / "s2.json").exists()))
+            del404 = False
+            try:
+                sr.delete_session("s2")
+            except HTTPException as e:
+                del404 = e.status_code == 404
+            checks.append(("/agent/sessions delete missing -> 404", del404))
+        finally:
+            config.DATA_DIR = orig

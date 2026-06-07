@@ -30,6 +30,7 @@ ustawić nagłówka Authorization.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -40,6 +41,8 @@ from caelo_core import chat_media_tools, responses_client
 from caelo_core import validation as V
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -238,6 +241,17 @@ async def chat_stream(ws: WebSocket) -> None:
                         continue
                     messages = list(msg.get("messages") or [])
                     system_prompt = (msg.get("system_prompt") or "").strip()
+                    # M22: doklej instrukcje aktywnego projektu czatu (system prompt per
+                    # projekt) PRZED globalnym promptem z ramki. Jedno źródło prawdy w backendzie.
+                    # getattr — atrapy backendu (self-checki) mogą nie mieć current_project.
+                    cur_proj = getattr(backend, "current_project", None)
+                    if callable(cur_proj):
+                        try:
+                            proj = cur_proj()
+                            if proj is not None and getattr(proj, "instructions", ""):
+                                system_prompt = (proj.instructions.strip() + "\n\n" + system_prompt).strip()
+                        except Exception:
+                            log.warning("Could not load project instructions", exc_info=True)
                     if system_prompt:
                         messages = [{"role": "system", "content": system_prompt}] + messages
                     model = msg.get("model") or backend.read_settings().get(

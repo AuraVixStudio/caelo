@@ -102,8 +102,9 @@ npm run dist:full
   (`windowsHide` ukrywa jego konsolę), zamiast `python -m caelo_core`.
 - **Dane**: w wersji spakowanej sidecar ma `sys.frozen=True`, więc `config.DATA_DIR` =
   `%LOCALAPPDATA%\AI Studio Pro` (dawniej współdzielone z legacy app — usuniętą w Fazie 8).
-- **Ikona**: `desktop\build\icon.ico` (dołączona; wygenerowana z `..\make_icon.py`, komplet 16–256 px) —
-  electron-builder wykrywa ją automatycznie. Aby zmienić logo, podmień ten plik.
+- **Ikona**: oficjalny zestaw marki Caelo (źródło: `..\assets\brand\`) — `desktop\build\icon.ico`
+  (Windows), `icon.icns` (macOS) i `icon.png` 1024 px (Linux). electron-builder wykrywa je
+  automatycznie po nazwie. Aby zmienić logo, podmień te pliki (lub wygeneruj nowe z `assets\brand\`).
 - **Nadzór**: proces główny robi health-check `/health` co 10 s i restartuje sidecar po padzie
   (do 5 prób z narastającym backoffem); przy zamknięciu aplikacji zabija sidecar.
 

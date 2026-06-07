@@ -32,10 +32,18 @@ class SelectProjectReq(BaseModel):
     project_id: Optional[str] = Field(None, max_length=V.MAX_ID_LEN)
 
 
+class UpdateProjectReq(BaseModel):
+    # M22: zmiana nazwy / instrukcji projektu czatu (oba opcjonalne; None = bez zmiany).
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    instructions: Optional[str] = Field(None, max_length=20000)
+
+
 @router.get("")
 def list_projects(b: Backend = Depends(get_backend)) -> dict:
+    # M22: czat/galeria/historia widzą TYLKO projekty czatu; workspace'y Code (kind='code')
+    # są wykluczone (należą do modułu Code).
     return {
-        "projects": [p.to_dict() for p in b.list_projects()],
+        "projects": [p.to_dict() for p in b.list_projects(kind="chat")],
         "recent_workspaces": b.recent_workspaces(),
         "current_project_id": b.current_project_id,
     }
@@ -45,6 +53,25 @@ def list_projects(b: Backend = Depends(get_backend)) -> dict:
 def create_project(req: CreateProjectReq, b: Backend = Depends(get_backend)) -> dict:
     proj = b.create_project(req.name, root=req.root or "")
     return {"project": proj.to_dict(), "current_project_id": b.current_project_id}
+
+
+@router.patch("/{project_id}")
+def update_project(project_id: str, req: UpdateProjectReq,
+                   b: Backend = Depends(get_backend)) -> dict:
+    """M22: zmień nazwę i/lub instrukcje projektu czatu."""
+    proj = b.update_project(project_id, name=req.name, instructions=req.instructions)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="Unknown project")
+    return {"project": proj.to_dict()}
+
+
+@router.delete("/{project_id}")
+def delete_project(project_id: str, b: Backend = Depends(get_backend)) -> dict:
+    """M22: usuń projekt + jego historię/artefakty/wiedzę. Czyści aktywny, jeśli dotyczył."""
+    proj = b.delete_project(project_id)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="Unknown project")
+    return {"ok": True, "current_project_id": b.current_project_id}
 
 
 @router.post("/current")

@@ -63,6 +63,7 @@ from caelo_core.tools.smoke_routes import (  # noqa: F401,E402
     _unit_lsp_routes,
     _unit_mcp_routes,
     _unit_team_routes,
+    _unit_sessions_routes,
 )
 from caelo_core.tools.smoke_core import (  # noqa: F401,E402
     _unit_ws_auth,
@@ -182,6 +183,15 @@ def main() -> int:
         s, _ = _post(base, "/agent/undo", {}, "wrong")
         checks.append(("/agent/undo (bad token) == 403", s == 403))
 
+        # M21: trwałe sesje agenta — 200 + kształt; bramka tokenu (jak checkpoints).
+        s, body = _get(base, "/agent/sessions", token)
+        checks.append(("/agent/sessions == 200 + shape",
+                       s == 200 and body is not None and isinstance(body.get("sessions"), list)))
+        s, _ = _get(base, "/agent/sessions")
+        checks.append(("/agent/sessions (no token) == 401", s == 401))
+        s, _ = _get(base, "/agent/sessions", "wrong")
+        checks.append(("/agent/sessions (bad token) == 403", s == 403))
+
         s, _ = _get(base, "/models")
         checks.append(("/models (no token) == 401", s == 401))
         s, _ = _get(base, "/models", "wrong")
@@ -278,6 +288,9 @@ def main() -> int:
 
         # M13-B5: trasy agenta (checkpoints/undo/caelo-md) — in-process.
         _unit_agent_routes(checks)
+
+        # M21: trwałe sesje agenta (lista/filtr po projekcie/odczyt/kasowanie) — in-process.
+        _unit_sessions_routes(checks)
 
         # M19-B4: trasy /permissions/rules (reguły glob — walidacja/persystencja/przebudowa).
         _unit_permissions_routes(checks)

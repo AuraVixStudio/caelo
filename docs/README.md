@@ -27,7 +27,7 @@ docs/
 | Dokument | Co zawiera | Status |
 |---|---|---|
 | [`plans/REBUILD_PLAN.md`](plans/REBUILD_PLAN.md) | Plan przebudowy customtkinter → Electron + Python sidecar: decyzje, architektura, **Fazy 0–8** (datowane statusy) oraz **§13 „Faza 9"** rekonsolidująca stan (moduły, stack, pełna lista endpointów). | Fazy 0–8 ✅ |
-| [`plans/PLAN_ROZBUDOWY.md`](plans/PLAN_ROZBUDOWY.md) | **Mapa drogowa „all-in-one hub" (v2)** — rozszerza REBUILD_PLAN od M9: trzy filary (szkielet huba / doskonałość trybów / otwarta platforma), kolejność, ryzyka. Blok „Postęp" = jednolinijkowy status M9–M19. | M9–M19 ✅ |
+| [`plans/PLAN_ROZBUDOWY.md`](plans/PLAN_ROZBUDOWY.md) | **Mapa drogowa „all-in-one hub" (v2)** — rozszerza REBUILD_PLAN od M9: trzy filary (szkielet huba / doskonałość trybów / otwarta platforma), kolejność, ryzyka. Blok „Postęp" = jednolinijkowy status M9–M22. | M9–M22 ✅ |
 | [`plans/MODYFIKACJE.md`](plans/MODYFIKACJE.md) | **Żywa specyfikacja** nadbudowy na Fazach 0–8: scalenie Generator+Edit → **Image**, **Video** edit/extend, moduł **Voice** (TTS/STT/realtime), załączniki w Chat/Code, poprawki UI. Tu szukaj kontraktów tych modułów. | ✅ |
 
 ### Rundy napraw / hardening
@@ -38,7 +38,7 @@ docs/
 | [`plans/PLAN_NAPRAWY_2.md`](plans/PLAN_NAPRAWY_2.md) | Naprawy/rozwój (**runda 2**, M5–M8) z niezależnego przeglądu — luki rezydualne: kolejka WS agenta (P0-9), metaznaki POSIX (P0-10), env terminala (P0-11), REST fail-open (P1-10), atomic write (P1-11), perystencja rozmów (P2-8), ESLint/testy tras (P3-7…P3-9). | ✅ ZREALIZOWANY (M5–M8) |
 | [`plans/PLAN_NAPRAWY_3.md`](plans/PLAN_NAPRAWY_3.md) | Naprawa słabych stron (**runda 3 / M18**) z **analizy SWOT** po M9–M17 — **dług utrzymaniowy, bez P0**: logowanie cichych `except` (P1-15), dekompozycja `state.py` (P2-13), `sandbox: true`/log no-token (P2-14), devDeps→lockfile (P3-10), testy komponentów+E2E (P3-11), cross-platform CI (P3-12), pytest + rozbicie `api_smoke.py` (P3-13), dokumentacja użytkownika (P3-14). | ✅ ZREALIZOWANY (8/8) |
 
-### Rozpisy milestone'ów (hub v2 — M9–M19)
+### Rozpisy milestone'ów (hub v2 — M9–M22)
 
 | Dokument | Milestone | Status |
 |---|---|---|
@@ -55,8 +55,13 @@ docs/
 | [`plans/PLAN_M19_TIER1.md`](plans/PLAN_M19_TIER1.md) | **M19 Tier-1** — §0 `AgentRunner`, B1 headless/CLI, B2 ACP, B3 LSP, B4 reguły glob. | ✅ |
 | [`plans/PLAN_M19_TIER2.md`](plans/PLAN_M19_TIER2.md) | **M19 Tier-2** — B5 interop ekosystemu, B6 skille-orkiestratory, B7 sandbox OS, B8 pamięć hybrydowa. | ✅ |
 | [`plans/PLAN_M19_TIER3.md`](plans/PLAN_M19_TIER3.md) | **M19 Tier-3** (quick-winy) — B9 effort, B10 eksport-md/auto-compact, B11 persony+I/O, B12 git-worktree, B13 web_fetch, B14 config hierarchiczny. | ✅ |
+| [`plans/PLAN_M21_SESJE_KODU.md`](plans/PLAN_M21_SESJE_KODU.md) | **M21** — zapis i **wznawianie sesji agenta** w trybie Code: wspólny magazyn `agent/sessions.py` (v2), ramka WS `session`, REST `/agent/sessions`, menu „Sessions" + filtr po projekcie/folderze i tekstem. | ✅ |
+| [`plans/PLAN_M22_PROJEKTY_CZATU.md`](plans/PLAN_M22_PROJEKTY_CZATU.md) | **M22** — **rozdzielenie projektów czatu od workspace'ów Code** (`projects.kind` chat/code) + instrukcje per projekt, rename/delete, wiedza w przełączniku (`ProjectSwitcher` = menedżer), grupowanie rozmów. | ✅ |
 
 > **Uwaga:** brak osobnego `PLAN_M18` — runda jakości M18 jest opisana w `plans/PLAN_NAPRAWY_3.md`.
+> Brak też osobnego `PLAN_M20` — runda feedbacku **M20** (ogólne skille builtin zamiast VN, przełącznik
+> projektu w czacie, komendy + @-pliki w composerze Code, generowanie obrazów/wideo w czacie —
+> `chat_media_tools`) jest udokumentowana w `../CLAUDE.md` i historii commitów.
 > Weryfikacje **LIVE** zależne od xAI (realny agent, ACP w Zed/Neovim, LSP/embeddings/sandbox, `web_fetch`)
 > oraz spike **B0 (`cli-chat-proxy`)** pozostają do potwierdzenia na maszynie użytkownika (sandbox blokuje sieć/exec).
 

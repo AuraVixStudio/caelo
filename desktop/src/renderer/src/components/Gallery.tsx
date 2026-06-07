@@ -71,7 +71,7 @@ export function Gallery({ conn }: { conn: Conn }) {
       }
     >
       <div className="mb-4 flex items-center gap-2">
-        <ProjectSwitcher />
+        <ProjectSwitcher conn={conn} />
         <Select
           value={filter}
           onChange={(e) => setFilter(e.target.value as Filter)}

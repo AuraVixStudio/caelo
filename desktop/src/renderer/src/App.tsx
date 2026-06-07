@@ -10,7 +10,6 @@ import {
   PanelLeftOpen,
   Puzzle,
   Settings as SettingsIcon,
-  Sparkles,
   Video as VideoIcon
 } from 'lucide-react'
 import { useConnection } from './lib/useConnection'
@@ -22,6 +21,7 @@ import { AppCommandPalette } from './components/AppCommandPalette'
 import { IconButton } from './components/ui/IconButton'
 import { Tooltip } from './components/ui/Tooltip'
 import { ThemeToggle } from './components/ui/ThemeToggle'
+import { BrandLockup, BrandMark, BrandTile } from './components/ui/BrandMark'
 import type { CoreConnection } from './types'
 import type { Conn } from './lib/api'
 
@@ -144,11 +144,17 @@ export default function App() {
       return (
         <main role="status" aria-live="polite" className="flex flex-1 items-center justify-center p-10">
           <div className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-2">
+            <div className="relative mx-auto mb-4 h-16 w-16">
+              <BrandTile size={64} className="rounded-2xl" />
               {conn.status === 'starting' ? (
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-border border-t-accent" />
+                <span className="absolute -bottom-1 -right-1 h-5 w-5 animate-spin rounded-full border-2 border-surface border-t-accent bg-surface" />
               ) : (
-                <span className={cn('h-3 w-3 rounded-full', STATUS[conn.status].dot)} />
+                <span
+                  className={cn(
+                    'absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-surface',
+                    STATUS[conn.status].dot
+                  )}
+                />
               )}
             </div>
             <h1 className="text-lg font-semibold">{STATUS[conn.status].label}</h1>
@@ -180,11 +186,8 @@ export default function App() {
         )}
       >
         {/* Brand */}
-        <div className="flex h-12 items-center gap-2.5 px-1.5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-fg">
-            <Sparkles size={18} />
-          </span>
-          {!collapsed ? <span className="truncate text-[15px] font-semibold">Caelo</span> : null}
+        <div className="flex h-12 items-center px-1.5">
+          {collapsed ? <BrandMark size={32} /> : <BrandLockup height={30} />}
         </div>
 
         {/* Nav */}

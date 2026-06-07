@@ -450,6 +450,8 @@ export interface HubProject {
   name: string
   root: string
   created_at: number
+  kind?: string // M22: 'chat' (projekt czatu) | 'code' (workspace Code)
+  instructions?: string // M22: system prompt per projekt czatu
 }
 
 /** Ready-to-use LLM input block produced by the send-to bus (M9-B4). */
@@ -562,6 +564,20 @@ export const selectProject = (
   projectId: string | null
 ): Promise<{ current_project_id: string | null; project: HubProject | null }> =>
   api(c, '/projects/current', { method: 'POST', body: JSON.stringify({ project_id: projectId }) })
+
+// M22: zarządzanie projektem czatu — rename / instrukcje (PATCH) + usunięcie (DELETE).
+export const updateProject = (
+  c: Conn,
+  id: string,
+  patch: { name?: string; instructions?: string }
+): Promise<{ project: HubProject }> =>
+  api(c, `/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
+
+export const deleteProject = (
+  c: Conn,
+  id: string
+): Promise<{ ok: boolean; current_project_id: string | null }> =>
+  api(c, `/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 // --- Project knowledge (M10-B5): documents stored locally per project, attached
 // to a message on demand ("Attach all"). xAI has no server-side vector stores. ---
@@ -731,6 +747,44 @@ export const agentUndo = (c: Conn, checkpointId?: string | null): Promise<UndoRe
     method: 'POST',
     body: JSON.stringify({ checkpoint_id: checkpointId ?? null })
   })
+
+// --- Agent sessions (M21): persisted, resumable coding sessions, filtered per project ---
+export interface AgentSessionMeta {
+  id: string
+  title: string
+  project_id: string | null
+  cwd: string
+  model: string | null
+  created_at: number // epoch seconds
+  updated_at: number // epoch seconds
+  message_count: number // user + assistant messages
+}
+
+/** A raw LLM message as stored in a saved session's history (role user/assistant/tool). */
+export interface RawLlmMessage {
+  role: string
+  content?: unknown // string | content parts | null
+  tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+  tool_call_id?: string
+}
+
+export interface AgentSessionFull extends AgentSessionMeta {
+  v?: number
+  history: RawLlmMessage[]
+}
+
+/** List saved sessions, newest first. Pass a project id to filter to that project. */
+export const listAgentSessions = (
+  c: Conn,
+  projectId?: string | null
+): Promise<{ sessions: AgentSessionMeta[] }> =>
+  api(c, '/agent/sessions' + (projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''))
+
+export const getAgentSession = (c: Conn, id: string): Promise<AgentSessionFull> =>
+  api(c, `/agent/sessions/${encodeURIComponent(id)}`)
+
+export const deleteAgentSession = (c: Conn, id: string): Promise<{ ok: boolean }> =>
+  api(c, `/agent/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 // --- Agent project rules (CAELO.md, M13-B4/F4) ---
 export interface CaeloMdResp {

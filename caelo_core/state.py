@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import List, Optional
 
 log = logging.getLogger(__name__)
@@ -45,9 +46,12 @@ class Backend(MediaMixin, CollectionsMixin):
     """Reużyte managery legacy + logika kluczy/ustawień/projektów. Generacja i zapis
     mediów (MediaMixin) oraz wiedza projektu (CollectionsMixin) dziedziczone z mixinów."""
 
-    # M9-B5: aktywny projekt (scope historii/artefaktów). Atrybut KLASOWY, by
-    # instancje budowane przez __new__ (testy) też miały bezpieczny default None.
+    # M9-B5: aktywny projekt CZATU (scope historii/artefaktów/wiedzy chat/media/voice).
+    # Atrybut KLASOWY, by instancje budowane przez __new__ (testy) miały bezpieczny default.
     current_project_id: Optional[str] = None
+    # M22: projekt workspace'u Code (kind='code') do stemplowania zdarzeń mode='code'.
+    # Trzymany ODDZIELNIE — otwarcie folderu w Code NIE zmienia aktywnego projektu czatu.
+    _code_project_id: Optional[str] = None
 
     def __init__(self) -> None:
         from caelo_core.agent.permissions import PermissionGate
@@ -87,8 +91,17 @@ class Backend(MediaMixin, CollectionsMixin):
         self._subagents = None
         self._team_merges = None
         self._team_reports: list[dict] = []
-        # M9-B5: ostatnio wybrany projekt (przeżywa restart przez caelo_settings.json).
+        # M9-B5: ostatnio wybrany projekt CZATU (przeżywa restart przez caelo_settings.json).
         self.current_project_id = self.read_settings().get("current_project_id")
+        # M22: legacy current_project_id mógł wskazywać workspace Code (przed rozdzieleniem) —
+        # projekt czatu musi startować czysto. Zeruj, gdy to projekt kind='code'.
+        if self.current_project_id:
+            try:
+                p = self.history_store.get_project(self.current_project_id)
+                if p is not None and p.kind == "code":
+                    self.current_project_id = None
+            except Exception:
+                log.warning("Could not validate current project kind", exc_info=True)
         # M19-B4: zbuduj reguły glob bramki z ustawień globalnych (workspace jeszcze None
         # → tylko globalne; projektowe doczytane przy set_workspace).
         self.reload_permission_rules()
@@ -107,13 +120,16 @@ class Backend(MediaMixin, CollectionsMixin):
         # robimy to deterministycznie w momencie przełączenia (jak intencja get_lsp).
         if new_root != old_root:
             self.reload_mcp()
-        # M9-B5: workspace kodu staje się aktywnym projektem (most, nie duplikat) —
-        # dzięki temu czat/media/voice w tej sesji też trafiają do tego projektu.
+        # M22: workspace Code wiąże się z projektem kind='code' (do stemplowania zdarzeń
+        # mode='code' i scope historii Code), ale — inaczej niż w M9-B5 — NIE zmienia
+        # aktywnego projektu CZATU. Trzymamy jego id osobno (record_event używa go dla code).
         try:
-            proj = self.history_store.ensure_project_for_root(root, name=self._workspace.root.name)
-            self.select_project(proj.id)
+            proj = self.history_store.ensure_project_for_root(
+                root, name=self._workspace.root.name, kind="code")
+            self._code_project_id = proj.id
         except Exception:
-            log.warning("Could not bind workspace to a project", exc_info=True)
+            self._code_project_id = None
+            log.warning("Could not bind workspace to a code project", exc_info=True)
         # M19-B4: dociągnij reguły uprawnień projektowe (<ws>/.caelo/permissions.json).
         self.reload_permission_rules()
         return self._workspace
@@ -469,7 +485,14 @@ class Backend(MediaMixin, CollectionsMixin):
         """Dorzuć zdarzenie do wspólnej, przeszukiwalnej historii huba (M9-B2).
         Bez jawnego `project_id` stempluje AKTYWNYM projektem (M9-B5). NIGDY nie
         wywraca ścieżki użytkownika — błąd magazynu jest logowany i połykany."""
-        pid = project_id if project_id is not None else self.current_project_id
+        if project_id is not None:
+            pid = project_id
+        elif mode == "code":
+            # M22: zdarzenia agenta (Code) stempluj projektem workspace'u (kind='code'),
+            # nie projektem czatu — rozdzielenie scope'ów.
+            pid = self._code_project_id or self.current_project_id
+        else:
+            pid = self.current_project_id
         try:
             ev = self.history_store.record_event(
                 mode=mode, text=text or "", artifact_id=artifact_id,
@@ -492,9 +515,10 @@ class Backend(MediaMixin, CollectionsMixin):
             log.warning("Could not record artifact (mode=%s)", kwargs.get("mode"), exc_info=True)
             return None
 
-    # --- projekty (M9-B5): wspólny scope trybów ---
-    def list_projects(self):
-        return self.history_store.list_projects()
+    # --- projekty (M9-B5; M22: rozdzielone na kind chat/code) ---
+    def list_projects(self, kind: Optional[str] = None):
+        """M22: `kind` filtruje typ ('chat'|'code'); None = wszystkie."""
+        return self.history_store.list_projects(kind=kind)
 
     def current_project(self):
         pid = self.current_project_id
@@ -520,6 +544,31 @@ class Backend(MediaMixin, CollectionsMixin):
             self.write_settings(s)  # przeżywa restart; niekrytyczne (połykane)
         except Exception:
             log.warning("Could not persist current project", exc_info=True)
+
+    def update_project(self, project_id, *, name=None, instructions=None):
+        """M22: zmień nazwę / instrukcje projektu. None → projekt nie istnieje."""
+        return self.history_store.update_project(
+            project_id, name=name, instructions=instructions)
+
+    def delete_project(self, project_id):
+        """M22: usuń projekt + jego historię/artefakty/kolekcje (store) oraz lokalny
+        katalog dokumentów wiedzy. Czyści aktywny projekt czatu / workspace, jeśli go
+        dotyczył. Zwraca skasowany Project (None gdy nie istniał)."""
+        proj = self.history_store.delete_project(project_id)
+        if proj is None:
+            return None
+        try:
+            import shutil
+            docs = Path(config.PROJECT_DOCS_DIR) / project_id
+            if docs.is_dir():
+                shutil.rmtree(docs, ignore_errors=True)
+        except Exception:
+            log.warning("Could not remove project docs dir", exc_info=True)
+        if self.current_project_id == project_id:
+            self.select_project(None)
+        if self._code_project_id == project_id:
+            self._code_project_id = None
+        return proj
 
     # --- wiedza projektu / kolekcje → CollectionsMixin (backend_collections.py, P2-13) ---
     # --- generacja i zapis mediów → MediaMixin (backend_media.py, P2-13) ---

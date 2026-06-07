@@ -44,11 +44,14 @@ never leaves your machine**, and there is **no telemetry**.
 
 ## Core concepts
 
-**Projects.** A project is a shared scope across modules: chats, generated media, voice turns,
-and agent runs you make while a project is active are tagged with it, and **History** can filter
-by project. Selecting a code workspace (in **Code**) also activates a matching project, so a
-coding session and its chats/media stay together. Switch or create projects from the top-bar
-project switcher.
+**Projects (chat).** A chat project is a container that scopes your chats, generated media, voice
+turns and **History**, and can hold per-project **instructions** (a system prompt added to every
+chat in that project) plus **knowledge** documents. Create, switch, rename, edit instructions,
+manage knowledge and delete projects from the top-bar **project switcher** — the ⚙ on a project
+opens its settings. New chats and the chat list are scoped to the active project. **Code workspaces
+are separate (M22):** opening a folder in **Code** binds it to its own *code* project (for code
+history) and does **not** change your active chat project, so code folders no longer clutter the
+chat project list.
 
 **Send-to.** Most results can be forwarded to another module — e.g. send a chat code block to
 the **Code** agent, or send a generated image into **Video** as a source frame. Look for the
@@ -114,6 +117,12 @@ remembered.
 
 **Checkpoints & Undo (M13).** The agent snapshots files before changes; use **Undo** to roll back
 to a checkpoint.
+
+**Sessions (M21).** Conversations with the agent are **saved automatically** and can be **resumed**
+with full context. Open the **Sessions** menu (top of the agent panel) to start a **New** session,
+**reopen** a past one (its transcript is restored and the agent continues with the saved context),
+or **delete** one. Filter the list by text or by **This project / All projects** (the current
+folder).
 
 **Subagent teams (M17).** For larger tasks the agent can **delegate** subtasks to specialized
 roles (researcher / reviewer / implementer / tester). Mutating roles work in an **isolated copy**

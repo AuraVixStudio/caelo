@@ -54,6 +54,8 @@ export interface LspDiagnostic {
 
 export type AgentEvent =
   | { type: 'workspace'; path: string }
+  // M21: aktywne id trwałej sesji (po połączeniu / wznowieniu / nowej sesji).
+  | { type: 'session'; id: string }
   | { type: 'text'; full: string }
   | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> }
   | { type: 'approval_request'; id: string; name: string; detail?: ApprovalDetail }
@@ -122,6 +124,8 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
   switch (o.type) {
     case 'workspace':
       return { type: 'workspace', path: asString(o.path) }
+    case 'session':
+      return { type: 'session', id: asString(o.id) }
     case 'text':
       return { type: 'text', full: asString(o.full) }
     case 'tool_call':
@@ -280,6 +284,12 @@ export class AgentConnection {
 
   setWorkspace(path: string): void {
     this.send({ type: 'workspace', path })
+  }
+
+  // M21: wznów zapisaną sesję (id) lub zacznij nową (null). Serwer odpowie ramką
+  // `session` z aktywnym id. Odrzucane przez serwer w trakcie tury (busy).
+  setSession(id: string | null): void {
+    this.send({ type: 'session', id })
   }
 
   sendMessage(

@@ -402,6 +402,17 @@ run external copy would use its own `config.py`, hence its own data dir.)
 - `caelo_history.db` (M9) — SQLite+FTS5 hub backbone: artifacts + searchable history + projects +
   `collection_files` + `gen_jobs` (M11 generation queue) ([`caelo_core/history_store.py`](caelo_core/history_store.py)).
   Own file; **never** touch `caelo_config.json`. Corrupt → `.corrupt` backup (like the JSON readers).
+  **M22 — chat vs code projects:** the M9-B5 single shared "project" was split via a `projects.kind`
+  discriminator (`'chat'` | `'code'`) + per-project `instructions` (added by idempotent `ALTER TABLE` +
+  backfill `root != '' → 'code'`). `set_workspace` now binds the folder to a **`kind='code'`** project
+  WITHOUT changing the active CHAT project — `Backend._code_project_id` stamps `mode='code'` events while
+  `current_project_id` is the chat project (`record_event` picks by mode). Chat/Gallery/History list only
+  `kind='chat'` (`GET /projects` → `list_projects(kind='chat')`); chat projects are renamable/deletable
+  (`PATCH`/`DELETE /projects/{id}`, delete cascades events/artifacts/gen_jobs/collection_files + docs dir)
+  and their `instructions` are prepended to the chat system prompt (`routes/chat.py`). Renderer: the
+  **ProjectSwitcher** is now the project manager (rename/instructions/knowledge/delete; absorbed the old
+  `KnowledgePopover`), and chat conversations carry a `project_id` (renderer `localStorage`) so the chat
+  list is scoped per project.
 - `project_docs/<project_id>/` (M10-B5) — local "project knowledge" documents (xAI has no vector
   stores); served sandboxed via `/collections/files/{id}/content`, attached on demand ("Attach all").
 - `caelo_mcp.json` / `caelo_commands.json` / `caelo_hooks.json` (M14) — MCP servers / user slash commands /
@@ -418,8 +429,15 @@ run external copy would use its own `config.py`, hence its own data dir.)
   permissions). Own file; atomic writes + `load_json_or_backup`; caught by the `caelo_*.json` net.
 - `templates/<id>/` (M16) — user-installed project templates. Built-in templates live in
   `caelo_core/packages/templates/builtin/` (packaged via the spec, read-only), NOT here. Gitignored.
-- `sessions/<id>.json` (M19-B1) — headless-mode agent session history (`-s`/`-r`/`-c`). Own files; atomic
-  writes + `load_json_or_backup`; gitignored (`/sessions/`, dev `DATA_DIR` = repo).
+- `sessions/<id>.json` (M19-B1; extended) — agent coding-session history. Originally headless-only
+  (`-s`/`-r`/`-c`); the store was extracted to [`caelo_core/agent/sessions.py`](caelo_core/agent/sessions.py)
+  (format **v2**: `id`/`cwd`/`project_id`/`title`/`model`/`created_at`/`updated_at`/`history`, loader
+  tolerates the old `{id,cwd,history}`) and is now ALSO used by the interactive WS agent: `AgentRunner`
+  persists the full session after every turn (stamped with `current_project_id`, M9-B5), the WS protocol
+  gained a `session` frame (resume by id / start new) and REST [`routes/sessions.py`](caelo_core/routes/sessions.py)
+  (`GET /agent/sessions?project_id=` · `GET /agent/sessions/{id}` · `DELETE`) backs the **Sessions** menu
+  in the agent panel (resume + per-project filter). Own files; atomic writes + `load_json_or_backup`;
+  gitignored (`/sessions/`, dev `DATA_DIR` = repo).
 - `lsp.json` (M19-B3) — GLOBAL language-server config; project config is `<ws>/.caelo/lsp.json` (read-only).
   `load_json_or_backup` + atomic writes; gitignored (`/lsp.json`, dev `DATA_DIR` = repo). Also read:
   `<ws>/.caelo/permissions.json` (M19-B4 project glob rules).

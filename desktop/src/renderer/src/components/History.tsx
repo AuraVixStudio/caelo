@@ -96,7 +96,7 @@ export function History({ conn }: { conn: Conn }) {
       }
     >
       <div className="mb-4 flex items-center gap-2">
-        <ProjectSwitcher />
+        <ProjectSwitcher conn={conn} />
         <div className="relative flex-1">
           <Search
             size={15}

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
+from caelo_core.agent import sessions  # M21: wspólny magazyn sesji (headless + WS)
 
 log = logging.getLogger("caelo_core.headless")
 
@@ -37,38 +38,27 @@ def _out(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 
-# --- minimalne sesje (M19-B1 §1.3): historia agenta w DATA_DIR/sessions/<id>.json ---
+# --- trwałe sesje (M19-B1): magazyn wydzielony do `agent/sessions.py` (M21 — wspólny
+# z WS `/agent/stream`). Poniższe to cienkie aliasy zachowujące dotychczasowe API
+# headless (self-checki ich używają); cała logika/format żyje w `sessions`. ---
 def _sessions_dir() -> Path:
-    return Path(config.DATA_DIR) / "sessions"  # czytane LIVE (testy podmieniają DATA_DIR)
+    return sessions.sessions_dir()
 
 
 def _session_path(sid: str) -> Path:
-    return _sessions_dir() / f"{sid}.json"
+    return sessions.session_path(sid)
 
 
 def _load_session(sid: str) -> list:
-    data = config.load_json_or_backup(_session_path(sid), {}) or {}
-    hist = data.get("history")
-    return hist if isinstance(hist, list) else []
+    return sessions.load_history(sid)
 
 
 def _save_session(sid: str, history: list, cwd: str) -> None:
-    try:
-        _sessions_dir().mkdir(parents=True, exist_ok=True)
-        config.atomic_write_text(
-            _session_path(sid),
-            json.dumps({"id": sid, "cwd": cwd, "history": history}, ensure_ascii=False),
-        )
-    except Exception:  # noqa: BLE001
-        log.warning("Could not persist headless session %s", sid, exc_info=True)
+    sessions.save(id=sid, cwd=cwd, history=history)
 
 
 def _latest_session() -> Optional[str]:
-    d = _sessions_dir()
-    if not d.exists():
-        return None
-    files = sorted(d.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
-    return files[0].stem if files else None
+    return sessions.latest()
 
 
 # --- eksport sesji do Markdown (M19-B10) ----------------------------------------
@@ -308,7 +298,10 @@ def _run(opts, backend) -> int:
     )
     final = runner.run_turn(opts.prompt, model, mode=mode)
 
-    _save_session(sid, runner.history, cwd)
+    # M21: zapisz pełną sesję ze stemplem projektu (M9-B5) + modelem — by lista sesji
+    # w UI mogła filtrować po projekcie. StubBackend bez current_project_id → None.
+    sessions.save(id=sid, cwd=cwd, history=runner.history,
+                  project_id=getattr(backend, "current_project_id", None), model=model)
 
     if opts.fmt == "plain":
         if final:

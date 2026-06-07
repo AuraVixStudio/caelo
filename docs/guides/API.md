@@ -1,8 +1,9 @@
 # Caelo — Backend API reference
 
 The Caelo sidecar (`caelo-core`, FastAPI/uvicorn) exposes a local HTTP + WebSocket API consumed by
-the Electron renderer. This document is the reference for that surface: **96 REST routes + 6
-WebSocket endpoints**.
+the Electron renderer. This document is the reference for that surface: **109 REST routes + 6
+WebSocket endpoints** (count verified via the snippet in [Regenerating this list](#regenerating-this-list);
+a few M20 chat-media routes are reflected in the count but not yet split into their own table).
 
 > End users want **[USER_GUIDE.md](USER_GUIDE.md)**. This file is for developers and integrators.
 > A machine-readable schema is also served at **`GET /openapi.json`** by the running sidecar.
@@ -125,17 +126,25 @@ All paths are sandboxed to the active workspace root.
 | `GET` | `/artifacts/{artifact_id}/input-block` | Artifact as a chat input block (for send-to). |
 | `DELETE` | `/artifacts/{artifact_id}` | Delete record + file from disk. |
 
-## Projects (M9-B5)
+## Projects (M9-B5; M22: chat vs code)
+
+M22 split projects via a `kind` discriminator (`'chat'` | `'code'`). `GET /projects` returns only
+**chat** projects (Code workspaces are `kind='code'`, bound by `set_workspace` and not shown here);
+chat projects carry per-project `instructions` (prepended to the chat system prompt).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/projects` | List projects. |
-| `POST` | `/projects` | Create (or reuse, for a root) a project. |
-| `POST` | `/projects/current` | Set the active project. |
+| `GET` | `/projects` | List **chat** projects (+ `recent_workspaces`, `current_project_id`). |
+| `POST` | `/projects` | Create a chat project (or, for a `root`, a code project). |
+| `POST` | `/projects/current` | Set the active chat project (`null` clears). |
+| `PATCH` | `/projects/{id}` | Rename and/or set `instructions` (M22). |
+| `DELETE` | `/projects/{id}` | Delete project + its history/artifacts/gen-jobs/knowledge (M22). |
 
 ## Project knowledge / collections (M10-B5)
 
-Local documents attached to a project (xAI has no server-side vector stores).
+Local documents attached to a project (xAI has no server-side vector stores). Scoped to the
+**active** project; in the renderer these are managed inside the `ProjectSwitcher` (M22, the old
+`KnowledgePopover` was absorbed).
 
 | Method | Path | Description |
 |---|---|---|
@@ -152,6 +161,18 @@ Local documents attached to a project (xAI has no server-side vector stores).
 | `POST` | `/agent/undo` | Roll back to a checkpoint. |
 | `GET` | `/agent/caelo-md` | Read the workspace `CAELO.md` (+ whether one exists). |
 | `PUT` | `/agent/caelo-md` | Write the workspace `CAELO.md` (atomic, sandboxed). |
+
+## Agent — sessions (M21)
+
+Saved, resumable coding sessions (`DATA_DIR/sessions/<id>.json`; the store is shared with headless
+mode). The WS `/agent/stream` persists the full session after each turn and can resume one via a
+`session` frame.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/agent/sessions?project_id=` | List session metadata (newest first; filter by project). |
+| `GET` | `/agent/sessions/{id}` | Full session (raw LLM history) for transcript + resume. |
+| `DELETE` | `/agent/sessions/{id}` | Delete a saved session. |
 
 ## Agent — permission allowlist
 
@@ -231,7 +252,7 @@ A `{"type":"stop"}` frame from the client cancels the in-flight operation.
 | Path | Purpose | Notable frames (server → client) |
 |---|---|---|
 | `/chat/stream` | Chat over the Responses API (search, vision, tools). | `delta` · `tool_call` · `citations` · `usage` · `done` · `error` |
-| `/agent/stream` | Coding-agent session loop (tools + approvals). | `delta`/event · `approval_request` · `workspace` · `subagent`/`subagent_status` · `team_done` · `error` |
+| `/agent/stream` | Coding-agent session loop (tools + approvals). | `delta`/event · `approval_request` · `workspace` · `session` (M21: active session id; client may send `{"type":"session","id":…\|null}` to resume/start) · `subagent`/`subagent_status` · `team_done` · `error` |
 | `/terminal` | Embedded pty shell (needs `pywinpty`). | pty output frames |
 | `/voice/converse` | **Talk** mode: transcript → Responses → TTS, with barge-in. | `audio` (+ text) frames; `{"type":"stop"}` = barge-in |
 | `/voice/realtime` | **Live** mode: transparent proxy to xAI Voice Agent (`/v1/realtime`). | raw passthrough frames |
