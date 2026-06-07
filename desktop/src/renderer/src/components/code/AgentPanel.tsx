@@ -705,13 +705,17 @@ export function AgentPanel({
             Ask the agent to read, edit or run code in the workspace.
           </p>
         ) : (
+          // `shrink-0`: bez tego dzieci kontenera flex-col KURCZĄ się (flex-shrink:1),
+          // więc przy wielu wpisach „ściskają się jak prasą" i lista nie przewija —
+          // zamiast tego mają zachować naturalną wysokość i przepełnić (scroll).
           entries.map((e) => (
-            <EntryView
-              key={e.id}
-              entry={e}
-              onApprove={approve}
-              streaming={busy && e.kind === 'assistant' && e.id === curAssistant.current}
-            />
+            <div key={e.id} className="shrink-0">
+              <EntryView
+                entry={e}
+                onApprove={approve}
+                streaming={busy && e.kind === 'assistant' && e.id === curAssistant.current}
+              />
+            </div>
           ))
         )}
       </div>
