@@ -26,7 +26,7 @@
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
-| E | Agent kodowania | P1 | ⬜ | | |
+| E | Agent kodowania | P1 | 🟡 | 2026-06-08 | E1 ✅ (pełny bieg + edycje accept-edits); naprawione 3 bugi (izolacja CAELO.md, „prasa"/scroll, approve); zostają E2–E10 (diff approval, plan, checkpointy, sesje, komendy, glob, LSP) |
 | F | Subagenci / zespoły | P2 | ⬜ | | |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
@@ -214,7 +214,13 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > **Table stakes** trybu Code. Testuj na **kopii** prawdziwego repo (agent pisze pliki).
 > Najpierw potwierdź A3 (czy narzędzia działają na Twoim aucie).
 
-- [ ] **E1 — Pełny bieg agenta.** Code → ustaw workspace → zadanie typu „przeczytaj X i dodaj funkcję Y".
+> **Postęp 2026-06-08 (testy na żywo u usera): E1 ✅ + 3 realne bugi NAPRAWIONE** (których mocki nie
+> złapały): izolacja CAELO.md/CLAUDE.md (agent nad cudzym projektem dostawał reguły repo Caelo, commit
+> `8a811d9`); panel agenta „ściskał" wpisy w paski i nie przewijał się → przyciski APPROVE nieosiągalne
+> (`65744c0` shrink-0 + `23b64c4` rAF auto-scroll). Po fixach: pełny bieg z edycjami (accept-edits) działa,
+> wpisy w pełnej wysokości, lista płynnie się przewija, analiza renderuje markdown. **Zostają E2–E10.**
+
+- [x] **E1 — Pełny bieg agenta.**  ✅ 2026-06-08. Agent czytał (read_file/grep/list_dir) i edytował pliki (edit_file App.tsx/icon-generator.ts) w accept-edits; pętla domknięta, analiza wyrenderowana.
   - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
 
 - [ ] **E2 — Diff approval.** Mutacja → karta zatwierdzenia z **diffem** (accept/reject per plik); plik binarny → znacznik „binary"/„new".
