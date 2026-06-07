@@ -85,15 +85,26 @@ export interface SettingsResp {
   has_api_key: boolean
 }
 
+/** Preferowane źródło uwierzytelniania ("przełącznik trybów"). */
+export type AuthSource = 'auto' | 'oauth' | 'api_key'
+/** Faktycznie aktywne źródło klucza dla wywołań xAI. */
+export type ActiveSource = 'oauth' | 'api_key' | 'env' | 'none'
+
 export interface AuthResp {
   authenticated: boolean
   oauth: boolean
   account: Record<string, unknown>
   has_api_key: boolean
+  // Pola dodane wraz z przełącznikiem źródła (opcjonalne — zgodność ze starszym backendem/mockami).
+  has_stored_key?: boolean // klucz w ustawieniach (usuwalny z UI)
+  has_env_key?: boolean // klucz z XAI_API_KEY (.env), nieusuwalny z UI
+  auth_source?: AuthSource // preferencja
+  active_source?: ActiveSource // faktyczne aktywne źródło
 }
 
 export type SettingsPatch = Partial<{
   api_key: string
+  auth_source: AuthSource // preferowane źródło uwierzytelniania
   chat_model: string
   code_model: string
   system_prompt: string
@@ -182,6 +193,9 @@ export const getSettings = (c: Conn): Promise<SettingsResp> => api<SettingsResp>
 export const getAuthStatus = (c: Conn): Promise<AuthResp> => api<AuthResp>(c, '/auth/status')
 export const putSettings = (c: Conn, patch: SettingsPatch): Promise<{ ok: boolean }> =>
   api<{ ok: boolean }>(c, '/settings', { method: 'PUT', body: JSON.stringify(patch) })
+/** Usuwa zapisany klucz API (nie dotyka XAI_API_KEY z .env ani OAuth). */
+export const clearApiKey = (c: Conn): Promise<{ ok: boolean }> =>
+  api<{ ok: boolean }>(c, '/settings/api-key', { method: 'DELETE' })
 
 // --- Auth (OAuth) ---
 export const login = (c: Conn): Promise<{ ok: boolean; account: Record<string, unknown> }> =>

@@ -47,8 +47,15 @@ stdout: `__CAELO_CORE_READY__ {"port":…,"token":…,"version":…}`. uvicorn l
 stdout stays clean. Electron parses this; the token it generated (passed via `CAELO_CORE_TOKEN`)
 is authoritative. See [`caelo_core/__main__.py`](caelo_core/__main__.py) and `index.ts`.
 
-**Auth precedence** (`Backend.get_api_key` in [`caelo_core/state.py`](caelo_core/state.py)):
-OAuth access token → saved `api_key` from settings → `XAI_API_KEY` from `.env`. OAuth uses the
+**Auth precedence** (`Backend.get_api_key`/`_resolve_auth` in [`caelo_core/state.py`](caelo_core/state.py)):
+the default (`auth_source="auto"`) is OAuth access token → saved `api_key` from settings → `XAI_API_KEY`
+from `.env`. A **hard source switch** (`auth_source` in `caelo_settings.json`, set via Settings →
+"Model source": auto/oauth/api_key) overrides this: `oauth` uses **only** the account token, `api_key`
+uses **only** a key (settings → `.env`) — neither silently falls back to the other, so picking "API key"
+with no key fails clearly instead of quietly using OAuth (the live A3 gap). `active_auth_source()` reports
+the source actually in effect (`oauth|api_key|env|none`) — surfaced in `/auth/status` (+`has_stored_key`/
+`has_env_key`); the renderer footer shows "Not signed in" when the sidecar is up but no source is active,
+and the API-key field is removable (`DELETE /settings/api-key`) and masked (dots) when stored. OAuth uses the
 public PKCE `client_id` of grok-cli/Hermes and undocumented `auth.x.ai` endpoints (see
 [`config.py`](config.py)) — may break server-side without notice.
 
@@ -392,8 +399,9 @@ run external copy would use its own `config.py`, hence its own data dir.)
 
 - `caelo_config.json` — **owned exclusively by `HistoryManager`**, rewritten wholesale (history /
   chat_history / save_path only). Never write anything else here — it wipes the data.
-- `caelo_settings.json` — API key (fallback), chat/code model, system prompt, temperature, `recent_workspaces`,
-  `current_project_id`, `chat_search_mode`/`chat_search_sources` (M10 live-search defaults).
+- `caelo_settings.json` — API key (fallback), `auth_source` (auto/oauth/api_key — the hard source switch),
+  chat/code model, system prompt, temperature, `recent_workspaces`, `current_project_id`,
+  `chat_search_mode`/`chat_search_sources` (M10 live-search defaults).
 - `caelo_auth.json` — OAuth tokens (gitignored; never commit).
 - `caelo_chats.json` — legacy conversation store. **No longer written by the sidecar** (P2-8: `ChatStore`
   removed from `Backend`); chat conversations now live in the renderer's `localStorage` (`useConversations`).

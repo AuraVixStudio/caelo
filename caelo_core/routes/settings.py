@@ -23,8 +23,14 @@ _SEARCH_MODES = {"auto", "on", "off"}
 _SEARCH_SOURCES = {"web", "x", "news"}
 
 
+# Preferencja zrodla uwierzytelniania ("przelacznik trybow"): auto|oauth|api_key.
+_AUTH_SOURCES = {"auto", "oauth", "api_key"}
+
+
 class SettingsPatch(BaseModel):
     api_key: Optional[str] = None
+    # Preferowane zrodlo klucza dla wywolan xAI (auto = OAuth->klucz->.env).
+    auth_source: Optional[str] = None
     chat_model: Optional[str] = None
     code_model: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -76,5 +82,15 @@ def put_settings(patch: SettingsPatch, b: Backend = Depends(get_backend)) -> dic
     for key in ("chat_effort", "code_effort"):
         if key in data:
             data[key] = V.normalize_effort(data[key]) or ""
+    # Preferencja zrodla auth — niepoprawna wartosc pomijana (nie psujemy pliku ustawien).
+    if "auth_source" in data and data["auth_source"] not in _AUTH_SOURCES:
+        data.pop("auth_source")
     b.update_settings(data)
+    return {"ok": True}
+
+
+@router.delete("/settings/api-key")
+def delete_api_key(b: Backend = Depends(get_backend)) -> dict:
+    """Usun zapisany klucz API (nie dotyka XAI_API_KEY z .env ani logowania OAuth)."""
+    b.clear_api_key()
     return {"ok": True}

@@ -13,6 +13,7 @@ import {
   Video as VideoIcon
 } from 'lucide-react'
 import { useConnection } from './lib/useConnection'
+import { useAuthStatus } from './lib/serverState'
 import { HubProvider } from './lib/hub'
 import { cn } from './lib/cn'
 import { Placeholder } from './components/Placeholder'
@@ -59,6 +60,52 @@ const STATUS: Record<CoreConnection['status'], { label: string; dot: string }> =
   ready: { label: 'Connected', dot: 'bg-success' },
   error: { label: 'Connection error', dot: 'bg-error' },
   stopped: { label: 'Backend stopped', dot: 'bg-muted' }
+}
+
+/** Pasek statusu w stopce railu (dot + etykieta). */
+function ConnStatusBar({
+  dot,
+  label,
+  collapsed
+}: {
+  dot: string
+  label: string
+  collapsed: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 px-1.5 text-xs text-muted',
+        collapsed && 'justify-center px-0'
+      )}
+    >
+      <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+      {!collapsed ? <span className="truncate">{label}</span> : null}
+    </div>
+  )
+}
+
+/** Gdy sidecar jest gotowy, stopka odzwierciedla TAKŻE stan auth: brak aktywnego
+ *  źródła (po wylogowaniu/usunięciu klucza) → bursztyn „Not signed in", a nie zielone
+ *  „Connected" (które myliło — to status backendu, nie konta xAI). */
+function ConnStatusReady({
+  conn,
+  status,
+  collapsed
+}: {
+  conn: Conn
+  status: { label: string; dot: string }
+  collapsed: boolean
+}) {
+  const { auth } = useAuthStatus(conn)
+  const noAuth = auth?.active_source === 'none'
+  return (
+    <ConnStatusBar
+      dot={noAuth ? 'bg-warn' : status.dot}
+      label={noAuth ? 'Not signed in' : status.label}
+      collapsed={collapsed}
+    />
+  )
 }
 
 const RAIL_KEY = 'caelo.rail.collapsed'
@@ -224,15 +271,11 @@ export default function App() {
 
         {/* Footer */}
         <div className="mt-auto flex flex-col gap-2 border-t border-border pt-3">
-          <div
-            className={cn(
-              'flex items-center gap-2 px-1.5 text-xs text-muted',
-              collapsed && 'justify-center px-0'
-            )}
-          >
-            <span className={cn('h-2 w-2 shrink-0 rounded-full', status.dot)} />
-            {!collapsed ? <span className="truncate">{status.label}</span> : null}
-          </div>
+          {c ? (
+            <ConnStatusReady conn={c} status={status} collapsed={collapsed} />
+          ) : (
+            <ConnStatusBar dot={status.dot} label={status.label} collapsed={collapsed} />
+          )}
           <div className={cn('flex items-center', collapsed ? 'flex-col gap-1' : 'justify-between')}>
             <ThemeToggle align={collapsed ? 'start' : 'start'} side="top" />
             <IconButton

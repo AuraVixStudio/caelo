@@ -8,9 +8,11 @@
 
 import { useEffect, useState } from 'react'
 import {
+  getAuthStatus,
   getModels,
   getSettings,
   putSettings,
+  type AuthResp,
   type Conn,
   type ModelsResp,
   type SettingsPatch,
@@ -113,6 +115,24 @@ function createResource<T>(fetcher: (conn: Conn) => Promise<T>) {
 
 const modelsResource = createResource(getModels)
 const settingsResource = createResource(getSettings)
+const authResource = createResource(getAuthStatus)
+
+/** Współdzielony, cache'owany odczyt `/auth/status` — używany przez footer App
+ *  (wskaźnik źródła) i ekran Settings, by oba widziały TEN SAM stan auth. */
+export function useAuthStatus(conn: Conn): {
+  auth: AuthResp | null
+  error: string | null
+  loading: boolean
+} {
+  const s = authResource.useResource(conn)
+  return { auth: s.data, error: s.error, loading: s.loading }
+}
+
+/** Wymusza ponowny odczyt `/auth/status` (po logowaniu/wylogowaniu/zapisie/usunięciu
+ *  klucza lub zmianie źródła) i budzi subskrybentów — footer i Settings odświeżają się. */
+export async function refreshAuth(conn: Conn): Promise<void> {
+  await authResource.load(conn, true).catch(() => undefined)
+}
 
 /** Współdzielony, cache'owany odczyt `/models` (jeden GET na połączenie). */
 export function useModels(conn: Conn): {

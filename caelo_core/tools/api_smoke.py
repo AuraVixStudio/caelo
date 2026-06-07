@@ -116,6 +116,10 @@ def main() -> int:
 
         s, body = _get(base, "/auth/status", token)
         checks.append(("/auth/status == 200", s == 200 and body is not None and "authenticated" in body))
+        # Przelacznik zrodla auth: status raportuje faktyczne aktywne zrodlo + flagi kluczy.
+        checks.append(("/auth/status exposes active_source", body is not None
+                       and body.get("active_source") in ("oauth", "api_key", "env", "none")
+                       and "has_stored_key" in body and "auth_source" in body))
 
         s, body = _get(base, "/models", token)
         ok_models = s == 200 and body and isinstance(body.get("chat"), list) and len(body["chat"]) > 0

@@ -17,6 +17,13 @@ def auth_status(b: Backend = Depends(get_backend)) -> dict:
         "oauth": b.oauth.is_authenticated(),
         "account": b.oauth.get_account(),
         "has_api_key": b.has_api_key(),
+        # Rozroznienie zrodel klucza: 'stored' = ustawienia (usuwalny z UI),
+        # 'env' = XAI_API_KEY z .env (nieusuwalny z UI).
+        "has_stored_key": b.has_stored_key(),
+        "has_env_key": b.has_env_key(),
+        # Preferencja ("przelacznik") vs faktyczne aktywne zrodlo.
+        "auth_source": b.auth_source_pref(),       # auto|oauth|api_key
+        "active_source": b.active_auth_source(),   # oauth|api_key|env|none
     }
 
 

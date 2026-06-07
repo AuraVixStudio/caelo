@@ -182,6 +182,22 @@ def _unit_settings_ownership(checks: list) -> None:
                            s.get("chat_model") == "grok-4"))
             checks.append(("settings ownership: api key stored (has_api_key)",
                            b.has_api_key() is True))
+
+            # Przelacznik zrodla auth (TWARDY): jawny wybor nie przeskakuje po cichu.
+            # Backend testowy: brak logowania OAuth -> oauth niedostepny.
+            checks.append(("auth source: stored key active under auto (no oauth)",
+                           b.has_stored_key() is True and b.active_auth_source() == "api_key"))
+            b.update_settings({"auth_source": "oauth"})
+            checks.append(("auth source: preference persisted",
+                           b.auth_source_pref() == "oauth"))
+            checks.append(("auth source: forced oauth + no login -> none (hard switch)",
+                           b.active_auth_source() == "none"))
+            b.update_settings({"auth_source": "api_key"})
+            checks.append(("auth source: forced api_key uses stored key (ignores oauth)",
+                           b.active_auth_source() == "api_key"))
+            b.clear_api_key()
+            checks.append(("auth source: clear_api_key removes stored key",
+                           b.has_stored_key() is False))
         except Exception as exc:  # noqa: BLE001
             checks.append((f"settings ownership: scenario ran ({exc})", False))
         finally:

@@ -248,14 +248,75 @@ class Backend(MediaMixin, CollectionsMixin):
         return s
 
     # --- klucze / uwierzytelnianie (jak app.get_api_key/is_authenticated) ---
+    # Preferencja zrodla ("przelacznik trybow"): 'auto' = dotychczasowa precedencja
+    # (OAuth -> klucz z ustawien -> .env); 'oauth' / 'api_key' = wymus dane zrodlo,
+    # z lagodnym fallbackiem gdy wybrane jest niedostepne. UI pokazuje FAKTYCZNE
+    # aktywne zrodlo (active_auth_source), nie samo zyczenie.
+    _AUTH_SOURCES = ("auto", "oauth", "api_key")
+
+    def _stored_key(self) -> str:
+        """Klucz API zapisany w ustawieniach (usuwalny z UI)."""
+        return (self.read_settings().get("api_key") or "").strip()
+
+    def _env_key(self) -> str:
+        """Klucz z XAI_API_KEY (.env) — nieusuwalny z UI (plik usera)."""
+        return (os.getenv("XAI_API_KEY") or "").strip()
+
+    def has_stored_key(self) -> bool:
+        return bool(self._stored_key())
+
+    def has_env_key(self) -> bool:
+        return bool(self._env_key())
+
     def has_api_key(self) -> bool:
-        return bool(self.read_settings().get("api_key") or os.getenv("XAI_API_KEY"))
+        return bool(self._stored_key() or self._env_key())
+
+    def auth_source_pref(self) -> str:
+        pref = (self.read_settings().get("auth_source") or "auto").strip().lower()
+        return pref if pref in self._AUTH_SOURCES else "auto"
+
+    def _resolve_auth(self) -> tuple[str, str]:
+        """Zwraca (source, key) wg preferencji + dostepnosci; source nalezy do
+        {oauth, api_key, env, none}. Ustawienia czytane RAZ (gorace wywolanie na kazde
+        zadanie API). Token OAuth pobierany leniwie (moze odswiezac) — tylko gdy potrzebny."""
+        s = self.read_settings()
+        stored = (s.get("api_key") or "").strip()
+        env = (os.getenv("XAI_API_KEY") or "").strip()
+        pref = (s.get("auth_source") or "auto").strip().lower()
+        if pref not in self._AUTH_SOURCES:
+            pref = "auto"
+        # TWARDY przelacznik: jawny wybor 'oauth'/'api_key' NIE przeskakuje po cichu na
+        # drugie zrodlo (inaczej "API key" uzywaloby OAuth, gdy brak klucza — mylace).
+        # 'api_key' obejmuje klucz z ustawien I .env (oba to "klucz API"), bez OAuth.
+        # 'auto' = wygodna precedencja z pelnym fallbackiem.
+        order = {
+            "api_key": ("api_key", "env"),
+            "oauth": ("oauth",),
+            "auto": ("oauth", "api_key", "env"),
+        }[pref]
+        for src in order:
+            if src == "oauth":
+                tok = self.oauth.get_access_token()
+                if tok:
+                    return "oauth", tok
+            elif src == "api_key" and stored:
+                return "api_key", stored
+            elif src == "env" and env:
+                return "env", env
+        return "none", ""
 
     def get_api_key(self) -> str:
-        token = self.oauth.get_access_token()
-        if token:
-            return token
-        return self.read_settings().get("api_key") or os.getenv("XAI_API_KEY", "")
+        return self._resolve_auth()[1]
+
+    def active_auth_source(self) -> str:
+        """Ktore zrodlo JEST faktycznie uzywane przez get_api_key (oauth|api_key|env|none)."""
+        return self._resolve_auth()[0]
+
+    def clear_api_key(self) -> None:
+        """Usun zapisany klucz API z ustawien (nie dotyka .env ani OAuth)."""
+        s = self.read_settings()
+        if s.pop("api_key", None) is not None:
+            self.write_settings(s)
 
     def is_authenticated(self) -> bool:
         return bool(self.oauth.is_authenticated() or self.has_api_key())
