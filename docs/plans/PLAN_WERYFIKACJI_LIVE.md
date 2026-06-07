@@ -1,0 +1,346 @@
+# PLAN_WERYFIKACJI_LIVE.md — Caelo Desktop
+
+> **Cel:** zamknąć największe ryzyko projektu (patrz SWOT 2026-06-07) — **przepaść między
+> zbudowaną powierzchnią a jej weryfikacją na żywo**. Self-checki są zielone, ale testują
+> kontrakty na **mockach**; sandbox dewelopera blokuje `api.x.ai` i exec OS. Ten dokument to
+> **runbook do wykonania na Twojej maszynie** (ważny klucz/OAuth + sieć + realny OS).
+>
+> **Jak używać:** wykonuj sekcjami wg priorytetu (P0 → P3). Każde zadanie ma: *Cel ·
+> Wymagania · Kroki · Oczekiwany wynik · Pułapki · Status*. Po teście wstaw `x` w `[ ]`,
+> dopisz datę i krótką notatkę „DZIAŁA / NIE DZIAŁA + co". Na końcu zaktualizuj
+> **tabelę wyników** i oznacz w docs/CLAUDE.md, co RZECZYWIŚCIE działa (zamiast „zrobione na mocku").
+>
+> **Legenda priorytetów:**
+> **P0** = fundament, blokuje wszystko inne (auth + kształt drutu + tool-use na OAuth) ·
+> **P1** = rdzeń produktu (czat, obraz, diffy agenta) ·
+> **P2** = pełne tryby (wideo, głos, subagenci, MCP, headless) ·
+> **P3** = funkcje-widma OFF-by-default (decyzja: włączyć po weryfikacji ALBO usunąć) + reszta.
+
+---
+
+## Tabela wyników (uzupełniaj na bieżąco)
+
+| Sekcja | Zakres | Prio | Status | Data | Notatka |
+|---|---|---|---|---|---|
+| A | Auth + kształt drutu | P0 | 🟡 | 2026-06-07 | OAuth login ✅, tryb API key ✅; dodano twardy przełącznik źródła + usuwanie/maska klucza; A3 (function-calling) do potwierdzenia |
+| B | Czat (Responses API) | P1 | ⬜ | | |
+| C | Twórczość (Image/Video) | P1/P2 | ⬜ | | |
+| D | Głos | P2 | ⬜ | | |
+| E | Agent kodowania | P1 | ⬜ | | |
+| F | Subagenci / zespoły | P2 | ⬜ | | |
+| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
+| H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
+| I | Pakiety / marketplace | P3 | ⬜ | | |
+| J | Cross-platform | P3 | ⬜ | | |
+| K | Terminal | P3 | ⬜ | | |
+
+Legenda statusu: ⬜ nie zaczęte · 🟡 częściowe · ✅ działa · ❌ nie działa · ⏭️ odłożone/usunięte.
+
+---
+
+## Część 0 — Przygotowanie środowiska (raz, przed testami)
+
+> Wszystkie polecenia z **korzenia repo** w PowerShell, chyba że napisano inaczej.
+> Sidecar uruchamiany przez Electron dziedziczy zmienne środowiskowe z powłoki, w której
+> odpalasz `npm run dev` — dlatego flagi env (`$env:CAELO_*`) ustawiaj **w tej samej powłoce**.
+
+- [ ] **0.1 — Poświadczenia.** Wybierz JEDNĄ ścieżkę (precedencja: OAuth → klucz z ustawień → `.env`):
+  - **Klucz API (najprostsze do testów backendu):** w `.env` (korzeń repo) ustaw `XAI_API_KEY=xai-...`.
+  - **OAuth (testuje pełny przepływ logowania):** zaloguj się w apce (sekcja A1).
+- [ ] **0.2 — Backend venv gotowy:** `caelo_core\.venv\Scripts\python.exe -c "import fastapi, uvicorn; print('ok')"`.
+- [ ] **0.3 — Frontend deps:** `cd desktop; npm install` (jeśli jeszcze nie). Powrót: `cd ..`.
+- [ ] **0.4 — (opcjonalnie) pełny pytest:** `caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt`
+      → potem `caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v` (powinno być zielone offline).
+- [ ] **0.5 — (opcjonalnie) E2E + Terminal:** `cd desktop; npx playwright install chromium` ·
+      `caelo_core\.venv\Scripts\pip install pywinpty` (Terminal — sekcja K).
+- [ ] **0.6 — Baseline offline (sanity przed live):** uruchom self-checki — muszą być zielone PRZED testami live, by odróżnić regresję od problemu z API:
+  ```powershell
+  caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py
+  caelo_core\.venv\Scripts\python caelo_core\tools\agent_selfcheck.py
+  caelo_core\.venv\Scripts\python caelo_core\tools\api_smoke.py
+  ```
+- [ ] **0.7 — Apka startuje:** `cd desktop; npm run dev` → okno Electrona, brak błędów w konsoli DevTools, handshake w logu. (Jeśli `Error: Electron uninstall` → patrz CLAUDE.md „Gotcha — TLS-interception".)
+
+**Modele referencyjne (z `config.py`, do użycia w krokach):** czat `grok-4.3` · obraz
+`grok-imagine-image` · wideo `grok-imagine-video-1.5-preview` · głos `grok-voice-latest` ·
+embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
+
+---
+
+## Część A — Auth + kształt drutu  🔴 P0 (blokuje wszystko)
+
+> Bez działającego auth i potwierdzonego kształtu odpowiedzi xAI żaden inny test nie ma sensu.
+> **Najważniejsze otwarte pytanie projektu (A3) testuj NAJPIERW** — przesądza architekturę agenta.
+
+> **Postęp 2026-06-07 (z testów na żywo u usera):** logowanie OAuth **DZIAŁA** (zalogowany jako
+> `grooverpty6@proton.me`), czat odpowiada na tokenie OAuth; tryb **API key DZIAŁA** (model odpowiedział).
+> Test ujawnił, że pierwotny **łagodny fallback** po cichu używał OAuth, gdy wybrano „API key" bez klucza
+> → wprowadzono **twardy przełącznik źródła** (Settings → „Model source": auto/oauth/api_key, `oauth`/
+> `api_key` bez krzyżowego fallbacku), **usuwanie klucza** (`DELETE /settings/api-key`), **maskę kropek**
+> dla zapisanego klucza i **status footera „Not signed in"**, gdy brak aktywnego źródła. **Zostaje A3 w
+> wąskim sensie** (function-calling: web_search/MCP/narzędzia agenta na tokenie OAuth vs klucz).
+
+- [x] **A1 — Logowanie OAuth (`auth.x.ai`, PKCE).**  ✅ POTWIERDZONE 2026-06-07 (zalogowany w apce).
+  - *Cel:* potwierdzić, że nieudokumentowany przepływ OAuth grok-cli/Hermes nadal działa.
+  - *Kroki:* w apce → Settings/Auth → „Sign in" → przejdź flow w przeglądarce → wróć do apki.
+  - *Oczekiwane:* status „zalogowany", `caelo_auth.json` zawiera tokeny (gitignored).
+  - *Pułapki:* endpointy `auth.x.ai` są nieudokumentowane — mogą paść server-side bez ostrzeżenia.
+    Jeśli nie działa: użyj klucza API (0.1) i odnotuj „OAuth broken".
+
+- [x] **A2 — Precedencja + przełącznik źródła.**  ✅ POTWIERDZONE 2026-06-07 (oba tryby autoryzują).
+  - *Stan:* czat działa na OAuth **i** na kluczu API. Dodano **twardy przełącznik** (Settings → „Model
+    source"): `auto` = OAuth → klucz → `.env`; `oauth`/`api_key` = **tylko** wybrane źródło (bez cichego
+    fallbacku). „Currently using" pokazuje faktyczne aktywne źródło; `/settings` NIE zwraca klucza (tylko flagi).
+  - *Do sprawdzenia (regresja):* `auto` przy zalogowanym OAuth **i** zapisanym kluczu → używa OAuth;
+    usunięcie klucza (Remove) → `has_stored_key=false`; wybór „API key" bez klucza → czat odmawia (nie OAuth).
+
+- [ ] **A3 — ⭐ Function-calling na tokenie OAuth vs klucz API (KRYTYCZNE — pozostaje).**
+  - *Cel:* rozstrzygnąć otwarte pytanie z `PLAN_ROZBUDOWY.md` §0 — czy tool-use (web_search, MCP,
+    narzędzia agenta) działa na tokenie OAuth, czy **wymaga klucza API**. (Zwykły czat na OAuth już ✅;
+    chodzi o ścieżkę **z narzędziami**.)
+  - *Kroki:* `Model source` = `xAI account` (wymuś OAuth, bez klucza) → w czacie wymuś `web_search`
+    (sekcja B2). Potem to samo z agentem (narzędzie pliku, sekcja E1).
+  - *Oczekiwane:* tool-use działa na OAuth. **Jeśli NIE** (401/403 przy narzędziach) → decyzja:
+    wymusić ścieżkę klucza API dla agenta/narzędzi i udokumentować to. (Twardy przełącznik ułatwia ten test
+    — „xAI account" gwarantuje, że idzie token OAuth, nie klucz.)
+  - *Pułapki:* to przesądza, czy „zaloguj się i koduj" w ogóle jest możliwe bez klucza.
+
+---
+
+## Część B — Czat (Responses API)  🟠 P1
+
+> Rdzeń `/v1/responses` (streaming). Stare `search_parameters` zwraca **410 Gone** (sty 2026) —
+> upewnij się, że idzie ścieżka Responses, nie legacy. Vector stores `/v1/vector_stores` → **404**.
+
+- [ ] **B1 — Zwykły czat + UTF-8.** Wyślij wiadomość z polskimi znakami (ą/ś/ż/ó).
+  - *Oczekiwane:* płynny streaming, **poprawne polskie znaki** (nie „Å›/Ä…"). Potwierdza UTF-8 SSE.
+
+- [ ] **B2 — Live web_search.** Nagłówek czatu → tryb wyszukiwania **On** (Globe) → zapytaj o coś bieżącego.
+  - *Oczekiwane:* wskaźnik „Searching…", odpowiedź z **klikalnymi cytowaniami [1..n]**, panel Sources,
+    badge kosztu/tokenów. (To było potwierdzone 2026-06-05 — sprawdź czy nadal.)
+  - *Pułapki:* realne API zwraca w `title` cytowania NUMER odnośnika → `citationLabel` pokazuje wtedy
+    domenę zamiast numeru (kosmetyka).
+
+- [ ] **B3 — Live x_search.** Jak B2, ale wybierz źródło X → zapytaj o coś z X/Twittera.
+  - *Oczekiwane:* cytowania z X, sensowna treść live.
+
+- [ ] **B4 — Wizja (obraz na wejściu).** Model **grok-4.x** → dołącz obraz → „co jest na obrazku".
+  - *Oczekiwane:* poprawny opis. Na modelu spoza grok-4 → czytelny błąd gatingu.
+
+- [ ] **B5 — Q&A nad dokumentem.** Dołącz PDF (`input_file`) → zadaj pytanie o treść.
+  - *Oczekiwane:* odpowiedź z treści dokumentu. (Potwierdzone 2026-06-05 — re-test.)
+
+- [ ] **B6 — Wiedza projektu (lokalna).** W przełączniku projektu dodaj dokument do wiedzy → „Attach all" → pytanie.
+  - *Oczekiwane:* dokument dołączony jako `input_file`, odpowiedź z jego treści. (xAI nie ma vector stores → to lokalne.)
+
+- [ ] **B7 — Tryby wyszukiwania auto/on/off + koszt.** Przełącz Auto/On/Off; obserwuj licznik kosztu.
+  - *Oczekiwane:* „off" = brak narzędzi; „on" = wymusza search; badge sumuje koszt. *Do potwierdzenia:* czy `tool_choice="required"` dla „on" jest akceptowane przez API.
+
+- [ ] **B8 — Reasoning effort (M19-B9).** W czacie ustaw `EffortSelect` low/medium/high (model rozumujący).
+  - *Oczekiwane:* `reasoning.effort` trafia do API (dłuższe/krótsze rozumowanie), brak błędu 400 za nieznane pole.
+
+- [ ] **B9 — Generowanie mediów w czacie (M20).** „Narysuj kota" w czacie.
+  - *Oczekiwane:* `generate_image` woła się, obraz renderuje **inline** (ramka `artifact`), trafia do Galerii.
+    „Zrób wideo z…" → `generate_video` zakolejkowane, info „śledź w zakładce Video". (Edycja obrazu — już potwierdzona LIVE.)
+  - *Pułapki:* narzędzia mediów są AMBIENTNE (nie liczą się do `has_tools`); wyłącznik `CAELO_CHAT_MEDIA=0`.
+
+- [ ] **B10 — Eksport do Markdown (M19-B10).** Przycisk Export w czacie/History.
+  - *Oczekiwane:* poprawny `.md` z przebiegiem rozmowy (treść + cytowania).
+
+---
+
+## Część C — Twórczość: Image / Video  🟠 P1 (Image) / P2 (Video)
+
+> Jedna async kolejka `GenJob` (queued→running→done/failed/cancelled). Wideo poll **server-side**.
+
+- [ ] **C1 — Obraz text2img.** Image → prompt → Generate (`grok-imagine-image`).
+  - *Oczekiwane:* zadanie w kolejce → wynik w galerii, koszt na badge.
+
+- [ ] **C2 — Edycja obrazu (referencje ≤3).** Dodaj 1–3 obrazy referencyjne → edytuj.
+  - *Oczekiwane:* poprawny wynik; walidacja odrzuca >3 referencje.
+
+- [ ] **C3 — Warianty.** „Make variations" z istniejącego artefaktu.
+  - *Oczekiwane:* nowe warianty (data-URI z B4-pipeline).
+
+- [ ] **C4 — Wideo text2video.** Video → prompt → Generate (`grok-imagine-video-1.5-preview`).
+  - *Oczekiwane:* zadanie zakolejkowane, **poll server-side** (FastAPI nie blokuje), wynik w galerii.
+  - *Pułapki:* render trwa minuty — to oczekiwane; sprawdź że UI nie zawiesza się i poll działa po przeładowaniu.
+
+- [ ] **C5 — Wideo img2video.** Obraz jako pierwsza klatka → animuj.
+- [ ] **C6 — Wideo edit / extend.** Z artefaktu-wideo „Send to → Edit/Extend".
+  - *Oczekiwane:* op `edit`/`extend` przez kolejkę (`edit_video_job`/`extend_video_job`).
+- [ ] **C7 — Zarządzanie kolejką/galerią.** Cancel zadania w trakcie · Retry po failu · Delete artefaktu (rekord+plik) · fullscreen wideo · miniatury (1. klatka, `object-contain`).
+  - *Oczekiwane:* wszystkie działają; `total_cost` się sumuje.
+
+---
+
+## Część D — Głos  🟡 P2
+
+> Audio: renderer → sidecar → xAI; **klucz NIE dociera do renderera** (most dokłada `Authorization`).
+
+- [ ] **D1 — TTS (5 głosów + język).** Settings → Voice → wybierz głos/język → read-aloud odpowiedzi.
+  - *Oczekiwane:* odtwarzanie, koszt na badge. *Pułapka:* `TTS_COST_PER_1K_CHARS=0.015` to **strojalny szacunek** (cena znakowa nie jest publiczna) — zweryfikuj realny koszt na fakturze.
+
+- [ ] **D2 — STT batch (dyktowanie).** Mikrofon w czacie/agencie (`useDictation`) → mów → tekst.
+  - *Oczekiwane:* poprawna transkrypcja wstrzyknięta do composera; koszt z czasu trwania.
+
+- [ ] **D3 — STT stream (partiale).** Tryb live STT (`/voice/stt/stream`).
+  - *Oczekiwane:* częściowe transkrypty na żywo + finał.
+  - *Pułapki:* ⚠️ **protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY** — `parseStt` parsuje warianty defensywnie. Jeśli śmieci/cisza: sprawdź sample-rate i format ramek. To główny znak zapytania głosu.
+
+- [ ] **D4 — Talk (pipeline converse) + barge-in.** Tryb Talk → mów → odpowiedź głosowa.
+  - *Oczekiwane:* stany listening/thinking/speaking; **przerwanie mową = barge-in** (pomija TTS); turę zapisuje do M9. Opcjonalnie live-search w Talk.
+
+- [ ] **D5 — Realtime (Live).** Tryb Live (`/voice/realtime`, `grok-voice-latest`).
+  - *Oczekiwane:* niskolatencyjna rozmowa głos↔głos.
+
+- [ ] **D6 — Read-aloud + D7 koszt sesji.** Czytanie odpowiedzi głosem z ustawień; badge sumuje audio per sesja.
+
+---
+
+## Część E — Agent kodowania (Code)  🟠 P1
+
+> **Table stakes** trybu Code. Testuj na **kopii** prawdziwego repo (agent pisze pliki).
+> Najpierw potwierdź A3 (czy narzędzia działają na Twoim aucie).
+
+- [ ] **E1 — Pełny bieg agenta.** Code → ustaw workspace → zadanie typu „przeczytaj X i dodaj funkcję Y".
+  - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
+
+- [ ] **E2 — Diff approval.** Mutacja → karta zatwierdzenia z **diffem** (accept/reject per plik); plik binarny → znacznik „binary"/„new".
+  - *Oczekiwane:* accept zapisuje, reject pomija; diff czytelny.
+
+- [ ] **E3 — Tryb planowania.** Selektor Mode → **plan** → zadanie wymagające zmian.
+  - *Oczekiwane:* READONLY działa, MUTATING „Blocked in plan mode", plan NIE tworzy checkpointu.
+
+- [ ] **E4 — 4 tryby.** Przejdź ask → accept-edits → plan → bypass; sprawdź baner per tryb (ostrzeżenie dla bypass).
+  - *Oczekiwane:* accept-edits auto-akceptuje write/edit; bypass wszystko.
+
+- [ ] **E5 — Checkpointy + undo.** Po kilku turach → popover „Checkpoints & undo" → „Undo to here" / „Undo all".
+  - *Oczekiwane:* pliki wracają (odwrotna kolejność), utworzone usunięte; `run_command` → baner „partial undo".
+  - *Test wielu plików:* zmień ≥3 pliki w 1 turze, cofnij — wszystkie wracają.
+
+- [ ] **E6 — CAELO.md wpływa na zachowanie.** Utwórz `CAELO.md` z regułą (np. „zawsze dodawaj docstring") → zadanie.
+  - *Oczekiwane:* agent stosuje regułę. (Też: edytor reguł w nagłówku Code.)
+
+- [ ] **E7 — Sesje kodu (M21).** Wykonaj turę → menu „Sessions" → wznów sesję; filtr po projekcie/folderze + szukaj tekstem.
+  - *Oczekiwane:* historia wczytana, kontekst zachowany; ramka WS `session`.
+
+- [ ] **E8 — Komendy + @-pliki w composerze (M20).** Wpisz `/` (autocomplete komend, np. `/refactor`) i `@nazwa` (fuzzy po plikach).
+  - *Oczekiwane:* podpowiedzi, wstawienie referencji pliku do promptu.
+
+- [ ] **E9 — Reguły glob (M19-B4).** Dodaj `--deny Bash(rm*)` / `--allow Edit(src/**)` (CLI lub `<ws>/.caelo/permissions.json` / `PUT /permissions/rules`).
+  - *Oczekiwane:* **deny > allow**; deny = twarda odmowa nawet w bypass; allow auto-akceptuje. **P0-1 zachowane:** `Bash(...)` allow NIE omija metaznaków (`git && rm` dalej blokowane).
+
+- [ ] **E10 — LSP diagnostyka (M19-B3).** Skonfiguruj realny serwer (np. pyright/tsserver) w `lsp.json` (global) lub `<ws>/.caelo/lsp.json` → Extensions → Language Servers.
+  - *Oczekiwane:* po edycji pliku ramka WS `diagnostics` (squiggle w panelu agenta); narzędzie `lsp` widoczne tylko gdy serwer skonfigurowany.
+  - *Pułapki:* LSP używa **Content-Length framing** (binarny stdio) — inaczej niż MCP.
+
+---
+
+## Część F — Subagenci / zespoły (M17)  🟡 P2
+
+- [ ] **F1 — Delegacja end-to-end.** Zadanie złożone → agent woła `delegate` → subagenci (researcher/reviewer/implementer/tester).
+  - *Oczekiwane:* TeamView (drzewo) pokazuje subagentów równolegle; kontekst rodzica czysty (1 `tool` = streszczenia). Brak `delegate` u subagentów (głębia 1).
+
+- [ ] **F2 — Merge review (worktree).** Mutujący subagent kończy → „Review merge": JEDEN diff + wykrycie konfliktu (ta sama ścieżka w >1 worktree); apply → checkpoint (cofalny), reject → discard.
+- [ ] **F3 — Cascade stop.** Stop orkiestratora w trakcie → wszystkie subagenty się zatrzymują (`run_command` tree-kill).
+- [ ] **F4 — Skille-orkiestratory (M19-B6).** Włącz skill `implement`/`review`/`design`/`best-of-n` (Extensions → Skills) → uruchom.
+  - *Oczekiwane:* skill steruje `delegate`+rolami; sensowny przebieg wielo-agentowy.
+
+---
+
+## Część G — Rozszerzalność: MCP / headless / ACP / interop  🟡 P2
+
+- [ ] **G1 — Realny serwer MCP (stdio).** Dodaj serwer (np. filesystem/git) w Extensions → MCP → Start.
+  - *Oczekiwane:* narzędzia `mcp__<srv>__<tool>` wylistowane; subproces hardened (scrubbed_env, tree-kill; Windows `.cmd`→`cmd /c`).
+
+- [ ] **G2 — MCP w agencie.** Agent woła narzędzie MCP mutujące → karta approval `mcp_tool_call` (gate po `readOnlyHint`).
+- [ ] **G3 — MCP w czacie.** Czat woła narzędzie MCP (function-call loop). Mutujące działa tylko gdy **wcześniej dopuszczone** na allowliście, inaczej odmowa z komunikatem.
+- [ ] **G4 — Remote MCP (native).** Skonfiguruj `tools=[{type:mcp,server_url,…}]` → wykonanie po stronie xAI (bez lokalnej bramki).
+- [ ] **G5 — Interop (M19-B5).**
+  - `~/.claude.json` + `<ws>/.mcp.json` → serwery MCP importowane `enabled=False` (autostart pomija).
+  - `AGENTS.md`/`CLAUDE.md` obok `CAELO.md` → sklejane do promptu agenta.
+  - `~/.claude/skills` + `<ws>/.claude|.grok/skills` → skille odkryte (badge źródła).
+  - *Pułapka:* odczyt interopu jest NIEDESTRUKCYJNY — nie nadpisuj cudzych plików `.claude`.
+- [ ] **G6 — Headless CLI (M19-B1).**
+  ```powershell
+  caelo_core\.venv\Scripts\python -m caelo_core run -p "Wypisz pliki i streść README" --cwd <kopia_repo> --output-format json
+  caelo_core\.venv\Scripts\python -m caelo_core run -p "Dodaj test do foo()" --cwd <kopia> --permission-mode accept-edits --allow "Edit(**)"
+  ```
+  - *Oczekiwane:* `plain`/`json`/`streaming-json` dają poprawny strumień; **fail-closed** (bez `--permission-mode bypass/accept-edits` lub reguły allow mutacje są odrzucane); sesja zapisana w `DATA_DIR/sessions/`.
+
+- [ ] **G7 — ACP (M19-B2).** W Zed/Neovim/Emacs skonfiguruj agenta ACP: `python -m caelo_core acp`.
+  - *Oczekiwane:* JSON-RPC stdio działa, `session/request_permission` poprawnie korelowane, ramki → `session/update`.
+
+---
+
+## Część H — Funkcje-widma OFF-by-default  ⚪ P3 (DECYZJA: włączyć po teście ALBO usunąć)
+
+> To kod zbudowany, **wyłączony i niezweryfikowany**. Każda pozycja: zweryfikuj → jeśli działa,
+> rozważ ON-by-default; jeśli nie/niepotrzebna → **usuń, by nie utrzymywać martwego kodu** (SWOT W3).
+
+- [ ] **H1 — ⭐ Embeddingi spike (gate dla całego B8).**
+  ```powershell
+  caelo_core\.venv\Scripts\python caelo_core\tools\embeddings_check.py --live
+  ```
+  - *Oczekiwane:* `POST /v1/embeddings` zwraca wektory (~1024 wymiarów).
+  - *Decyzja:* **jeśli 404/400 → xAI nie ma embeddingów → odłóż/usuń B8 (NIE wprowadzaj torch).**
+
+- [ ] **H2 — Pamięć hybrydowa (zależy od H1).** `$env:CAELO_MEMORY="1"; npm run dev` → agent w 2. sesji odwołuje się do faktu z 1.
+  - *Oczekiwane:* recall wstrzyknięty na 1. turze (kNN∪FTS5). Tylko jeśli H1 = OK.
+
+- [ ] **H3 — Sandbox OS (Linux/macOS).** Na Linux/mac:
+  ```bash
+  python -m caelo_core run -p "spróbuj zapisać poza workspace" --cwd <ws> --sandbox strict
+  ```
+  - *Oczekiwane:* realny **bwrap** (Linux) / **sandbox-exec seatbelt** (macOS) blokuje zapis poza CWD i sieć (profil strict). Windows = no-op (oczekiwane).
+
+- [ ] **H4 — web_fetch (M19-B13).** `$env:CAELO_WEB_FETCH="1"; npm run dev` → poproś agenta o pobranie strony.
+  - *Oczekiwane:* https-only, SSRF-guard blokuje loopback/IP prywatne; narzędzie gated (Always-allow per host). Bez flagi ukryte.
+
+- [ ] **H5 — git worktree (M19-B12).** W repo git: `python -m caelo_core run -p "…" --cwd <repo> --worktree` (lub `$env:CAELO_GIT_WORKTREE="1"`).
+  - *Oczekiwane:* mutujący subagent dostaje realny `git worktree` (start z HEAD), diff vs HEAD, sprzątanie `git worktree remove`.
+
+- [ ] **H6 — auto-compact (M19-B10).** `$env:CAELO_AUTOCOMPACT="1"` → długa sesja agenta.
+  - *Oczekiwane:* historia przycinana na granicy `user` (balans tool_call↔tool zachowany), deterministyczny digest, bez utraty kontraktu xAI.
+
+---
+
+## Część I — Pakiety / marketplace (M16)  ⚪ P3
+
+- [ ] **I1 — Fetch registry.** Extensions → Marketplace → Browse (sieć).
+  - *Oczekiwane:* lista z `PACKAGES_REGISTRY_URL` (https-only + cap).
+- [ ] **I2 — Instalacja `.caelopkg`.** Import → ConsentCard (uprawnienia/ryzyko) → Install.
+  - *Oczekiwane:* odmowa bez zgody I przy złej integralności (tamper/sha256); skille install **disabled**, MCP `enabled=False`.
+- [ ] **I3 — Export/Share.** Share na panelu Skills/Commands/MCP/Templates → plik `.caelopkg`.
+  - *Oczekiwane:* sekrety (`authorization`/`env`) **zdjęte** przy eksporcie.
+
+---
+
+## Część J — Cross-platform (M15)  ⚪ P3 (gdy masz dostęp do mac/Linux)
+
+- [ ] **J1 — Build mac/Linux.** `cd desktop; npm run dist:full` na danym OS (NSIS/dmg/AppImage/deb).
+  - *Oczekiwane:* instalator się buduje (3 kroki sieciowe wg rozpisu M15: devDeps, electron-updater, sekrety GitHub).
+- [ ] **J2 — PTY terminal cross-platform.** Terminal działa (stdlib `pty` na Unix, pywinpty na Win).
+- [ ] **J3 — tree-kill POSIX.** Stop długiego `run_command` zabija drzewo procesów (SIGTERM→SIGKILL). *(Pokrywa się z H3.)*
+
+---
+
+## Część K — Terminal  ⚪ P3
+
+- [ ] **K1 — Terminal (pywinpty).** `caelo_core\.venv\Scripts\pip install pywinpty` → Terminal w apce.
+  - *Oczekiwane:* interaktywny shell; **env scrubbed** (brak `XAI_API_KEY`/`CAELO_CORE_TOKEN` — sprawdź `echo $env:XAI_API_KEY` w terminalu apki = puste).
+
+---
+
+## Po weryfikacji — co zrobić z wynikami
+
+1. **Zaktualizuj tabelę wyników** (góra dokumentu) i wstaw daty/notatki przy zadaniach.
+2. **Skoryguj docs** — w `CLAUDE.md` i planach zamień „zrobione (mock)" na realny status
+   (✅ działa / ❌ / ⏭️ odłożone) — to domyka dług „dokumentacja przecenia kompletność" (SWOT W2).
+3. **Decyzje per funkcja-widmo (H)** — włącz domyślnie albo usuń (SWOT W3).
+4. **Rozważ publikację** (push + remote) gdy P0+P1 są ✅ (SWOT — brak remote = projekt „OSS" bez repo).
+
+> **Pułapki ogólne (z historii projektu):** stare `search_parameters` → 410; vector stores → 404
+> (wiedza = lokalny `input_file`); cytowania mogą mieć NUMER w `title`; STT-stream sample-rate
+> niepotwierdzony; tool-use na OAuth = otwarte (A3); koszt TTS = szacunek. Self-checki ≠ live.
