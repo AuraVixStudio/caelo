@@ -698,7 +698,14 @@ export function AgentPanel({
             Ask the agent to read, edit or run code in the workspace.
           </p>
         ) : (
-          entries.map((e) => <EntryView key={e.id} entry={e} onApprove={approve} />)
+          entries.map((e) => (
+            <EntryView
+              key={e.id}
+              entry={e}
+              onApprove={approve}
+              streaming={busy && e.kind === 'assistant' && e.id === curAssistant.current}
+            />
+          ))
         )}
       </div>
 
@@ -1150,10 +1157,12 @@ function SessionsMenu({
 
 export function EntryView({
   entry,
-  onApprove
+  onApprove,
+  streaming = false
 }: {
   entry: Entry
   onApprove: (id: string, decision: 'accept' | 'reject' | 'always') => void
+  streaming?: boolean
 }) {
   if (entry.kind === 'user') {
     return (
@@ -1175,7 +1184,16 @@ export function EntryView({
       <div>
         <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Caelo</div>
         {entry.text ? (
-          <Markdown text={entry.text} />
+          // Podczas streamingu renderuj TEKST ZWYKŁY (pre-wrap). Markdown re-parsowany
+          // co chunk pokazuje puste wiersze tabel / <hr> z częściowych „---" jako „paski"
+          // (potwierdzone wizualnie). Pełny markdown dopiero po zakończeniu tury.
+          streaming ? (
+            <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
+              {entry.text}
+            </div>
+          ) : (
+            <Markdown text={entry.text} />
+          )
         ) : (
           <span className="text-lg leading-none tracking-widest text-muted">…</span>
         )}

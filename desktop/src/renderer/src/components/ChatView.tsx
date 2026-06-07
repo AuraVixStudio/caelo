@@ -243,6 +243,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
   index,
   isSpeaking,
   basedOnDocument,
+  streaming = false,
   conn,
   onCopy,
   onSpeak
@@ -251,6 +252,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
   index: number
   isSpeaking: boolean
   basedOnDocument: boolean
+  streaming?: boolean
   conn: Conn
   onCopy: (content: string) => void
   onSpeak: (idx: number, content: string) => void
@@ -297,7 +299,16 @@ const ChatMessageRow = memo(function ChatMessageRow({
         ) : null}
       </div>
       {m.content ? (
-        <Markdown text={m.content} />
+        // Podczas streamingu render tekstu zwykłego — markdown re-parsowany co chunk
+        // pokazuje puste wiersze tabel / <hr> z częściowych „---" jako „paski". Pełny
+        // markdown dopiero po zakończeniu odpowiedzi.
+        streaming ? (
+          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+            {m.content}
+          </div>
+        ) : (
+          <Markdown text={m.content} />
+        )
       ) : (
         <span className="text-2xl leading-none tracking-widest text-muted">…</span>
       )}
@@ -933,6 +944,9 @@ export function ChatView({ conn }: { conn: Conn }) {
                   basedOnDocument={
                     m.role === 'assistant' &&
                     !!messages[i - 1]?.attachments?.some((a) => a.kind === 'document')
+                  }
+                  streaming={
+                    stream.streaming && m.role === 'assistant' && i === messages.length - 1
                   }
                   conn={conn}
                   onCopy={copyMessage}
