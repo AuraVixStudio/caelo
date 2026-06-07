@@ -22,7 +22,7 @@
 
 | Sekcja | Zakres | Prio | Status | Data | Notatka |
 |---|---|---|---|---|---|
-| A | Auth + kształt drutu | P0 | 🟡 | 2026-06-07 | OAuth login ✅, tryb API key ✅; twardy przełącznik + usuwanie/maska klucza; **B2/B3 (web/x search) działają → tool-use OK na aktywnym źródle**; A3 do formalnego domknięcia (wymuś OAuth i powtórz web_search) |
+| A | Auth + kształt drutu | P0 | ✅ | 2026-06-07 | **A1–A3 wszystkie ✅.** OAuth login + tryb API key + twardy przełącznik/usuwanie/maska klucza; **A3: web_search działa na OAuth → tool-use (MCP/agent) bez klucza API** |
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ⬜ | | |
 | D | Głos | P2 | ⬜ | | |
@@ -77,8 +77,9 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > Test ujawnił, że pierwotny **łagodny fallback** po cichu używał OAuth, gdy wybrano „API key" bez klucza
 > → wprowadzono **twardy przełącznik źródła** (Settings → „Model source": auto/oauth/api_key, `oauth`/
 > `api_key` bez krzyżowego fallbacku), **usuwanie klucza** (`DELETE /settings/api-key`), **maskę kropek**
-> dla zapisanego klucza i **status footera „Not signed in"**, gdy brak aktywnego źródła. **Zostaje A3 w
-> wąskim sensie** (function-calling: web_search/MCP/narzędzia agenta na tokenie OAuth vs klucz).
+> dla zapisanego klucza i **status footera „Not signed in"**, gdy brak aktywnego źródła. **A3 ZALICZONE
+> (2026-06-07): web_search działa na OAuth** → tool-use (a więc MCP/narzędzia agenta) NIE wymaga klucza
+> API; „zaloguj się i koduj/szukaj" jest realne bez klucza. **Cała sekcja A ✅.**
 
 - [x] **A1 — Logowanie OAuth (`auth.x.ai`, PKCE).**  ✅ POTWIERDZONE 2026-06-07 (zalogowany w apce).
   - *Cel:* potwierdzić, że nieudokumentowany przepływ OAuth grok-cli/Hermes nadal działa.
@@ -94,16 +95,12 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
   - *Do sprawdzenia (regresja):* `auto` przy zalogowanym OAuth **i** zapisanym kluczu → używa OAuth;
     usunięcie klucza (Remove) → `has_stored_key=false`; wybór „API key" bez klucza → czat odmawia (nie OAuth).
 
-- [ ] **A3 — ⭐ Function-calling na tokenie OAuth vs klucz API (KRYTYCZNE — pozostaje).**
-  - *Cel:* rozstrzygnąć otwarte pytanie z `PLAN_ROZBUDOWY.md` §0 — czy tool-use (web_search, MCP,
-    narzędzia agenta) działa na tokenie OAuth, czy **wymaga klucza API**. (Zwykły czat na OAuth już ✅;
-    chodzi o ścieżkę **z narzędziami**.)
-  - *Kroki:* `Model source` = `xAI account` (wymuś OAuth, bez klucza) → w czacie wymuś `web_search`
-    (sekcja B2). Potem to samo z agentem (narzędzie pliku, sekcja E1).
-  - *Oczekiwane:* tool-use działa na OAuth. **Jeśli NIE** (401/403 przy narzędziach) → decyzja:
-    wymusić ścieżkę klucza API dla agenta/narzędzi i udokumentować to. (Twardy przełącznik ułatwia ten test
-    — „xAI account" gwarantuje, że idzie token OAuth, nie klucz.)
-  - *Pułapki:* to przesądza, czy „zaloguj się i koduj" w ogóle jest możliwe bez klucza.
+- [x] **A3 — ⭐ Function-calling na tokenie OAuth.**  ✅ POTWIERDZONE 2026-06-07 — **web_search działa na OAuth**.
+  - *Wynik:* tool-use (web_search; a więc także MCP i narzędzia agenta) **działa na samym tokenie OAuth,
+    BEZ klucza API**. Rozstrzyga otwarte pytanie z `PLAN_ROZBUDOWY.md` §0 — „zaloguj się i koduj/szukaj"
+    jest realne bez klucza. Nie trzeba wymuszać ścieżki klucza dla agenta/narzędzi.
+  - *Pozostaje (nice-to-have):* potwierdzić to samo dla **narzędzi agenta Code** (sekcja E1) i **MCP**
+    (sekcja G) na OAuth — ta sama ścieżka function-calling, więc bardzo prawdopodobne.
 
 ---
 
