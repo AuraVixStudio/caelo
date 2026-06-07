@@ -22,8 +22,8 @@
 
 | Sekcja | Zakres | Prio | Status | Data | Notatka |
 |---|---|---|---|---|---|
-| A | Auth + kształt drutu | P0 | 🟡 | 2026-06-07 | OAuth login ✅, tryb API key ✅; dodano twardy przełącznik źródła + usuwanie/maska klucza; A3 (function-calling) do potwierdzenia |
-| B | Czat (Responses API) | P1 | ⬜ | | |
+| A | Auth + kształt drutu | P0 | 🟡 | 2026-06-07 | OAuth login ✅, tryb API key ✅; twardy przełącznik + usuwanie/maska klucza; **B2/B3 (web/x search) działają → tool-use OK na aktywnym źródle**; A3 do formalnego domknięcia (wymuś OAuth i powtórz web_search) |
+| B | Czat (Responses API) | P1 | 🟡 | 2026-06-07 | B1–B6 ✅ (UTF-8, web/x search, wizja, PDF Q&A, wiedza projektu); zostaje B7–B10 (tryby search/koszt, effort, media-gen, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ⬜ | | |
 | D | Głos | P2 | ⬜ | | |
 | E | Agent kodowania | P1 | ⬜ | | |
@@ -112,25 +112,33 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > Rdzeń `/v1/responses` (streaming). Stare `search_parameters` zwraca **410 Gone** (sty 2026) —
 > upewnij się, że idzie ścieżka Responses, nie legacy. Vector stores `/v1/vector_stores` → **404**.
 
-- [ ] **B1 — Zwykły czat + UTF-8.** Wyślij wiadomość z polskimi znakami (ą/ś/ż/ó).
+> **Postęp 2026-06-07 (testy na żywo u usera): B1–B6 ✅ POTWIERDZONE.** UTF-8, live web_search
+> (cytowania + Sources x.ai/imagine.art/the-decoder/klingaio, „4 searches · 20k tokens"), live
+> x_search (źródła x.com, trendy PL), wizja (opis obrazu cyberpunk), Q&A nad PDF (instrukcja-logowania),
+> wiedza projektu (CAELO.md, „Based on document"). **WAŻNE dla A3:** web_search + x_search to
+> SERWEROWE narzędzia xAI — skoro działają, **tool-use działa na aktywnym źródle auth**. Jeśli podczas
+> tych testów aktywny był OAuth (footer „Connected", nie „Not signed in") → **A3 w praktyce zaliczone**;
+> by domknąć formalnie: ustaw „Model source" = `xAI account` i powtórz web_search (sekcja A3).
+
+- [x] **B1 — Zwykły czat + UTF-8.**  ✅ 2026-06-07. Polskie znaki renderują się poprawnie.
   - *Oczekiwane:* płynny streaming, **poprawne polskie znaki** (nie „Å›/Ä…"). Potwierdza UTF-8 SSE.
 
-- [ ] **B2 — Live web_search.** Nagłówek czatu → tryb wyszukiwania **On** (Globe) → zapytaj o coś bieżącego.
+- [x] **B2 — Live web_search.**  ✅ 2026-06-07. Cytowania [1..4] + panel Sources + „4 searches · 20k tokens".
   - *Oczekiwane:* wskaźnik „Searching…", odpowiedź z **klikalnymi cytowaniami [1..n]**, panel Sources,
     badge kosztu/tokenów. (To było potwierdzone 2026-06-05 — sprawdź czy nadal.)
   - *Pułapki:* realne API zwraca w `title` cytowania NUMER odnośnika → `citationLabel` pokazuje wtedy
     domenę zamiast numeru (kosmetyka).
 
-- [ ] **B3 — Live x_search.** Jak B2, ale wybierz źródło X → zapytaj o coś z X/Twittera.
+- [x] **B3 — Live x_search.**  ✅ 2026-06-07. Trendy PL ze źródłami x.com.
   - *Oczekiwane:* cytowania z X, sensowna treść live.
 
-- [ ] **B4 — Wizja (obraz na wejściu).** Model **grok-4.x** → dołącz obraz → „co jest na obrazku".
+- [x] **B4 — Wizja (obraz na wejściu).**  ✅ 2026-06-07. Poprawny opis załączonego obrazu (grok-4.3).
   - *Oczekiwane:* poprawny opis. Na modelu spoza grok-4 → czytelny błąd gatingu.
 
-- [ ] **B5 — Q&A nad dokumentem.** Dołącz PDF (`input_file`) → zadaj pytanie o treść.
+- [x] **B5 — Q&A nad dokumentem.**  ✅ 2026-06-07. Odpowiedź z treści PDF, badge „Based on document".
   - *Oczekiwane:* odpowiedź z treści dokumentu. (Potwierdzone 2026-06-05 — re-test.)
 
-- [ ] **B6 — Wiedza projektu (lokalna).** W przełączniku projektu dodaj dokument do wiedzy → „Attach all" → pytanie.
+- [x] **B6 — Wiedza projektu (lokalna).**  ✅ 2026-06-07. CAELO.md dołączony, „Based on document".
   - *Oczekiwane:* dokument dołączony jako `input_file`, odpowiedź z jego treści. (xAI nie ma vector stores → to lokalne.)
 
 - [ ] **B7 — Tryby wyszukiwania auto/on/off + koszt.** Przełącz Auto/On/Off; obserwuj licznik kosztu.
