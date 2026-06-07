@@ -101,9 +101,9 @@ Your key is stored locally, **never returned** by the API (`/settings` exposes o
 That's it — start chatting, generate media, or open a workspace in the **Code**
 module to use the agent.
 
-> **New to the app?** The **[User Guide](docs/USER_GUIDE.md)** walks through every module
+> **New to the app?** The **[User Guide](docs/guides/USER_GUIDE.md)** walks through every module
 > (Chat, Code, Image, Video, Gallery, Voice, History, Extensions, Settings) step by step.
-> Integrating? See the **[API reference](docs/API.md)**.
+> Integrating? See the **[API reference](docs/guides/API.md)**.
 
 ## Modules
 
@@ -192,10 +192,11 @@ a per-OS runner (cross-compiling PyInstaller is impractical).
 
 ## Documentation
 
-- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — **end-user guide**: every module, step by step.
-- [`docs/API.md`](docs/API.md) — backend **REST/WebSocket API reference** (96 routes + 6 WS).
+- [`docs/guides/USER_GUIDE.md`](docs/guides/USER_GUIDE.md) — **end-user guide**: every module, step by step.
+- [`docs/guides/API.md`](docs/guides/API.md) — backend **REST/WebSocket API reference** (96 routes + 6 WS).
 - [`CLAUDE.md`](CLAUDE.md) — architecture source of truth + hardening history.
-- [`docs/README.md`](docs/README.md) — documentation index.
-- [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md) — the rebuild plan and phase status.
+- [`docs/README.md`](docs/README.md) — documentation index (guides + plans).
+- [`docs/plans/REBUILD_PLAN.md`](docs/plans/REBUILD_PLAN.md) — the rebuild plan and phase status;
+  [`docs/plans/PLAN_ROZBUDOWY.md`](docs/plans/PLAN_ROZBUDOWY.md) — the all-in-one hub roadmap (M9–M19).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) ·
   [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [`CLA.md`](CLA.md).

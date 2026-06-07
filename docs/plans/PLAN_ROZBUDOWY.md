@@ -2,21 +2,33 @@
 
 > **Kierunek (ustalony):** open-source **all-in-one hub Grok** (czat + image + video +
 > voice + code w jednym), Windows teraz → macOS/Linux docelowo, model **BYO-key**.
-> Rozszerza `docs/REBUILD_PLAN.md`. Numeracja milestone'ów od M9.
+> Rozszerza `REBUILD_PLAN.md` (ten sam folder). Numeracja milestone'ów od M9.
 >
 > **Zmiana vs v1:** agent kodujący NIE jest już rdzeniem — jest jednym z pięciu trybów.
 > Środek ciężkości przesunięty na **spójność między trybami** i **jakość każdego trybu**.
 >
-> **Postęp (2026-06-05):** ✅ **M9** (szkielet huba) · ✅ **M10** (czat: Responses API + live search) ·
+> **Postęp (2026-06-07):** ✅ **M9** (szkielet huba) · ✅ **M10** (czat: Responses API + live search) ·
 > ✅ **M11** (twórczość: Image/Video — jednolita kolejka `GenJob` + galeria + koszt) ·
 > ✅ **M12** (głos: dyktowanie + Talk-pipeline + read-aloud + koszt) ·
 > ✅ **M13** (agent: zaufanie — diffy/plan/checkpointy/GROK.md; ⬜ tylko per-hunk F5) ·
 > ✅ **M14** (rozszerzalność: klient MCP stdio + komendy + hooki + skille — B1–B6 + F1–F5) ·
 > ✅ **M15** (OSS + cross-platform: rebranding „Caelo" + Apache-2.0/CLA + PTY/tree-kill cross-platform +
 > gitleaks + CI + auto-update + pakowanie mac/Linux — M15-1/1b/2–9).
-> Następne: **M17** (subagenci — duża część już w drzewie roboczym). Rozpisy:
+> ✅ **M16** (społeczność: marketplace `.caelopkg`) · ✅ **M17** (subagenci: role + worktree + `TeamManager`) ·
+> ✅ **M18** (runda jakości / SWOT: dekompozycja `state.py`, pytest, testy frontu).
+> ✅ **M19** (parytet z oficjalnym Grok CLI — z analizy dystrybucji Grok CLI) — **Tier-1/2/3 KOMPLETNE** (kod
+> w drzewie roboczym, selfchecki zielone; zostają weryfikacje LIVE u usera):
+> **Tier-1** (§0 `AgentRunner` · B1 headless/CLI · B2 ACP stdio · B3 LSP · B4 reguły glob) ·
+> **Tier-2** (B5 interop AGENTS/CLAUDE.md + `.mcp.json`/`~/.claude` · B6 skille-orkiestratory · B7 sandbox OS
+> seatbelt/bwrap · B8 pamięć hybrydowa embeddings+kNN) · **Tier-3** (B9 effort · B10 eksport-md/auto-compact ·
+> B11 persony+I/O · B12 realne git-worktree · B13 web_fetch · B14 config hierarchiczny). Selfchecki:
+> `agent_selfcheck` 184+, nowe `headless_check`/`acp_check`/`lsp_check`/`sandbox_check`/`embeddings_check`,
+> `mcp_check` 36. **Zostają weryfikacje LIVE u usera** (xAI/exec blokowane w sandboxie) + spike
+> **B0 `cli-chat-proxy` NIEZACZĘTY**. Rozpisy:
 > `PLAN_M9_SZKIELET.md`, `PLAN_M10_CZAT.md`, `PLAN_M11_TWORCZOSC.md`, `PLAN_M12_GLOS.md`,
-> `PLAN_M13_AGENT_ZAUFANIE.md`, `PLAN_M14_ROZSZERZALNOSC.md`.
+> `PLAN_M13_AGENT_ZAUFANIE.md`, `PLAN_M14_ROZSZERZALNOSC.md`, `PLAN_M16_SPOLECZNOSC.md`,
+> `PLAN_M17_SUBAGENCI.md`, `PLAN_M19_PARYTET_GROK_CLI.md` + `PLAN_M19_TIER1.md` + `PLAN_M19_TIER2.md` +
+> `PLAN_M19_TIER3.md`.
 
 ---
 

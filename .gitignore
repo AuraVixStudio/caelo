@@ -80,3 +80,18 @@ worktrees/
 # M16: zainstalowane szablony projektów użytkownika (config.TEMPLATES_DIR). Wbudowane
 # szablony leżą w caelo_core/packages/templates/builtin/ (wersjonowane, NIE tu).
 /templates/
+# M19-B1: historia sesji trybu headless (DATA_DIR/sessions/<id>.json). W dev DATA_DIR =
+# korzeń repo, więc bez tego pliki sesji CLI wyciekłyby do commita.
+/sessions/
+# M19-B3: globalny konfig serwerów LSP (DATA_DIR/lsp.json). Konfig PROJEKTOWY to
+# <ws>/.caelo/lsp.json (decyzja repo użytkownika). W dev DATA_DIR = korzeń repo.
+/lsp.json
+# M19-B7: globalny konfig sandboxa (DATA_DIR/sandbox.json) + log zdarzeń (JSONL).
+# Konfig PROJEKTOWY to <ws>/.caelo/sandbox.json (decyzja repo użytkownika). Dev DATA_DIR = repo.
+/sandbox.json
+/sandbox-events.jsonl
+
+# ── Materiały referencyjne / build (NIE część produktu) ──
+# Lokalna kopia oficjalnej dystrybucji Grok CLI używana jako materiał źródłowy do
+# analizy parytetu M19 — nie commitujemy jej do repo OSS.
+/PLIKI Z GROK BUILD/

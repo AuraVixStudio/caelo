@@ -8,7 +8,7 @@ labels: ["package", "submission"]
 <!--
 Caelo packages are shared as a single .caelopkg file (a ZIP with manifest.json +
 payload/). The registry is just a git-based index — no hosted service. See
-docs/PACKAGES.md for the format and how to build a package (Extensions →
+docs/guides/PACKAGES.md for the format and how to build a package (Extensions →
 Marketplace → Export, or the /packages/export route).
 
 By submitting you confirm the package is yours to share (or appropriately

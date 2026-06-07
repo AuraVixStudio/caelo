@@ -8,7 +8,7 @@ Desktop app for **Grok (xAI)** in the style of Claude Code / Codex: chat, image/
 generation & editing, and an **agentic coding module** with local file access. It is a
 **monorepo rebuild** of an older customtkinter (Python) app into **Electron (frontend) +
 Python FastAPI sidecar (backend)**. The mature xAI logic (OAuth, SSE streaming, media) is
-**reused, not rewritten**. Full plan & phase status live in [`docs/REBUILD_PLAN.md`](docs/REBUILD_PLAN.md)
+**reused, not rewritten**. Full plan & phase status live in [`docs/plans/REBUILD_PLAN.md`](docs/plans/REBUILD_PLAN.md)
 (source of truth). The old customtkinter app has been **removed from the repo** (kept as an external
 backup) — Phase 8 closed.
 
@@ -61,7 +61,7 @@ rejects `..`/absolute escapes); `run_command` is NOT sandboxed in command conten
 The approval allowlist is persisted to `caelo_permissions.json` and shared by the agent WS and the
 REST `/permissions` routes.
 
-**Agent hardening (M1, see [`docs/PLAN_NAPRAWY.md`](docs/PLAN_NAPRAWY.md) P0-1…P0-8 — all done):**
+**Agent hardening (M1, see [`docs/plans/PLAN_NAPRAWY.md`](docs/plans/PLAN_NAPRAWY.md) P0-1…P0-8 — all done):**
 `run_command` **rejects shell metacharacters** (`command_metachars` in `permissions.py`) so the
 "Always allow" allowlist can't be bypassed by chaining (`git && rm`); the allowlist key is the full
 normalized command, not the exe name. It runs with a **scrubbed env** (no `CAELO_CORE_TOKEN`/
@@ -72,7 +72,7 @@ size/binary skips. Interrupted `tool_calls` get synthetic `tool` results so hist
 (xAI contract). Writes are atomic (`tools.atomic_write_text`). Don't regress these — `agent_selfcheck.py`
 asserts them (81 checks).
 
-**Round-2 hardening (M5–M6, see [`docs/PLAN_NAPRAWY_2.md`](docs/PLAN_NAPRAWY_2.md) — done):** the
+**Round-2 hardening (M5–M6, see [`docs/plans/PLAN_NAPRAWY_2.md`](docs/plans/PLAN_NAPRAWY_2.md) — done):** the
 agent WS now uses the shared **`WsStream`** (bounded queue + worker join on disconnect, so the agent
 can't write files / run commands after the socket is gone — P0-9); `command_metachars` is
 **POSIX-aware** and `run_command` runs `shell=False`+`shlex` off-Windows (P0-10); the **terminal pty
@@ -88,7 +88,7 @@ threadsafe `emit()` (backpressure) + `send()` (event-loop) + worker `track()`/jo
 A `{"type":"stop"}` frame sets a `threading.Event`. See the WS protocol docstrings at the top of
 [`routes/chat.py`](caelo_core/routes/chat.py) and [`routes/agent.py`](caelo_core/routes/agent.py).
 
-**Chat core = Responses API (M10, see [`docs/PLAN_M10_CZAT.md`](docs/PLAN_M10_CZAT.md)):** `/chat/stream`
+**Chat core = Responses API (M10, see [`docs/plans/PLAN_M10_CZAT.md`](docs/plans/PLAN_M10_CZAT.md)):** `/chat/stream`
 runs through **[`caelo_core/responses_client.py`](caelo_core/responses_client.py)** (`POST /v1/responses`,
 streaming) — live web/X search (`web_search`/`x_search`), vision (grok-4 family), document Q&A
 (`input_file`), citations + token/usage counter. Legacy `chat_completion_stream` stays only as a
@@ -99,7 +99,7 @@ is the thin endpoint/auth layer (CLAUDE.md rule). **Verified on the real API:** 
 knowledge" (B5) is **local** (`config.PROJECT_DOCS_DIR`) + attached on demand ("Attach all"), not
 `file_search`. Mirror the `responses_client` UTF-8 SSE decode if you touch streaming.
 
-**Creative = GenJob queue (M11, see [`docs/PLAN_M11_TWORCZOSC.md`](docs/PLAN_M11_TWORCZOSC.md)):** image
+**Creative = GenJob queue (M11, see [`docs/plans/PLAN_M11_TWORCZOSC.md`](docs/plans/PLAN_M11_TWORCZOSC.md)):** image
 and video generation share **one async job engine** — [`caelo_core/genjobs.py`](caelo_core/genjobs.py)
 `GenJobManager` (a `queue.Queue` + worker threads, statuses queued→running→done|failed|cancelled,
 cancel/retry/`max_active` limit, cost estimate). The **executor is injected** by `Backend` — `genjobs.py`
@@ -118,7 +118,7 @@ queue-limit asserts) + `/genjobs` guards in `api_smoke.py`. Renderer staged inpu
 frame/source) live in the **Hub context** (`lib/hub.tsx`) — panels are lazy and unmount on tab switch,
 so per-panel `useState` would lose them.
 
-**Voice = bridges + conversation pipeline (M12, see [`docs/PLAN_M12_GLOS.md`](docs/PLAN_M12_GLOS.md)):**
+**Voice = bridges + conversation pipeline (M12, see [`docs/plans/PLAN_M12_GLOS.md`](docs/plans/PLAN_M12_GLOS.md)):**
 all voice routes live in [`routes/voice.py`](caelo_core/routes/voice.py); audio flows
 **renderer → sidecar → xAI** and the key NEVER reaches the renderer (the sidecar injects
 `Authorization`). REST: `POST /voice/tts` (5 voices, language; returns audio + `chars`/`cost`) and
@@ -142,7 +142,7 @@ per-char is a **tunable estimate**) → response fields + M9 meta; renderer accu
 new routes. **xAI streaming-STT protocol/sample-rate is unconfirmed** — `parseStt` handles variants
 defensively; verify live.
 
-**Extensibility = MCP + commands + hooks + skills (M14, see [`docs/PLAN_M14_ROZSZERZALNOSC.md`](docs/PLAN_M14_ROZSZERZALNOSC.md)):**
+**Extensibility = MCP + commands + hooks + skills (M14, see [`docs/plans/PLAN_M14_ROZSZERZALNOSC.md`](docs/plans/PLAN_M14_ROZSZERZALNOSC.md)):**
 the hub became a **programmable platform** — tools serve chat AND the agent. The **MCP client** is a
 **custom thin SYNCHRONOUS layer** (`caelo_core/mcp/`), NOT the official SDK (deliberate hybrid, like
 `responses_client` vs the OpenAI SDK — zero new deps, fits the worker-thread model; `client.py` does
@@ -175,7 +175,7 @@ CAELO.md). New state files (all via `load_json_or_backup` + atomic writes, gitig
 `_unit_mcp_routes`, `_unit_commands_skills`). **Real MCP servers / live chat verified on the user's
 machine** (sandbox blocks them); don't regress P0-1…P0-8 / M5–M6.
 
-**Agent teams = subagents (M17, see [`docs/PLAN_M17_SUBAGENCI.md`](docs/PLAN_M17_SUBAGENCI.md)):** the
+**Agent teams = subagents (M17, see [`docs/plans/PLAN_M17_SUBAGENCI.md`](docs/plans/PLAN_M17_SUBAGENCI.md)):** the
 orchestrator (top-level `AgentSession`) gets a **`delegate`** tool that fans out subtasks to specialized
 **subagents**, each an **isolated sub-session on the same `session.py`** with its own history, a **role**
 persona, a **narrowed tool set**, and (for mutating roles) an **isolated worktree** — the parent's
@@ -207,8 +207,8 @@ isolation/roles/no-escalation/worktree/cascade/budget/merge/cost), `api_smoke.py
 `_unit_team_routes`). **Live delegation verified on the user's machine** (sandbox blocks xAI); don't
 regress P0-1…P0-8 / M5–M6 / M13 / M14.
 
-**Community packages = marketplace (M16, see [`docs/PLAN_M16_SPOLECZNOSC.md`](docs/PLAN_M16_SPOLECZNOSC.md)
-+ [`docs/PACKAGES.md`](docs/PACKAGES.md)):** the M14 artifacts (skills/commands/MCP-configs/templates)
+**Community packages = marketplace (M16, see [`docs/plans/PLAN_M16_SPOLECZNOSC.md`](docs/plans/PLAN_M16_SPOLECZNOSC.md)
++ [`docs/guides/PACKAGES.md`](docs/guides/PACKAGES.md)):** the M14 artifacts (skills/commands/MCP-configs/templates)
 become **shareable, versioned packages** — distribution over M14, **zero hosted infrastructure** (git/
 GitHub registry). A package is **`.caelopkg` = a ZIP** (`zipfile`, no new deps) with `manifest.json`
 (name/version/type/author/`requires`/declared **permissions**/`source`/**sha256 integrity**) + `payload/`.
@@ -228,13 +228,13 @@ registry) + `templates/` (user templates) — both gitignored. Routes [`routes/p
 registries as M14). Renderer: **Extensions → Marketplace** tab ([`components/extensions/Marketplace.tsx`](desktop/src/renderer/src/components/extensions/Marketplace.tsx):
 Browse/Installed/Import/Templates + **ConsentCard**) + **Share/Export** buttons on the Skills/Commands/MCP/
 Templates panels (`lib/packages.ts` for base64 ↔ file). Community ops: `.github/ISSUE_TEMPLATE/`
-(package-submission + package-report), `docs/PACKAGES.md`, `docs/registry.example.json`. Selfchecks:
+(package-submission + package-report), `docs/guides/PACKAGES.md`, `docs/guides/registry.example.json`. Selfchecks:
 [`caelo_core/tools/packages_check.py`](caelo_core/tools/packages_check.py) (**47/47**: round-trip, consent,
 tamper, Zip-Slip/limits, registry, updates, templates) + `api_smoke.py` `_unit_packages`. **Real network
 registry/install verified on the user's machine** (sandbox blocks the net); don't regress P0-1…P0-8 / M5–M6 /
 M13 / M14.
 
-**Quality round (M18, SWOT remediation — see [`docs/PLAN_NAPRAWY_3.md`](docs/PLAN_NAPRAWY_3.md), 8/8 done):**
+**Quality round (M18, SWOT remediation — see [`docs/plans/PLAN_NAPRAWY_3.md`](docs/plans/PLAN_NAPRAWY_3.md), 8/8 done):**
 a maintenance round (no P0) hardening testability/maintainability after M9–M17. **Structural fact:** `state.py`
 was **decomposed** (691→378 lines) — the **auth layer** moved to [`caelo_core/auth_tokens.py`](caelo_core/auth_tokens.py)
 (`require_token`/`ws_authorized`/`_ws_origin_ok`/`_warn_no_token`, testable without `Backend`; **re-exported**
@@ -248,6 +248,61 @@ lines). Frontend gained **React Testing Library** component tests (`desktop/test
 E2E** (`desktop/e2e/`, over `preview:web`+`devMock`). Electron now runs with **`sandbox: true`** (P2-14) and the
 no-token dev escape logs per-request. Don't regress these; the `state`/`auth_tokens`/`backend_media` re-export
 boundary keeps the public import API stable.
+
+**Grok-CLI parity (M19, Tier-1/2/3 DONE — see [`docs/plans/PLAN_M19_TIER1.md`](docs/plans/PLAN_M19_TIER1.md) ·
+[`docs/plans/PLAN_M19_TIER2.md`](docs/plans/PLAN_M19_TIER2.md) · [`docs/plans/PLAN_M19_TIER3.md`](docs/plans/PLAN_M19_TIER3.md);
+analysis [`docs/plans/PLAN_M19_PARYTET_GROK_CLI.md`](docs/plans/PLAN_M19_PARYTET_GROK_CLI.md)):** adopts the strongest
+bits of xAI's official Grok CLI (a Claude-Code fork). **Structural fact:** the agent's session wiring (lazy
+`AgentSession` + `TeamManager` + `delegate` + M9 history record) was extracted from the WS handler into a
+**transport-neutral [`AgentRunner`](caelo_core/agent/runner.py)** (§0) — `routes/agent.py` (WS), headless and
+ACP all build the SAME runner with their own `emit`/`request_approval`/`stop` (do NOT re-add per-transport
+wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatches subcommands:** no args /
+`serve` = uvicorn + handshake (Electron path — stdout stays clean, unchanged), `run` = headless, `acp` = ACP.
+- **B1 headless** ([`caelo_core/headless.py`](caelo_core/headless.py)): `python -m caelo_core run -p "…"
+  [--output-format plain|json|streaming-json] [--model] [--cwd] [--max-turns] [--tools/--disallowed-tools]
+  [--permission-mode] [--always-approve] [--allow/--deny] [-s/-r/-c]`. Fail-closed (`request_approval`→reject;
+  mutations only via bypass/accept-edits or an allow rule). Minimal session persistence in `DATA_DIR/sessions/`.
+- **B2 ACP** ([`caelo_core/acp/`](caelo_core/acp/) `server.py`+`bridge.py`): `python -m caelo_core acp` →
+  Agent Client Protocol over stdio (JSON-RPC 2.0, newline-delimited) for Zed/Neovim/Emacs. Server is also a
+  client for `session/request_permission` (id-correlated, like `McpClient`). Frames→`session/update` via `bridge`.
+- **B3 LSP** ([`caelo_core/lsp/`](caelo_core/lsp/) `client.py`+`manager.py`): ⚠ **Content-Length framing**
+  (binary stdio, NOT newline-delimited like MCP). Agent tool `lsp` (READONLY — in `permissions.READONLY`;
+  **hidden when no server configured**) + **passive diagnostics** after edits (new WS frame `diagnostics`).
+  Config `lsp.json` (global `DATA_DIR` + project `<ws>/.caelo/lsp.json`); `backend.get_lsp()` is workspace-aware
+  (rebuild on root change, like checkpoints) + `reload_lsp()`; REST [`routes/lsp.py`](caelo_core/routes/lsp.py);
+  renderer **Extensions → Language Servers**. Editor inline squiggles deferred (diagnostics shown in agent panel).
+- **B4 glob permission rules** ([`agent/permission_rules.py`](caelo_core/agent/permission_rules.py)
+  `RuleSet`): `ToolPrefix(glob)` (`Bash(npm*)`/`Edit(src/**)`/`Read`/`Grep`/`Write`/`WebFetch(domain:…)`/
+  `MCPTool`), **deny>allow**, segment-aware `*`/`**` (path) vs flat (command/name). A layer ABOVE the
+  "Always allow" allowlist: **deny** is a hard refuse in `session._handle_tool_call` (covers READONLY + bypass),
+  **allow** auto-accepts in `_gate_mutation` — **P0-1 preserved** (a `Bash(...)` allow never bypasses
+  metachars). Rules from `caelo_settings.json` + `<ws>/.caelo/permissions.json` + CLI `--allow/--deny` +
+  `PUT /permissions/rules`; `backend.reload_permission_rules()`.
+- **Tier-2 DONE** ([`docs/plans/PLAN_M19_TIER2.md`](docs/plans/PLAN_M19_TIER2.md)): **B5 ecosystem interop** — the agent
+  reads `AGENTS.md`/`CLAUDE.md` next to `CAELO.md` (`agent/caelomd.py`), `McpManager` merges `~/.claude.json`+
+  `.mcp.json` servers (imported `enabled=False`), skills are discovered from `~/.claude/skills`. **B6
+  orchestration-skills** — new roles + `skills/builtin/` packages that drive `delegate` (implement/review/design/
+  best-of-n/check-work/pr-babysit). **B7 OS-sandbox** ([`caelo_core/sandbox/`](caelo_core/sandbox/) `profiles.py`+
+  `wrap.py` — macOS seatbelt / Linux bwrap, wired into `run_command` + MCP + LSP spawns). **B8 hybrid-memory**
+  ([`caelo_core/memory.py`](caelo_core/memory.py) + [`embeddings.py`](caelo_core/embeddings.py): `/v1/embeddings`
+  + an `event_embeddings` table with kNN/`hybrid_search` in `history_store`, injected via `session._maybe_inject_memory`).
+- **Tier-3 DONE** ([`docs/plans/PLAN_M19_TIER3.md`](docs/plans/PLAN_M19_TIER3.md), quick-wins): **B9 effort** (`reasoning.effort`
+  in `responses_client`/`llm`, per-role + `EffortSelect.tsx`), **B10 export-md + auto-compact** (`lib/exportMarkdown.ts`,
+  `/history/export`, `--export-md`; deterministic `compact_history`, off by default), **B11 personas + I/O contract**
+  (`roles.py` instructions/inputs/outputs → subagent `extra_system`), **B12 real git worktree** (`worktree.py`
+  `use_git` branch, used by `team.py`), **B13 web_fetch** (`tools.web_fetch`, https-only + SSRF guard; `web_search`
+  deferred), **B14 hierarchical project config** ([`agent/project.py`](caelo_core/agent/project.py) deeper-wins
+  chain feeding CAELO.md / permission rules / LSP / sandbox).
+- **Selfchecks:** `agent_selfcheck` 166 → **184** (B4), then extended with Tier-2/3 B-item tests (CAELO.md interop ·
+  orchestration roles · memory injection · effort · persona/IO · auto-compact · git worktree · web_fetch · project
+  config); new **`headless_check`** (19, B1), **`acp_check`** (14, B2), **`lsp_check`** (19, B3, Content-Length mock
+  server `tools/_lsp_mock_server.py`), **`sandbox_check`** (29, B7), **`embeddings_check`** (11, B8); `mcp_check`
+  24 → **36** (B5 interop), `history_check`/`api_smoke` extended (+`/permissions/rules`/`/lsp` routes). Pytest wraps
+  the suites (`tests/test_selfchecks.py`; install `requirements-dev.txt` for the adapter). New gitignored state:
+  `sessions/` (B1), `lsp.json` (B3), `sandbox.json`/`sandbox-events.jsonl` (B7). ⚠ **LIVE verification still pending
+  on the user's machine** (sandbox blocks xAI/exec): real `run -p`, ACP in Zed/Neovim, real LSP/embeddings/seatbelt-
+  bwrap/`web_fetch`. The **B0 `cli-chat-proxy` spike is NOT started** (separate experiment in
+  `PLAN_M19_PARYTET_GROK_CLI.md` §7). Don't regress P0-1…P0-8 / M5–M6 / M13 / M14.
 
 ## Commands
 
@@ -263,6 +318,21 @@ npm run dev                     # Electron + Vite HMR; main process spawns the s
 ```
 Electron finds Python in this order: `CAELO_CORE_PYTHON` env → `caelo_core/.venv/Scripts/python.exe`
 → system `python`. Override: `$env:CAELO_CORE_PYTHON = "C:\path\python.exe"; npm run dev`.
+
+**Gotcha — `npm run dev` fails with `Error: Electron uninstall` (TLS-interception networks):**
+this means the **Electron binary never downloaded** during `npm install` (Electron's postinstall fetches
+`electron-vX-win32-x64.zip` from GitHub; a TLS-intercepting proxy blocks it — same class of issue as the pip
+note above). The JS package is installed but `desktop/node_modules/electron/{dist/,path.txt}` are missing.
+electron-vite's `getElectronPath` (NOT Electron's) reads `node_modules/electron/path.txt` + `dist/` and
+ignores `ELECTRON_OVERRIDE_DIST_PATH` — it only honors `ELECTRON_EXEC_PATH` (full path to `electron.exe`).
+Fixes, in order of preference:
+1. **Root cause:** `$env:NODE_EXTRA_CA_CERTS = "C:\corp-root-ca.pem"` then `node desktop\node_modules\electron\install.js`
+   (lets Node trust the intercepting proxy's cert; also fixes Playwright/other downloads).
+2. **Manual binary:** download `electron-v<ver>-win32-x64.zip` (the version in `desktop/package.json`) via a
+   browser, unzip, then make `node_modules/electron` self-contained: copy the unzip into
+   `node_modules/electron/dist/` and write `node_modules/electron/path.txt` containing exactly `electron.exe`
+   (no trailing newline). Survives new terminals + packaging; **wiped by the next `npm install`/`npm ci`**.
+3. **Quick (ephemeral):** `set ELECTRON_EXEC_PATH=C:\…\electron.exe` (cmd) in the same shell as `npm run dev`.
 
 **Type-check the frontend (primary check) + ESLint + Vitest + E2E:**
 ```powershell
@@ -282,7 +352,7 @@ networks set `E2E_CHROMIUM_PATH`). All lint/test/E2E devDeps (`eslint`/`vitest`/
 **Backend self-checks (this repo's "tests"): run all via pytest (M18: P3-13), or each script standalone.**
 ```powershell
 caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt   # one-time: pytest
-caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v             # all 8 suites (discovery)
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v             # all 11 suites (discovery)
 caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -k api_smoke   # one suite (-k filter)
 # …or run any suite standalone (each tools/*_check.py + api_smoke/handshake_check has a main()):
 caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py   # handshake + /health + token auth
@@ -346,6 +416,11 @@ run external copy would use its own `config.py`, hence its own data dir.)
   permissions). Own file; atomic writes + `load_json_or_backup`; caught by the `caelo_*.json` net.
 - `templates/<id>/` (M16) — user-installed project templates. Built-in templates live in
   `caelo_core/packages/templates/builtin/` (packaged via the spec, read-only), NOT here. Gitignored.
+- `sessions/<id>.json` (M19-B1) — headless-mode agent session history (`-s`/`-r`/`-c`). Own files; atomic
+  writes + `load_json_or_backup`; gitignored (`/sessions/`, dev `DATA_DIR` = repo).
+- `lsp.json` (M19-B3) — GLOBAL language-server config; project config is `<ws>/.caelo/lsp.json` (read-only).
+  `load_json_or_backup` + atomic writes; gitignored (`/lsp.json`, dev `DATA_DIR` = repo). Also read:
+  `<ws>/.caelo/permissions.json` (M19-B4 project glob rules).
 
 All five JSON readers go through **`config.load_json_or_backup`** (P1-11): a corrupt file is moved to
 `<name>.corrupt` and logged, not silently wiped. The API key is **stored but never returned** by

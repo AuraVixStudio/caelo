@@ -53,7 +53,7 @@ Faza 6 (uprawnienia / git / recent):
 - `POST /git/add`, `POST /git/commit`
 - `GET /fs/recent` — ostatnie workspace
 
-Nadbudowa — media / głos (patrz [`../docs/MODYFIKACJE.md`](../docs/MODYFIKACJE.md)):
+Nadbudowa — media / głos (patrz [`../docs/plans/MODYFIKACJE.md`](../docs/plans/MODYFIKACJE.md)):
 - `POST /video/edits`, `POST /video/extensions` — edycja / przedłużanie wideo (odpyt przez `GET /video/jobs/{id}`)
 - `POST /voice/tts`, `POST /voice/stt` — TTS / STT (audio base64 w JSON)
 - **WS `/voice/realtime?token=...`** — most do `wss://api.x.ai/v1/realtime`

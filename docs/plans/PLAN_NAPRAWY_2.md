@@ -353,7 +353,7 @@ oraz dwie systemowe luki jakości: **brak realnych testów tras** i **brak ESLin
   pozostawiono jako rozszerzenie (wymaga `jsdom`).
 
 ### [x] P3-10 — Synchronizacja statusu dokumentacji  🟡 ŚREDNIE
-- **Plik:** `docs/PLAN_NAPRAWY.md` („✅ ZREALIZOWANY"), `docs/README.md` (indeks).
+- **Plik:** `docs/plans/PLAN_NAPRAWY.md` („✅ ZREALIZOWANY"), `docs/README.md` (indeks).
 - **Problem:** status „zrealizowany" przy realnych rezydualnych lukach klasy P0/P1 (powyżej) jest
   mylący przy następnej iteracji.
 - **Rekomendacja:** dopisać w `PLAN_NAPRAWY.md` odnośnik „kontynuacja → `PLAN_NAPRAWY_2.md`"; dodać

@@ -22,8 +22,8 @@
 > OK, zero regresji), `agent_selfcheck`/`handshake_check` bez regresji. **Frontend:** Extensions
 > → **Marketplace** (Browse/Installed/Import/Templates + karta zgody) + przyciski „Export" w
 > panelach Skills/Commands/MCP/Templates; `typecheck` OK; renderowanie 4 sekcji zweryfikowane w
-> `preview:web` (bez błędów konsoli). **Społeczność:** `docs/PACKAGES.md`, szablony issue
-> (submission + report), `docs/registry.example.json`. Szczegóły per-zadanie niżej.
+> `preview:web` (bez błędów konsoli). **Społeczność:** `docs/guides/PACKAGES.md`, szablony issue
+> (submission + report), `docs/guides/registry.example.json`. Szczegóły per-zadanie niżej.
 
 ---
 
@@ -92,7 +92,7 @@
   per-wpis `installed`/`has_update`/`compatible`), `fetch_package`/`install_from_url`/`inspect_from_url`.
   Domyślny `config.PACKAGES_REGISTRY_URL` (nadpisywalny w UI). Trasy `/packages/registry`. Renderer:
   **Browse** (pole „Registry URL", lista wpisów z badge installed/update/incompatible, Install → karta
-  zgody → instalacja z URL-a). Przykład `docs/registry.example.json`. **Selfcheck:** `packages_check.py`
+  zgody → instalacja z URL-a). Przykład `docs/guides/registry.example.json`. **Selfcheck:** `packages_check.py`
   (parse pomija niepełne), `api_smoke` (parse in-process bez sieci). Realny fetch sieciowy weryfikuje
   user na swojej maszynie (sandbox blokuje sieć).
 
@@ -106,7 +106,7 @@
   zasoby; builtin też), command (`command.json`), mcp (`public_config` — **sekrety zdjęte**), template
   (drzewo). Trasa `/packages/export` (zwraca base64). Renderer: przyciski **Share** w panelach Skills/
   Commands/MCP + Marketplace→Templates; `lib/packages.ts` `downloadBase64` pobiera `<id>-<ver>.caelopkg`
-  (jeden bundle, itch.io-style). Instrukcja „Publish" w `docs/PACKAGES.md`. **Selfcheck:** `packages_check.py`
+  (jeden bundle, itch.io-style). Instrukcja „Publish" w `docs/guides/PACKAGES.md`. **Selfcheck:** `packages_check.py`
   (export→inspect→install round-trip command/template), `api_smoke` `_unit_packages` (export → `.caelopkg`
   + base64, ponowny import działa).
 
@@ -139,9 +139,9 @@
 - **Status (2026-06-06):** `.github/ISSUE_TEMPLATE/package-submission.md` (zgłoszenie pakietu do registry
   + checklist bezpieczeństwa), `package-report.md` (raport złośliwego/zepsutego pakietu; kieruje
   security-issues Caelo do SECURITY.md), `config.yml` (linki: przewodnik, Discussions, prywatne
-  zgłoszenie luki). **Przewodnik** `docs/PACKAGES.md` (format, model bezpieczeństwa, registry,
+  zgłoszenie luki). **Przewodnik** `docs/guides/PACKAGES.md` (format, model bezpieczeństwa, registry,
   publish, **featured/kuracja**, reporting + „złośliwy pakiet nie wystartuje cicho" via audyt M14-B5).
-  Sekcja w `CONTRIBUTING.md`. `docs/registry.example.json`.
+  Sekcja w `CONTRIBUTING.md`. `docs/guides/registry.example.json`.
 
 ### ✅ M16-7 [P2] Wersjonowanie i aktualizacje pakietów  — S/M  — **DONE**
 - **Cel:** zainstalowane pakiety da się aktualizować, niekompatybilne — oznaczać.
@@ -181,7 +181,7 @@ M16-6, M16-7 (ops społeczności) — później
    wykonania — skille/MCP WYŁĄCZONE, integralność weryfikowana, Zip-Slip/limity).
 3. ✅ Registry oparte o git/GitHub pozwala przeglądać/instalować; bez hostowanej infrastruktury/kosztu.
 4. ✅ Eksport/udostępnianie + szablony projektów działają (Ren'Py VN + DAZ jako pierwsze).
-5. ✅ Istnieje proces zgłaszania/raportowania/aktualizacji pakietów (szablony issue + `docs/PACKAGES.md`).
+5. ✅ Istnieje proces zgłaszania/raportowania/aktualizacji pakietów (szablony issue + `docs/guides/PACKAGES.md`).
 
 ## 6. Otwarte pytania
 - **Registry:** czysto git/GitHub (zero infra, etos BYO-key) vs lekka hostowana usługa (lepsze UX,

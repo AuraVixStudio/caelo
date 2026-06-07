@@ -101,7 +101,7 @@ By submitting a contribution you agree it is licensed under the project's
 Caelo has a community marketplace (M16): skills, slash commands, MCP server configs,
 and project templates can be exported as a single `.caelopkg` file and shared, or
 listed in a git-based registry. To build and publish one, or to submit it to the
-registry, see [`docs/PACKAGES.md`](docs/PACKAGES.md). Two issue templates exist —
+registry, see [`docs/guides/PACKAGES.md`](docs/guides/PACKAGES.md). Two issue templates exist —
 **Package submission** and **Report a problematic package** — under *New issue*.
 Packages run under the same security regime as the rest of the app (declared
 permissions, explicit consent, no auto-run).

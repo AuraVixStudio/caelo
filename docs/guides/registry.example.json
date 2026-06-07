@@ -1,5 +1,5 @@
 {
-  "_comment": "Example Caelo package registry index (M16-3). Host a file like this in a git repo and point Caelo at its raw URL (Marketplace → Browse → Registry URL). Each 'url' is a raw download link to a .caelopkg bundle. See docs/PACKAGES.md.",
+  "_comment": "Example Caelo package registry index (M16-3). Host a file like this in a git repo and point Caelo at its raw URL (Marketplace → Browse → Registry URL). Each 'url' is a raw download link to a .caelopkg bundle. See docs/guides/PACKAGES.md.",
   "registry_version": 1,
   "packages": [
     {

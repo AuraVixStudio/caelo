@@ -585,4 +585,4 @@ jakość/wydajność frontu, CI + testy logiki — pełny rejestr i status w **[
 
 ---
 
-*Dokument utrzymywany w `docs/REBUILD_PLAN.md`. Aktualizować przy zmianach decyzji.*
+*Dokument utrzymywany w `docs/plans/REBUILD_PLAN.md`. Aktualizować przy zmianach decyzji.*

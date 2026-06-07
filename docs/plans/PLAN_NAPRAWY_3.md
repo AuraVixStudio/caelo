@@ -320,19 +320,19 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 - **Problem:** brak „on-ramp" dla użytkownika i kontrybutora: jak zacząć czat, jak używać agenta/
   trybów plan/review, jak działa marketplace (M16 istnieje, brak instrukcji), referencja endpointów
   REST/WS. To hamuje adopcję OSS i zgłoszenia społeczności.
-- **Rekomendacja:** dodać `docs/USER_GUIDE.md` (EN — zgodnie z regułą języka UI; per-moduł: Chat, Code/
-  Agent, Image, Video, Voice, History, Extensions/Marketplace, Settings) oraz `docs/API.md`
+- **Rekomendacja:** dodać `docs/guides/USER_GUIDE.md` (EN — zgodnie z regułą języka UI; per-moduł: Chat, Code/
+  Agent, Image, Video, Voice, History, Extensions/Marketplace, Settings) oraz `docs/guides/API.md`
   (auto/ręczna lista tras REST + ramki WS — można wygenerować z FastAPI `openapi.json`). Zlinkować w
   `docs/README.md` i głównym `README.md`. Rozważyć GitHub Pages.
 - **Weryfikacja (DoD):** `USER_GUIDE.md` pokrywa wszystkie 9 modułów; `API.md` listuje każdą trasę z
   `routes/*`; oba zlinkowane z indeksu. Krótki „Getting Started" w README wskazuje na guide.
 - **Szac. koszt:** 1.5–2 dni.
 - **✅ Zrobione (2026-06-06):**
-  1. **[`docs/USER_GUIDE.md`](USER_GUIDE.md)** (EN, zgodnie z regułą języka user-facing) — Getting Started
+  1. **[`docs/guides/USER_GUIDE.md`](../guides/USER_GUIDE.md)** (EN, zgodnie z regułą języka user-facing) — Getting Started
      (instalacja/auth/precedence), **wszystkie 9 modułów** (Chat, Code/agent, Image, Video, Gallery, Voice,
      History, Extensions, Settings), kluczowe koncepcje (Projekty, Send-to, permission gate, prywatność/koszty)
      i Troubleshooting.
-  2. **[`docs/API.md`](API.md)** (EN) — referencja **96 tras REST + 6 WS** pogrupowana po domenach (auth,
+  2. **[`docs/guides/API.md`](../guides/API.md)** (EN) — referencja **96 tras REST + 6 WS** pogrupowana po domenach (auth,
      models/settings, media/genjobs, voice, fs/git, history/artifacts, projects/collections, agent/team,
      mcp/hooks/commands/skills, packages), model autoryzacji (Bearer/token w query, fail-closed, CORS),
      handshake, tabela protokołów ramek WS + snippet do **regeneracji** listy (introspekcja `app.routes`).

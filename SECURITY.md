@@ -56,7 +56,7 @@ These properties are part of the design and must not be regressed:
   navigation, and only the `media` (microphone) / `fullscreen` permissions granted.
 
 See `CLAUDE.md` for the full architecture and the hardening history
-(`docs/PLAN_NAPRAWY.md`, `docs/PLAN_NAPRAWY_2.md`).
+(`docs/plans/PLAN_NAPRAWY.md`, `docs/plans/PLAN_NAPRAWY_2.md`).
 
 ## Telemetry
 
