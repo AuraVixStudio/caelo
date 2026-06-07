@@ -249,7 +249,14 @@ export function AgentPanel({
 
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    // Dosuń do dołu PO ułożeniu layoutu (rAF). Bez tego wysokość świeżo rozwiniętej
+    // karty approval (detale + przyciski Accept/Reject/Always) bywa mierzona za wcześnie
+    // i przyciski lądują pod foldem — użytkownik nie może ich kliknąć.
+    const id = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(id)
   }, [entries])
 
   // M9-F2: „Send to → Code" — podnieś artefakt jako załącznik agenta (np. obraz),
