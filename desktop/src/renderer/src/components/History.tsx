@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, RotateCw, Search } from 'lucide-react'
-import { listHistory, type Conn, type HubEvent } from '../lib/api'
+import { ArrowUpRight, Download, RotateCw, Search } from 'lucide-react'
+import { exportHistoryMarkdown, listHistory, type Conn, type HubEvent } from '../lib/api'
+import { downloadText } from '../lib/exportMarkdown'
 import { useHub } from '../lib/hub'
 import { buildHistoryQuery, eventTitle, isImageEvent, modeToModule, modeTone } from '../lib/hubQuery'
 import { ArtifactThumb } from './ArtifactThumb'
@@ -61,19 +62,37 @@ export function History({ conn }: { conn: Conn }) {
     if (target) navigate(target)
   }
 
+  // M19-B10: export the currently-filtered history to a Markdown file.
+  const exportMd = (): void => {
+    exportHistoryMarkdown(conn, buildHistoryQuery({ q, mode, projectId: currentProjectId }))
+      .then((md) => downloadText('caelo-history.md', md))
+      .catch((e) => setError(String((e as Error).message || e)))
+  }
+
   return (
     <Page
       title="History"
       subtitle="Everything across modes — search by content or prompt."
       actions={
-        <Button
-          variant="outline"
-          size="sm"
-          icon={<RotateCw size={14} />}
-          onClick={() => run(q, mode, currentProjectId)}
-        >
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Download size={14} />}
+            disabled={events.length === 0}
+            onClick={exportMd}
+          >
+            Export .md
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<RotateCw size={14} />}
+            onClick={() => run(q, mode, currentProjectId)}
+          >
+            Refresh
+          </Button>
+        </div>
       }
     >
       <div className="mb-4 flex items-center gap-2">

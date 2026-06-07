@@ -67,11 +67,16 @@ export interface ModelsResp {
   default_code: string
 }
 
+// M19-B9: poziom reasoning_effort dla modeli rozumujących ('' = Auto/dziedzicz).
+export type ReasoningEffort = '' | 'low' | 'medium' | 'high'
+
 export interface SettingsResp {
   chat_model: string
   code_model: string
   system_prompt: string
   chat_temperature: number
+  chat_effort: ReasoningEffort // M19-B9: domyślny effort czatu
+  code_effort: ReasoningEffort // M19-B9: domyślny effort agenta
   chat_search_mode: SearchMode
   chat_search_sources: string[]
   voice: string
@@ -92,6 +97,8 @@ export type SettingsPatch = Partial<{
   code_model: string
   system_prompt: string
   chat_temperature: number
+  chat_effort: ReasoningEffort // M19-B9
+  code_effort: ReasoningEffort // M19-B9
   chat_search_mode: SearchMode
   chat_search_sources: string[]
   voice: string
@@ -488,6 +495,18 @@ export const listArtifacts = (
 ): Promise<{ artifacts: HubArtifact[]; count: number; limit: number; offset: number }> =>
   api(c, '/artifacts' + queryString(query as Record<string, string | number | undefined>))
 
+/** M19-B10: fetch hub history as Markdown (the /history/export route returns
+ *  text/markdown, not JSON — so this is a raw fetch with the bearer header). */
+export async function exportHistoryMarkdown(c: Conn, query: HistoryQuery = {}): Promise<string> {
+  const res = await fetch(
+    c.baseUrl + '/history/export' +
+      queryString(query as Record<string, string | number | undefined>),
+    { headers: { Authorization: `Bearer ${c.token}` } }
+  )
+  if (!res.ok) throw new ApiError(`History export failed (${res.status})`, res.status)
+  return res.text()
+}
+
 export const getArtifact = (c: Conn, id: string): Promise<HubArtifact> =>
   api(c, `/artifacts/${encodeURIComponent(id)}`)
 
@@ -637,6 +656,42 @@ export const getPermissions = (c: Conn): Promise<{ rules: string[] }> => api(c, 
 export const clearPermissions = (c: Conn): Promise<{ ok: boolean; rules: string[] }> =>
   api(c, '/permissions', { method: 'DELETE' })
 
+// M19-B4: glob permission rules (ToolPrefix(glob), deny > allow). Global rules persist
+// in caelo_settings.json; project rules live in <ws>/.caelo/permissions.json (read-only here).
+export interface GlobRules {
+  allow: string[]
+  deny: string[]
+}
+export const getPermissionRules = (c: Conn): Promise<GlobRules> => api(c, '/permissions/rules')
+export const setPermissionRules = (c: Conn, rules: GlobRules): Promise<GlobRules> =>
+  api(c, '/permissions/rules', { method: 'PUT', body: JSON.stringify(rules) })
+
+// M19-B3: LSP servers (language intelligence for the coding agent). Global config in
+// caelo_settings DATA_DIR/lsp.json; project config in <ws>/.caelo/lsp.json (read-only here).
+export interface LspServerInfo {
+  name: string
+  command: string
+  args: string[]
+  languages: string[]
+  running: boolean
+}
+export interface LspServerBody {
+  name: string
+  command: string
+  args?: string[]
+  extensionToLanguage: Record<string, string>
+  env?: Record<string, string>
+}
+export const listLspServers = (
+  c: Conn
+): Promise<{ servers: LspServerInfo[]; has_workspace: boolean }> => api(c, '/lsp')
+export const addLspServer = (c: Conn, body: LspServerBody): Promise<{ ok: boolean }> =>
+  api(c, '/lsp', { method: 'POST', body: JSON.stringify(body) })
+export const removeLspServer = (c: Conn, name: string): Promise<{ ok: boolean }> =>
+  api(c, `/lsp/${encodeURIComponent(name)}`, { method: 'DELETE' })
+export const restartLspServer = (c: Conn, name: string): Promise<{ ok: boolean }> =>
+  api(c, `/lsp/${encodeURIComponent(name)}/restart`, { method: 'POST' })
+
 // --- Agent checkpoints / undo (M13-B5) ---
 export interface CheckpointInfo {
   id: string
@@ -784,6 +839,8 @@ export interface SkillInfo {
   has_resources: boolean
   bytes: number
   body?: string
+  /** M19-B5 §1.3: discovery source — 'builtin' | 'user' | 'claude-global' | 'claude-project' | 'grok-project'. Only 'user' skills are editable/deletable. */
+  source?: string
 }
 
 export const listSkills = (c: Conn): Promise<{ skills: SkillInfo[] }> => api(c, '/skills')
@@ -938,6 +995,14 @@ export const newProjectFromTemplate = (
   })
 
 // --- M17: Subagent teams (roles / limits / worktree merges / runs) ---------------
+/** M19-B11: one declared input/output field of a subagent role (persona I/O contract). */
+export interface TeamRoleIO {
+  name: string
+  io_type: 'text' | 'file'
+  required: boolean
+  description: string
+}
+
 export interface TeamRole {
   id: string
   label: string
@@ -946,6 +1011,10 @@ export interface TeamRole {
   mcp: 'none' | 'readonly' | 'all'
   worktree: boolean // mutating role → works in an isolated copy, reviewed at merge
   model: string // '' = inherit orchestrator model
+  reasoning_effort: ReasoningEffort // M19-B9: '' = inherit run effort
+  instructions: string // M19-B11: persona (falls back to prompt when empty)
+  inputs: TeamRoleIO[] // M19-B11: what the orchestrator may pass in
+  outputs: TeamRoleIO[] // M19-B11: what the subagent should return
   prompt: string
   builtin: boolean
 }
@@ -1043,6 +1112,7 @@ export interface ChatStreamPayload {
   model: string
   temperature: number
   system_prompt?: string
+  reasoning_effort?: ReasoningEffort // M19-B9: low|medium|high (omit/'' = inherit chat_effort)
   search_mode?: SearchMode // M10-B2: live-search mode (default off, server-side)
   sources?: string[] // M10-B2: web/x/news (only meaningful when searching)
 }

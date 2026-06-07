@@ -1,7 +1,28 @@
 import { useEffect, useState } from 'react'
-import { Group, Panel, useDefaultLayout } from 'react-resizable-panels'
-import { BookText, ChevronDown, Clock, FolderOpen, GitBranch, RotateCw, Shield, SquareTerminal, X } from 'lucide-react'
-import { clearPermissions, fsRecent, getCaeloMd, getPermissions, putCaeloMd, type Conn } from '../lib/api'
+import { Group, Panel, useDefaultLayout, usePanelRef } from 'react-resizable-panels'
+import {
+  BookText,
+  ChevronDown,
+  Clock,
+  FolderOpen,
+  GitBranch,
+  PanelLeft,
+  PanelRight,
+  RotateCw,
+  Shield,
+  SquareTerminal,
+  X
+} from 'lucide-react'
+import {
+  clearPermissions,
+  fsRecent,
+  getCaeloMd,
+  getPermissions,
+  getPermissionRules,
+  putCaeloMd,
+  setPermissionRules,
+  type Conn
+} from '../lib/api'
 import { saveSettings, useModels } from '../lib/serverState'
 import { useWorkspace } from '../lib/useWorkspace'
 import { cn } from '../lib/cn'
@@ -39,8 +60,29 @@ export function CodeView({ conn }: { conn: Conn }) {
   // P2-3: katalog roboczy, zakładki edytora i Git wydzielone do useWorkspace.
   const ws = useWorkspace(conn)
 
-  const hLayout = useDefaultLayout({ id: 'caelo.code' })
+  // Układ: drzewo | AGENT (środek, główny) | edytor. Bok-panele zwijalne (toggle w nagłówku).
+  // Id bumpnięte do v2 — aranżacja paneli się zmieniła, więc nie czytamy starego layoutu.
+  const hLayout = useDefaultLayout({ id: 'caelo.code.v2' })
   const vLayout = useDefaultLayout({ id: 'caelo.code.center' })
+
+  // Imperatywne refy do zwijania bocznych paneli (drzewo, edytor) + stan dla ikon nagłówka.
+  const treeRef = usePanelRef()
+  const editorRef = usePanelRef()
+  const [treeCollapsed, setTreeCollapsed] = useState(false)
+  const [editorCollapsed, setEditorCollapsed] = useState(false)
+
+  const toggleTree = (): void => {
+    const p = treeRef.current
+    if (!p) return
+    if (p.isCollapsed()) p.expand()
+    else p.collapse()
+  }
+  const toggleEditor = (): void => {
+    const p = editorRef.current
+    if (!p) return
+    if (p.isCollapsed()) p.expand()
+    else p.collapse()
+  }
 
   // P2-2: modele ze współdzielonego cache.
   useEffect(() => {
@@ -68,6 +110,11 @@ export function CodeView({ conn }: { conn: Conn }) {
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws.activePath])
+
+  // Otwarcie pliku przy zwiniętym edytorze → rozwiń go, by plik był widoczny.
+  useEffect(() => {
+    if (ws.activePath && editorRef.current?.isCollapsed()) editorRef.current.expand()
+  }, [ws.activePath, editorRef])
 
   function onModelChange(m: string): void {
     setModel(m)
@@ -168,6 +215,14 @@ export function CodeView({ conn }: { conn: Conn }) {
           )}
         </Popover>
 
+        <IconButton
+          label={treeCollapsed ? 'Show file tree' : 'Hide file tree'}
+          icon={<PanelLeft size={18} />}
+          active={!treeCollapsed}
+          tooltipSide="bottom"
+          onClick={toggleTree}
+        />
+
         <span
           className="min-w-0 flex-1 truncate font-mono text-xs text-muted"
           title={ws.workspacePath || ''}
@@ -181,6 +236,13 @@ export function CodeView({ conn }: { conn: Conn }) {
           </span>
         ) : null}
 
+        <IconButton
+          label={editorCollapsed ? 'Show editor' : 'Hide editor'}
+          icon={<PanelRight size={18} />}
+          active={!editorCollapsed}
+          tooltipSide="bottom-end"
+          onClick={toggleEditor}
+        />
         <IconButton
           label="Project rules (CAELO.md) — applies to the next agent run"
           icon={<BookText size={18} />}
@@ -227,7 +289,7 @@ export function CodeView({ conn }: { conn: Conn }) {
         onLayoutChanged={hLayout.onLayoutChanged}
         className="min-h-0 flex-1"
       >
-        {/* Drzewo + Git */}
+        {/* Drzewo + Git — zwijalny bok (toggle w nagłówku) */}
         <Panel
           id="tree"
           defaultSize="18%"
@@ -235,6 +297,8 @@ export function CodeView({ conn }: { conn: Conn }) {
           maxSize="32%"
           collapsible
           collapsedSize="0%"
+          panelRef={treeRef}
+          onResize={(s) => setTreeCollapsed(s.asPercentage < 0.5)}
           style={{ overflow: 'hidden' }}
           className="flex min-h-0 flex-col bg-surface"
         >
@@ -257,10 +321,35 @@ export function CodeView({ conn }: { conn: Conn }) {
 
         <ResizeHandle orientation="horizontal" />
 
-        {/* Center: edytor (+ terminal) */}
+        {/* Agent — centralny, główny panel (zawsze widoczny) */}
         <Panel
-          id="center"
-          minSize="30%"
+          id="agent"
+          defaultSize="44%"
+          minSize="24%"
+          style={{ overflow: 'hidden' }}
+          className="min-h-0"
+        >
+          <AgentPanel
+            conn={conn}
+            workspacePath={ws.workspacePath}
+            model={model}
+            models={models}
+            onModelChange={onModelChange}
+            onFilesChanged={ws.onFilesChanged}
+          />
+        </Panel>
+
+        <ResizeHandle orientation="horizontal" />
+
+        {/* Edytor (+ terminal) — zwijalny bok (toggle w nagłówku) */}
+        <Panel
+          id="editorPane"
+          defaultSize="38%"
+          minSize="22%"
+          collapsible
+          collapsedSize="0%"
+          panelRef={editorRef}
+          onResize={(s) => setEditorCollapsed(s.asPercentage < 0.5)}
           style={{ overflow: 'hidden' }}
           className="flex min-h-0 flex-col bg-bg"
         >
@@ -295,29 +384,6 @@ export function CodeView({ conn }: { conn: Conn }) {
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">{editorPane}</div>
           )}
-        </Panel>
-
-        <ResizeHandle orientation="horizontal" />
-
-        {/* Agent */}
-        <Panel
-          id="agent"
-          defaultSize="28%"
-          minSize="18%"
-          maxSize="46%"
-          collapsible
-          collapsedSize="0%"
-          style={{ overflow: 'hidden' }}
-          className="min-h-0"
-        >
-          <AgentPanel
-            conn={conn}
-            workspacePath={ws.workspacePath}
-            model={model}
-            models={models}
-            onModelChange={onModelChange}
-            onFilesChanged={ws.onFilesChanged}
-          />
         </Panel>
       </Group>
     </div>
@@ -374,6 +440,11 @@ function RecentMenuContent({
 function PermissionsMenuContent({ conn }: { conn: Conn }) {
   const [rules, setRules] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  // M19-B4: glob rules editor (allow/deny, one ToolPrefix(glob) per line). deny > allow.
+  const [allowText, setAllowText] = useState('')
+  const [denyText, setDenyText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   function load(): void {
     setLoading(true)
@@ -381,6 +452,14 @@ function PermissionsMenuContent({ conn }: { conn: Conn }) {
       .then((r) => setRules(r.rules))
       .catch(() => setRules([]))
       .finally(() => setLoading(false))
+    void getPermissionRules(conn)
+      .then((r) => {
+        setAllowText(r.allow.join('\n'))
+        setDenyText(r.deny.join('\n'))
+      })
+      .catch(() => {
+        /* keep current text */
+      })
   }
 
   useEffect(() => {
@@ -397,6 +476,27 @@ function PermissionsMenuContent({ conn }: { conn: Conn }) {
     }
   }
 
+  const toLines = (s: string): string[] =>
+    s
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+
+  async function saveRules(): Promise<void> {
+    setSaving(true)
+    setSaveMsg(null)
+    try {
+      const r = await setPermissionRules(conn, { allow: toLines(allowText), deny: toLines(denyText) })
+      setAllowText(r.allow.join('\n'))
+      setDenyText(r.deny.join('\n'))
+      setSaveMsg({ ok: true, text: 'Saved' })
+    } catch (e) {
+      setSaveMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed to save rules' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="flex w-80 flex-col gap-2">
       <div className="flex items-center justify-between px-1 pt-1 text-xs font-semibold text-muted">
@@ -410,7 +510,7 @@ function PermissionsMenuContent({ conn }: { conn: Conn }) {
           Nothing allowed yet. “Always allow” on an approval card adds a rule here.
         </div>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
           {rules.map((r) => (
             <div
               key={r}
@@ -430,6 +530,47 @@ function PermissionsMenuContent({ conn }: { conn: Conn }) {
       >
         Clear all
       </Button>
+
+      {/* M19-B4: glob permission rules (deny > allow). One rule per line, e.g. Bash(npm*) */}
+      <div className="mt-2 border-t border-border pt-2">
+        <div className="px-1 text-xs font-semibold text-muted">Rules (glob) — deny &gt; allow</div>
+        <div className="mt-1 px-1 text-[11px] leading-tight text-muted">
+          One per line, e.g. <span className="font-mono">Bash(npm*)</span>,{' '}
+          <span className="font-mono">Edit(src/**)</span>,{' '}
+          <span className="font-mono">WebFetch(domain:docs.rs)</span>.
+        </div>
+        <label className="mt-2 block px-1 text-[11px] font-semibold text-muted">Allow</label>
+        <textarea
+          value={allowText}
+          onChange={(e) => setAllowText(e.target.value)}
+          rows={3}
+          spellCheck={false}
+          placeholder="Bash(npm*)"
+          className="mt-1 w-full resize-y rounded-md border border-border bg-surface-2 px-2 py-1.5 font-mono text-xs text-fg outline-none focus:border-accent"
+        />
+        <label className="mt-2 block px-1 text-[11px] font-semibold text-muted">Deny</label>
+        <textarea
+          value={denyText}
+          onChange={(e) => setDenyText(e.target.value)}
+          rows={3}
+          spellCheck={false}
+          placeholder="Bash(rm*)"
+          className="mt-1 w-full resize-y rounded-md border border-border bg-surface-2 px-2 py-1.5 font-mono text-xs text-fg outline-none focus:border-accent"
+        />
+        {saveMsg ? (
+          <div
+            className={cn(
+              'mt-1 px-1 text-[11px]',
+              saveMsg.ok ? 'text-emerald-500' : 'text-red-500'
+            )}
+          >
+            {saveMsg.text}
+          </div>
+        ) : null}
+        <Button size="sm" className="mt-2 w-full" onClick={saveRules} disabled={saving}>
+          {saving ? 'Saving…' : 'Save rules'}
+        </Button>
+      </div>
     </div>
   )
 }

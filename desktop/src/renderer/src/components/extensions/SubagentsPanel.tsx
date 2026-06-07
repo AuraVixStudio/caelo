@@ -7,7 +7,8 @@ import {
   upsertTeamRole,
   type Conn,
   type TeamLimits,
-  type TeamRole
+  type TeamRole,
+  type TeamRoleIO
 } from '../../lib/api'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -131,6 +132,10 @@ function blankRole(): TeamRole {
     mcp: 'readonly',
     worktree: false,
     model: '',
+    reasoning_effort: '',
+    instructions: '',
+    inputs: [],
+    outputs: [],
     prompt: '',
     builtin: false
   }
@@ -157,6 +162,73 @@ function RoleRow({ role, onEdit }: { role: TeamRole; onEdit: () => void }) {
   )
 }
 
+/** M19-B11: edit a role's declared input/output fields (persona I/O contract). */
+function IoListEditor({
+  label,
+  items,
+  onChange
+}: {
+  label: string
+  items: TeamRoleIO[]
+  onChange: (items: TeamRoleIO[]) => void
+}) {
+  const update = (i: number, patch: Partial<TeamRoleIO>): void =>
+    onChange(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)))
+  const remove = (i: number): void => onChange(items.filter((_, idx) => idx !== i))
+  const add = (): void =>
+    onChange([...items, { name: '', io_type: 'text', required: false, description: '' }])
+
+  return (
+    <Field label={label}>
+      <div className="flex flex-col gap-1.5">
+        {items.map((it, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <Input
+              value={it.name}
+              onChange={(e) => update(i, { name: e.target.value })}
+              placeholder="name"
+              className="w-28 font-mono text-[11px]"
+            />
+            <Select
+              value={it.io_type}
+              onChange={(e) => update(i, { io_type: e.target.value as TeamRoleIO['io_type'] })}
+              className="w-20"
+            >
+              <option value="text">text</option>
+              <option value="file">file</option>
+            </Select>
+            <label className="flex items-center gap-1 text-[11px] text-muted">
+              <input
+                type="checkbox"
+                checked={it.required}
+                onChange={(e) => update(i, { required: e.target.checked })}
+              />
+              req
+            </label>
+            <Input
+              value={it.description}
+              onChange={(e) => update(i, { description: e.target.value })}
+              placeholder="description"
+              className="flex-1 text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              aria-label="Remove field"
+              className="shrink-0 text-muted transition-colors hover:text-error"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))}
+        <Button variant="ghost" size="sm" icon={<Plus size={13} />} onClick={add}>
+          Add field
+        </Button>
+      </div>
+    </Field>
+  )
+}
+
 function RoleEditor({
   role,
   onSave,
@@ -168,7 +240,12 @@ function RoleEditor({
   onCancel: () => void
   onReset?: () => void
 }) {
-  const [draft, setDraft] = useState<TeamRole>(role)
+  // M19-B11: edytuj jedno pole persony — `instructions`. Gdy rola ma tylko legacy
+  // `prompt` (builtiny M17), wczytaj go jako wartość początkową (instructions nadpisuje).
+  const [draft, setDraft] = useState<TeamRole>(() => ({
+    ...role,
+    instructions: role.instructions || role.prompt
+  }))
   const isNew = role.id === ''
 
   function toggleTool(t: string): void {
@@ -232,6 +309,21 @@ function RoleEditor({
         </Field>
       </div>
 
+      {/* M19-B9: reasoning_effort per role (blank = inherit the run's effort). */}
+      <Field label="Reasoning effort (blank = inherit)">
+        <Select
+          value={draft.reasoning_effort}
+          onChange={(e) =>
+            setDraft({ ...draft, reasoning_effort: e.target.value as TeamRole['reasoning_effort'] })
+          }
+        >
+          <option value="">auto (inherit)</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </Select>
+      </Field>
+
       <label className="flex items-center gap-2 text-xs text-muted">
         <input
           type="checkbox"
@@ -246,15 +338,27 @@ function RoleEditor({
         </p>
       ) : null}
 
-      <Field label="System prompt (role persona)">
+      <Field label="Instructions (role persona)">
         <Textarea
-          value={draft.prompt}
-          onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
+          value={draft.instructions}
+          onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
           rows={4}
           className="font-mono text-[11.5px]"
           placeholder="You are a … subagent. …"
         />
       </Field>
+
+      {/* M19-B11: declared I/O contract — what the orchestrator passes / what comes back. */}
+      <IoListEditor
+        label="Inputs (what the orchestrator may pass in)"
+        items={draft.inputs}
+        onChange={(inputs) => setDraft({ ...draft, inputs })}
+      />
+      <IoListEditor
+        label="Outputs (what the subagent should return)"
+        items={draft.outputs}
+        onChange={(outputs) => setDraft({ ...draft, outputs })}
+      />
 
       <div className="flex items-center gap-2">
         <Button size="sm" icon={<Save size={14} />} disabled={!draft.id.trim()} onClick={() => onSave(draft)}>

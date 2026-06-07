@@ -1,5 +1,26 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { Check, ChevronDown, History, ListChecks, Mic, Pencil, Play, ShieldCheck, Square, Undo2, Zap } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  FolderTree,
+  Globe,
+  History,
+  ListChecks,
+  Loader2,
+  Mic,
+  Pencil,
+  Play,
+  Plug,
+  Search,
+  ShieldCheck,
+  Square,
+  Terminal,
+  Undo2,
+  Zap
+} from 'lucide-react'
 import { AgentConnection, type AgentEvent, type ApprovalDetail } from '../../lib/agentClient'
 import {
   agentUndo,
@@ -10,6 +31,7 @@ import {
   type ChatAttachment,
   type CheckpointInfo,
   type Conn,
+  type ReasoningEffort,
   type TeamMerge,
   type TeamReport
 } from '../../lib/api'
@@ -44,6 +66,7 @@ import { Markdown } from '../Markdown'
 import { AttachButton, AttachmentChips } from '../Attachments'
 import { Button } from '../ui/Button'
 import { IconButton } from '../ui/IconButton'
+import { EffortSelect } from '../ui/EffortSelect'
 import { ModelSelect } from '../ui/ModelSelect'
 import { Popover } from '../ui/Popover'
 import { Textarea } from '../ui/Textarea'
@@ -62,7 +85,7 @@ function modeIcon(id: AgentMode, size = 14): ReactNode {
   }
 }
 
-type Entry =
+export type Entry =
   | { kind: 'user'; id: string; text: string; attachments?: ChatAttachment[] }
   | { kind: 'assistant'; id: string; text: string }
   | { kind: 'error'; id: string; text: string }
@@ -104,6 +127,8 @@ export function AgentPanel({
   const [dragging, setDragging] = useState(false) // M9-F4: drop plików do composera
   // M13-F2: tryb agenta (ask/accept-edits/plan/bypass) + faza cyklu plan → review → execute.
   const [mode, setMode] = useState<AgentMode>('ask')
+  // M19-B9: reasoning_effort tej sesji ('' = Auto → backend użyje code_effort).
+  const [effort, setEffort] = useState<ReasoningEffort>('')
   const [planPhase, setPlanPhase] = useState<PlanPhase>('idle')
   // M13-F3: oś checkpointów sesji + flaga „partial undo".
   const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([])
@@ -185,7 +210,6 @@ export function AgentPanel({
       setTeamNodes({}) // nowy workspace → nowe drzewo zespołu
       setTeamReport(null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
 
   useEffect(() => {
@@ -306,6 +330,26 @@ export function AgentPanel({
         setBusy(false)
         setPlanPhase((p) => planReducer(p, { type: 'done' }))
         break
+      case 'diagnostics': {
+        // M19-B3: pasywna diagnostyka LSP po edycie — pokaż w transkrypcie (puste pomiń).
+        if (e.items.length === 0) break
+        const base = e.path.split('/').pop() || e.path
+        const lines = e.items.slice(0, 5).map((d) => {
+          const ln = typeof d.line === 'number' ? `L${d.line + 1}: ` : ''
+          return `• ${ln}${d.message}`
+        })
+        const more = e.items.length > 5 ? `\n…and ${e.items.length - 5} more` : ''
+        setEntries((prev) => [
+          ...prev,
+          {
+            kind: 'info',
+            id: nextId(),
+            tone: 'warn',
+            text: `LSP — ${e.items.length} problem(s) in ${base}\n${lines.join('\n')}${more}`
+          }
+        ])
+        break
+      }
       case 'workspace':
         break // potwierdzenie ustawienia katalogu — obsługiwane po stronie CodeView
       default:
@@ -332,7 +376,7 @@ export function AgentPanel({
     setBusy(true)
     setInput('')
     att.clear()
-    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts), mode)
+    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts), mode, effort)
   }
 
   // M13-F2: zatwierdź plan i wykonaj go w trybie „accept edits" (plan był sprawdzony).
@@ -345,7 +389,7 @@ export function AgentPanel({
     curAssistant.current = null
     turnWasPlanRef.current = false
     setBusy(true)
-    agentRef.current?.sendMessage(text, model, [], 'accept-edits')
+    agentRef.current?.sendMessage(text, model, [], 'accept-edits', effort)
   }
 
   function approve(id: string, decision: 'accept' | 'reject' | 'always'): void {
@@ -523,8 +567,9 @@ export function AgentPanel({
           </div>
         ) : null}
         <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />
-        <div className="flex items-end gap-2">
+        <div className="flex items-center gap-2">
           <ModeSelector mode={mode} disabled={false} onSelect={setMode} />
+          <EffortSelect effort={effort} onSelect={setEffort} align="end" />
           <AttachButton onPick={att.addFiles} disabled={!connected} className="h-8 w-8 rounded-lg" />
           <Textarea
             value={input}
@@ -718,7 +763,7 @@ function CheckpointsMenu({
   )
 }
 
-function EntryView({
+export function EntryView({
   entry,
   onApprove
 }: {
@@ -768,86 +813,188 @@ function EntryView({
     )
   }
 
-  // tool
+  // tool — własny komponent (kompaktowy, zwijany; trzyma stan rozwinięcia).
+  return <ToolEntryView entry={entry} onApprove={onApprove} />
+}
+
+type ToolEntry = Extract<Entry, { kind: 'tool' }>
+
+// Ikona per-narzędzie — czytelniejszy strumień niż sama nazwa (read/list/grep/edit/run…).
+function toolIcon(name: string, size = 13): ReactNode {
+  if (name.startsWith('mcp__')) return <Plug size={size} />
+  switch (name) {
+    case 'read_file':
+      return <FileText size={size} />
+    case 'list_dir':
+      return <FolderTree size={size} />
+    case 'glob':
+    case 'grep':
+      return <Search size={size} />
+    case 'write_file':
+    case 'edit_file':
+      return <Pencil size={size} />
+    case 'run_command':
+      return <Terminal size={size} />
+    case 'web_fetch':
+      return <Globe size={size} />
+    default:
+      return <FileText size={size} />
+  }
+}
+
+function ToolStatus({ status }: { status: ToolEntry['status'] }): ReactNode {
+  switch (status) {
+    case 'pending':
+      return <Loader2 size={13} className="shrink-0 animate-spin text-muted" />
+    case 'awaiting':
+      return (
+        <span className="shrink-0 rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warn">
+          approve
+        </span>
+      )
+    case 'error':
+      return <AlertTriangle size={13} className="shrink-0 text-error" />
+    default: // done
+      return <Check size={13} className="shrink-0 text-success/70" />
+  }
+}
+
+/**
+ * Pojedyncze wywołanie narzędzia. Domyślnie **kompaktowe** (jeden wiersz: ikona + nazwa
+ * + argument + status), żeby seria odczytów plików nie zalewała transkryptu. Output i
+ * podsumowanie chowamy pod rozwijaniem (klik w nagłówek). Wpisy oczekujące na
+ * zatwierdzenie oraz błędy są zawsze rozwinięte — wymagają uwagi.
+ */
+function ToolEntryView({
+  entry,
+  onApprove
+}: {
+  entry: ToolEntry
+  onApprove: (id: string, decision: 'accept' | 'reject' | 'always') => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+
   const argSummary =
     entry.name === 'run_command'
       ? String(entry.args.command ?? '')
       : String(entry.args.path ?? JSON.stringify(entry.args))
+
+  const isAwaiting = entry.status === 'awaiting'
+  const isError = entry.status === 'error'
+  const hasOutput = !!entry.output
+  const hasSummary = !!entry.summary && !isAwaiting
+  const hasDetails = hasOutput || hasSummary
+  const showDetails = isAwaiting || isError || (expanded && hasDetails)
+  // Oczekujące zatwierdzenie i błąd są wymuszenie rozwinięte → bez chevrona/przełączania.
+  const canToggle = !isAwaiting && !isError && hasDetails
+
   return (
     <div
       className={cn(
         'overflow-hidden rounded-lg border text-xs',
-        entry.status === 'awaiting'
-          ? 'border-warn'
-          : entry.status === 'error'
-            ? 'border-error'
-            : 'border-border'
+        isAwaiting ? 'border-warn' : isError ? 'border-error' : 'border-border'
       )}
     >
-      <div className="flex items-center gap-2 bg-surface-2 px-2.5 py-1.5">
-        <span className="font-bold text-accent">{entry.name}</span>
+      <button
+        type="button"
+        onClick={canToggle ? () => setExpanded((v) => !v) : undefined}
+        aria-expanded={canToggle ? showDetails : undefined}
+        className={cn(
+          'flex w-full items-center gap-2 bg-surface-2 px-2.5 py-1.5 text-left outline-none',
+          canToggle
+            ? 'cursor-pointer hover:bg-surface-3/60 focus-visible:ring-2 focus-visible:ring-accent'
+            : 'cursor-default'
+        )}
+      >
+        <span className="shrink-0 text-muted">{toolIcon(entry.name)}</span>
+        <span className="shrink-0 font-semibold text-accent">{entry.name}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-muted" title={argSummary}>
           {argSummary}
         </span>
-        {entry.detail?.created && entry.status === 'awaiting' ? (
+        {entry.detail?.created && isAwaiting ? (
           <span className="shrink-0 rounded bg-success/15 px-1 text-[10px] text-success">new</span>
         ) : null}
-        <span className="shrink-0 text-[10px] uppercase text-muted">{entry.status}</span>
-      </div>
+        <ToolStatus status={entry.status} />
+        {canToggle ? (
+          showDetails ? (
+            <ChevronDown size={13} className="shrink-0 text-muted" />
+          ) : (
+            <ChevronRight size={13} className="shrink-0 text-muted" />
+          )
+        ) : null}
+      </button>
 
-      {entry.status === 'awaiting' && entry.detail ? (
-        <div className="flex flex-col gap-2 p-2.5">
-          {entry.detail.kind === 'diff' ? (
-            <DiffView diff={entry.detail.diff ?? ''} />
-          ) : entry.detail.kind === 'binary' ? (
-            <div className="rounded-md bg-surface-2 px-2.5 py-2 font-mono text-[11.5px] text-muted">
-              {entry.detail.detail ?? 'Binary file would change'}
-            </div>
-          ) : entry.detail.kind === 'command' ? (
-            <pre className="m-0 whitespace-pre-wrap rounded-md bg-surface-2 px-2.5 py-2 font-mono text-xs text-fg/90">
-              $ {entry.detail.command}
-              {entry.detail.cwd ? `   (cwd: ${entry.detail.cwd})` : ''}
-            </pre>
-          ) : entry.detail.kind === 'mcp_tool_call' ? (
-            <div className="rounded-md bg-surface-2 px-2.5 py-2">
-              <div className="mb-1 flex items-center gap-2 text-xs">
-                <span className="rounded bg-accent/15 px-1.5 py-0.5 font-medium text-accent">MCP</span>
-                <span className="font-mono text-fg/90">{entry.detail.tool}</span>
-                {entry.detail.server ? (
-                  <span className="text-muted">on {entry.detail.server}</span>
-                ) : null}
-              </div>
-              {entry.detail.description ? (
-                <p className="mb-1.5 text-[11.5px] text-muted">{entry.detail.description}</p>
+      {showDetails ? (
+        <>
+          {isAwaiting && entry.detail ? (
+            <div className="flex flex-col gap-2 p-2.5">
+              {entry.detail.kind === 'diff' ? (
+                <DiffView diff={entry.detail.diff ?? ''} />
+              ) : entry.detail.kind === 'binary' ? (
+                <div className="rounded-md bg-surface-2 px-2.5 py-2 font-mono text-[11.5px] text-muted">
+                  {entry.detail.detail ?? 'Binary file would change'}
+                </div>
+              ) : entry.detail.kind === 'command' ? (
+                <pre className="m-0 whitespace-pre-wrap rounded-md bg-surface-2 px-2.5 py-2 font-mono text-xs text-fg/90">
+                  $ {entry.detail.command}
+                  {entry.detail.cwd ? `   (cwd: ${entry.detail.cwd})` : ''}
+                </pre>
+              ) : entry.detail.kind === 'web_fetch' ? (
+                <div className="rounded-md bg-surface-2 px-2.5 py-2">
+                  <div className="mb-1 flex items-center gap-2 text-xs">
+                    <span className="rounded bg-accent/15 px-1.5 py-0.5 font-medium text-accent">
+                      Web
+                    </span>
+                    <span className="text-muted">fetch URL (network)</span>
+                  </div>
+                  <pre className="m-0 whitespace-pre-wrap break-all font-mono text-[11.5px] text-fg/90">
+                    {entry.detail.url}
+                  </pre>
+                </div>
+              ) : entry.detail.kind === 'mcp_tool_call' ? (
+                <div className="rounded-md bg-surface-2 px-2.5 py-2">
+                  <div className="mb-1 flex items-center gap-2 text-xs">
+                    <span className="rounded bg-accent/15 px-1.5 py-0.5 font-medium text-accent">
+                      MCP
+                    </span>
+                    <span className="font-mono text-fg/90">{entry.detail.tool}</span>
+                    {entry.detail.server ? (
+                      <span className="text-muted">on {entry.detail.server}</span>
+                    ) : null}
+                  </div>
+                  {entry.detail.description ? (
+                    <p className="mb-1.5 text-[11.5px] text-muted">{entry.detail.description}</p>
+                  ) : null}
+                  <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11.5px] text-fg/80">
+                    {JSON.stringify(entry.detail.args ?? {}, null, 2)}
+                  </pre>
+                </div>
               ) : null}
-              <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11.5px] text-fg/80">
-                {JSON.stringify(entry.detail.args ?? {}, null, 2)}
-              </pre>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => onApprove(entry.id, 'accept')}>
+                  Accept
+                </Button>
+                <Button variant="danger" size="sm" onClick={() => onApprove(entry.id, 'reject')}>
+                  Reject
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => onApprove(entry.id, 'always')}>
+                  Always allow
+                </Button>
+              </div>
             </div>
           ) : null}
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => onApprove(entry.id, 'accept')}>
-              Accept
-            </Button>
-            <Button variant="danger" size="sm" onClick={() => onApprove(entry.id, 'reject')}>
-              Reject
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => onApprove(entry.id, 'always')}>
-              Always allow
-            </Button>
-          </div>
-        </div>
-      ) : null}
 
-      {entry.output ? (
-        <pre className="m-0 max-h-44 overflow-auto whitespace-pre-wrap bg-surface-3/40 px-2.5 py-2 font-mono text-[11.5px]">
-          {entry.output.slice(-4000)}
-        </pre>
-      ) : null}
-      {entry.summary && entry.status !== 'awaiting' ? (
-        <div className="whitespace-pre-wrap border-t border-border px-2.5 py-1.5 font-mono text-[11.5px] text-muted">
-          {entry.summary}
-        </div>
+          {hasOutput ? (
+            <pre className="m-0 max-h-44 overflow-auto whitespace-pre-wrap bg-surface-3/40 px-2.5 py-2 font-mono text-[11.5px]">
+              {entry.output.slice(-4000)}
+            </pre>
+          ) : null}
+          {hasSummary ? (
+            <div className="whitespace-pre-wrap border-t border-border px-2.5 py-1.5 font-mono text-[11.5px] text-muted">
+              {entry.summary}
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   )

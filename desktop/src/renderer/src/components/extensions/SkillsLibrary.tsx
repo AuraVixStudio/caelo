@@ -18,6 +18,21 @@ import { Field } from '../ui/Page'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
 
+/** M19-B5 §1.3: human label for an interop discovery source (ecosystem dirs).
+ * Returns '' for native sources (builtin/user) — they get no extra badge. */
+function sourceLabel(source?: string): string {
+  switch (source) {
+    case 'claude-global':
+      return '~/.claude'
+    case 'claude-project':
+      return '.claude'
+    case 'grok-project':
+      return '.grok'
+    default:
+      return ''
+  }
+}
+
 /** M14-F5: browse/enable/create skills (reusable workflows; Ren'Py/DAZ bundled). */
 export function SkillsLibrary({ conn }: { conn: Conn }) {
   const [skills, setSkills] = useState<SkillInfo[]>([])
@@ -124,6 +139,7 @@ export function SkillsLibrary({ conn }: { conn: Conn }) {
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium text-fg">{s.name}</span>
                     {s.builtin ? <Badge tone="accent">built-in</Badge> : null}
+                    {sourceLabel(s.source) ? <Badge>{sourceLabel(s.source)}</Badge> : null}
                   </div>
                   <p className="mt-0.5 text-xs text-muted">{s.description}</p>
                 </div>
@@ -146,7 +162,7 @@ export function SkillsLibrary({ conn }: { conn: Conn }) {
                   icon={<Share2 size={14} />}
                   aria-label="Export skill"
                 />
-                {!s.builtin ? (
+                {s.source === 'user' || (!s.builtin && !s.source) ? (
                   <Button
                     variant="ghost"
                     size="sm"

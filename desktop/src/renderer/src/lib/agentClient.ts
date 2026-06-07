@@ -7,10 +7,11 @@ import type { Conn } from './api'
 /** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda / plik binarny /
  *  wywołanie narzędzia MCP — M14-F2). */
 export interface ApprovalDetail {
-  kind?: string // 'diff' | 'command' | 'binary' | 'error' | 'mcp_tool_call'
+  kind?: string // 'diff' | 'command' | 'binary' | 'error' | 'mcp_tool_call' | 'web_fetch'
   diff?: string
   command?: string
   cwd?: string
+  url?: string // M19-B13: kind === 'web_fetch'
   created?: boolean // M13-B1: diff dla NOWEGO pliku (same dodania)
   bytes?: number // M13-B1: rozmiar dla kind === 'binary'
   detail?: string // komunikat dla 'binary'/'error'
@@ -43,6 +44,14 @@ export interface SubagentStatus {
  * Ramki serwer→klient agenta (P2-7) — **discriminated union** po `type`, zgodny z
  * protokołem w `caelo_core/routes/agent.py`. Zastępuje luźne `{type:string; [k]:unknown}`.
  */
+// M19-B3: pojedyncza diagnostyka LSP (znormalizowana z LSP Diagnostic).
+export interface LspDiagnostic {
+  message: string
+  severity?: number // 1=error 2=warning 3=info 4=hint (LSP)
+  source?: string
+  line?: number // range.start.line (0-based)
+}
+
 export type AgentEvent =
   | { type: 'workspace'; path: string }
   | { type: 'text'; full: string }
@@ -55,6 +64,8 @@ export type AgentEvent =
   | { type: 'stopped' }
   | { type: 'done' }
   | { type: 'error'; error: string }
+  // M19-B3: pasywna diagnostyka LSP po edycie pliku.
+  | { type: 'diagnostics'; path: string; items: LspDiagnostic[] }
   // M17 — zespół subagentów (multipleks po agent_id na tym samym WS):
   | { type: 'subagent'; agent_id: string; role: string; task: string; event: AgentEvent }
   | ({ type: 'subagent_status' } & SubagentStatus)
@@ -78,6 +89,7 @@ function parseDetail(v: unknown): ApprovalDetail | undefined {
   if (typeof d.diff === 'string') out.diff = d.diff
   if (typeof d.command === 'string') out.command = d.command
   if (typeof d.cwd === 'string') out.cwd = d.cwd
+  if (typeof d.url === 'string') out.url = d.url // M19-B13
   if (typeof d.created === 'boolean') out.created = d.created
   if (typeof d.bytes === 'number') out.bytes = d.bytes
   if (typeof d.detail === 'string') out.detail = d.detail
@@ -140,6 +152,21 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
       return { type: 'done' }
     case 'error':
       return { type: 'error', error: asString(o.error, 'error') }
+    case 'diagnostics': {
+      const rawItems = Array.isArray(o.items) ? o.items : []
+      const items: LspDiagnostic[] = rawItems.map((it) => {
+        const d = asRecord(it)
+        const range = asRecord(d.range)
+        const start = asRecord(range.start)
+        return {
+          message: asString(d.message),
+          severity: typeof d.severity === 'number' ? d.severity : undefined,
+          source: typeof d.source === 'string' ? d.source : undefined,
+          line: typeof start.line === 'number' ? start.line : undefined
+        }
+      })
+      return { type: 'diagnostics', path: asString(o.path), items }
+    }
     case 'subagent': {
       const inner = parseAgentEvent(o.event) // zagnieżdżona ramka subagenta
       if (!inner) return null
@@ -255,9 +282,18 @@ export class AgentConnection {
     this.send({ type: 'workspace', path })
   }
 
-  sendMessage(text: string, model: string, images: string[] = [], mode = 'ask'): void {
+  sendMessage(
+    text: string,
+    model: string,
+    images: string[] = [],
+    mode = 'ask',
+    effort = ''
+  ): void {
     // M13: mode = ask | accept-edits | plan | bypass (jak „Mode" w Claude Code).
-    this.send({ type: 'message', text, model, images, mode })
+    // M19-B9: effort = '' | low | medium | high (pusty → backend użyje code_effort).
+    const frame: Record<string, unknown> = { type: 'message', text, model, images, mode }
+    if (effort) frame.effort = effort
+    this.send(frame)
   }
 
   approve(id: string, decision: 'accept' | 'reject' | 'always'): void {

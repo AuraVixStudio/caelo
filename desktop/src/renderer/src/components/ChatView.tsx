@@ -11,6 +11,7 @@ import { Group, Panel, useDefaultLayout, usePanelRef } from 'react-resizable-pan
 import {
   ArrowUp,
   Copy,
+  Download,
   ExternalLink,
   FileText,
   Globe,
@@ -25,7 +26,13 @@ import {
   Volume2,
   X
 } from 'lucide-react'
-import { type ChatMessage, type Conn, type SearchMode, type ToolEvent } from '../lib/api'
+import {
+  type ChatMessage,
+  type Conn,
+  type ReasoningEffort,
+  type SearchMode,
+  type ToolEvent
+} from '../lib/api'
 import { saveSettings, useModels, useSettings } from '../lib/serverState'
 import { toApiMessages } from '../lib/attachments'
 import {
@@ -40,6 +47,7 @@ import { useHub } from '../lib/hub'
 import { useAttachments } from '../lib/useAttachments'
 import { useChatStream } from '../lib/useChatStream'
 import { useConversations } from '../lib/useConversations'
+import { conversationToMarkdown, downloadText, safeFilename } from '../lib/exportMarkdown'
 import { appendDictation, useDictation } from '../lib/useDictation'
 import { useTts } from '../lib/useTts'
 import { AttachButton, AttachmentChips } from './Attachments'
@@ -49,6 +57,7 @@ import { cn } from '../lib/cn'
 import { Markdown } from './Markdown'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
+import { EffortSelect } from './ui/EffortSelect'
 import { ModelSelect } from './ui/ModelSelect'
 import { Popover } from './ui/Popover'
 import { ResizeHandle } from './ui/ResizeHandle'
@@ -209,6 +218,8 @@ export function ChatView({ conn }: { conn: Conn }) {
   // M10-F1/F3: live search — mode (auto/on/off) + sources, plus transient activity.
   const [searchMode, setSearchMode] = useState<SearchMode>('off')
   const [sources, setSources] = useState<string[]>(['web', 'x'])
+  // M19-B9: reasoning_effort dla czatu ('' = Auto → backend użyje chat_effort).
+  const [effort, setEffort] = useState<ReasoningEffort>('')
   const [searchActivity, setSearchActivity] = useState<ToolEvent | null>(null)
 
   // Voice: czytanie odpowiedzi na głos (TTS → useTts); dyktowanie promptu (STT → useDictation).
@@ -264,6 +275,7 @@ export function ChatView({ conn }: { conn: Conn }) {
     setModel((prev) => prev || settings.chat_model)
     if (settings.chat_search_mode) setSearchMode(settings.chat_search_mode)
     if (settings.chat_search_sources?.length) setSources(settings.chat_search_sources)
+    if (settings.chat_effort !== undefined) setEffort(settings.chat_effort) // M19-B9
     // M12-F4: read-aloud używa domyślnego głosu z ustawień (fallback: /models).
     if (settings.voice) setDefaultVoice(settings.voice)
   }, [settings])
@@ -320,7 +332,9 @@ export function ChatView({ conn }: { conn: Conn }) {
         system_prompt: systemPrompt,
         // M10-B2: live-search mode + sources (sources only matter when searching).
         search_mode: searchMode,
-        sources: searchMode !== 'off' ? sources : undefined
+        sources: searchMode !== 'off' ? sources : undefined,
+        // M19-B9: reasoning_effort ('' → omit; backend dziedziczy chat_effort).
+        reasoning_effort: effort || undefined
       },
       {
         onDelta: (full) =>
@@ -422,6 +436,21 @@ export function ChatView({ conn }: { conn: Conn }) {
   function changeSearchMode(mode: SearchMode): void {
     setSearchMode(mode)
     void saveSettings(conn, { chat_search_mode: mode }).catch(() => undefined)
+  }
+
+  // M19-B9: reasoning_effort choice persists as the app-wide chat default.
+  function changeEffort(e: ReasoningEffort): void {
+    setEffort(e)
+    void saveSettings(conn, { chat_effort: e }).catch(() => undefined)
+  }
+
+  // M19-B10: export the active conversation to a Markdown file (renderer-side).
+  function exportChat(): void {
+    if (!convo.active) return
+    downloadText(
+      safeFilename(convo.active.title) + '.md',
+      conversationToMarkdown(convo.active)
+    )
   }
 
   function toggleSource(src: string): void {
@@ -578,6 +607,15 @@ export function ChatView({ conn }: { conn: Conn }) {
             <ModelSelect value={model} models={models} onChange={onModelChange} />
           </div>
           <div className="ml-auto flex items-center gap-1">
+            <EffortSelect effort={effort} onSelect={changeEffort} side="bottom" align="end" />
+            <IconButton
+              label="Export chat as Markdown"
+              icon={<Download size={18} />}
+              tooltip
+              tooltipSide="bottom-end"
+              disabled={messages.length === 0}
+              onClick={exportChat}
+            />
             <KnowledgePopover conn={conn} onAttach={att.add} />
             <Popover
               align="end"

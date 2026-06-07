@@ -14,7 +14,13 @@ export async function mockBackend(
     '/commands': { commands: [] },
     '/history': { events: [] },
     '/artifacts': { artifacts: [] },
-    '/settings': { chat_model: 'grok-4', code_model: 'grok-4', has_api_key: true },
+    '/settings': {
+      chat_model: 'grok-4',
+      code_model: 'grok-4',
+      chat_effort: '',
+      code_effort: '',
+      has_api_key: true
+    },
     '/models': { chat: ['grok-4'], code: ['grok-4'], default_chat: 'grok-4', default_code: 'grok-4' }
   }
   await page.route('http://127.0.0.1:9/**', async (route) => {

@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Blocks, SlashSquare, Store, Users, Webhook, Sparkles } from 'lucide-react'
+import { Blocks, FileCode, SlashSquare, Store, Users, Webhook, Sparkles } from 'lucide-react'
 import type { Conn } from '../lib/api'
 import { cn } from '../lib/cn'
 import { Page } from './ui/Page'
 import { McpServers } from './extensions/McpServers'
+import { LspServers } from './extensions/LspServers'
 import { HooksPanel } from './extensions/HooksPanel'
 import { SkillsLibrary } from './extensions/SkillsLibrary'
 import { CommandsPanel } from './extensions/CommandsPanel'
@@ -12,6 +13,7 @@ import { Marketplace } from './extensions/Marketplace'
 
 const TABS = [
   { id: 'mcp', label: 'MCP Servers', icon: Blocks },
+  { id: 'lsp', label: 'Language Servers', icon: FileCode },
   { id: 'commands', label: 'Commands', icon: SlashSquare },
   { id: 'hooks', label: 'Hooks', icon: Webhook },
   { id: 'skills', label: 'Skills', icon: Sparkles },
@@ -54,6 +56,7 @@ export function Extensions({ conn }: { conn: Conn }) {
       </div>
 
       {tab === 'mcp' ? <McpServers conn={conn} /> : null}
+      {tab === 'lsp' ? <LspServers conn={conn} /> : null}
       {tab === 'commands' ? <CommandsPanel conn={conn} /> : null}
       {tab === 'hooks' ? <HooksPanel conn={conn} /> : null}
       {tab === 'skills' ? <SkillsLibrary conn={conn} /> : null}
