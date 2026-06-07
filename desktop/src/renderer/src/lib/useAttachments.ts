@@ -11,14 +11,14 @@ import type { ChatAttachment } from './api'
  */
 export function useAttachments(): {
   attachments: ChatAttachment[]
-  addFiles: (files: FileList | null) => Promise<void>
+  addFiles: (files: FileList | File[] | null) => Promise<void>
   add: (att: ChatAttachment) => void
   removeAttachment: (id: string) => void
   clear: () => void
 } {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
 
-  async function addFiles(files: FileList | null): Promise<void> {
+  async function addFiles(files: FileList | File[] | null): Promise<void> {
     if (!files) return
     const loaded = (await Promise.all(Array.from(files).map(fileToAttachment))).filter(
       Boolean

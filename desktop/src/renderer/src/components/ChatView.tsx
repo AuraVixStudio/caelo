@@ -1011,6 +1011,28 @@ export function ChatView({ conn }: { conn: Conn }) {
               onChange={(e) => setInput(e.target.value)}
               onInput={autoGrow}
               onKeyDown={onKeyDown}
+              onPaste={(e) => {
+                // Wklej zrzut/obraz ze schowka jako załącznik (Ctrl+V). Obrazy ze
+                // schowka nie mają nazwy pliku → nadajemy domyślną.
+                const items = e.clipboardData?.items
+                if (!items) return
+                const imgs: File[] = []
+                for (const it of Array.from(items)) {
+                  if (it.kind === 'file' && it.type.startsWith('image/')) {
+                    const f = it.getAsFile()
+                    if (f)
+                      imgs.push(
+                        f.name
+                          ? f
+                          : new File([f], 'pasted-image.png', { type: f.type || 'image/png' })
+                      )
+                  }
+                }
+                if (imgs.length) {
+                  e.preventDefault()
+                  void att.addFiles(imgs)
+                }
+              }}
               placeholder="Type a message…"
               rows={1}
               className="max-h-52 flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed text-fg outline-none placeholder:text-muted"
