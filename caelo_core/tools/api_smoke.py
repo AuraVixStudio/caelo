@@ -58,6 +58,8 @@ from caelo_core.tools.smoke_routes import (  # noqa: F401,E402
     _unit_history_routes,
     _unit_projects_routes,
     _unit_agent_routes,
+    _unit_permissions_routes,
+    _unit_lsp_routes,
     _unit_mcp_routes,
     _unit_team_routes,
 )
@@ -272,6 +274,12 @@ def main() -> int:
 
         # M13-B5: trasy agenta (checkpoints/undo/caelo-md) — in-process.
         _unit_agent_routes(checks)
+
+        # M19-B4: trasy /permissions/rules (reguły glob — walidacja/persystencja/przebudowa).
+        _unit_permissions_routes(checks)
+
+        # M19-B3: trasy /lsp (serwery języka — lista/dodaj/usuń).
+        _unit_lsp_routes(checks)
 
         # M14-B1/F1: trasy /mcp (serwery MCP) — in-process (remote + stdio mock).
         _unit_mcp_routes(checks)

@@ -3,7 +3,7 @@
 Protokół (JSON):
   klient -> serwer:
     {"type":"workspace","path":"C:/..."}          # ustaw katalog roboczy
-    {"type":"message","text":"...","model":"...","mode":"ask"}  # nowa tura agenta
+    {"type":"message","text":"...","model":"...","mode":"ask","effort":"high"}  # nowa tura agenta (effort: M19-B9, opcjonalny)
     {"type":"approval","id":"<call_id>","decision":"accept|reject|always"}
     {"type":"stop"}
   serwer -> klient:
@@ -43,10 +43,8 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-import config  # type: ignore
-
-from caelo_core.agent.llm import stream_chat_with_tools
-from caelo_core.agent.session import AgentSession
+from caelo_core import validation as V
+from caelo_core.agent.runner import AgentRunner
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
 
@@ -75,17 +73,15 @@ async def agent_stream(ws: WebSocket) -> None:
 
     pending: dict[str, dict] = {}
     stop_event = threading.Event()
-    gate = backend.permissions  # trwała allowlista współdzielona z REST /permissions
-    # M17: model/tryb bieżącej tury — czytane przez delegate_fn (świeże per tura).
-    state = {"session": None, "busy": False, "model": "", "mode": "ask", "team": None}
+    # M19-§0: tylko flaga zajętości zostaje w warstwie transportu; model/tryb/sesja/
+    # zespół i finalna odpowiedź tury żyją w AgentRunner.
+    state = {"busy": False}
 
     async with WsStream(ws) as stream:
 
         def emit(ev: dict) -> None:
             # Z wątku-workera (tura agenta). Gdy konsument zniknął → ustaw Stop,
             # żeby pętla agenta przerwała się przy najbliższym sprawdzeniu (P0-9).
-            if ev.get("type") == "assistant_done":  # M9-B2: złap finalną odpowiedź tury
-                state["last_assistant"] = ev.get("content") or ""
             if not stream.emit(ev):
                 stop_event.set()
 
@@ -99,75 +95,20 @@ async def agent_stream(ws: WebSocket) -> None:
                 log.warning("Approval for %s (%s) timed out → reject", name, call_id)
             return pending.pop(call_id, {}).get("decision", "reject")
 
-        def get_team():
-            """Leniwy TeamManager (M17) per sesja WS. Współdzieli emit/approval/stop
-            orkiestratora; scalenia rejestruje w magazynie Backendu (REST je stosuje)."""
-            if state["team"] is None:
-                from caelo_core.agent.llm import stream_chat_with_tools
-                from caelo_core.agent.team import TeamManager
+        # M19-§0: wspólne okablowanie sesji (leniwa AgentSession + TeamManager +
+        # delegacja + zapis tury). Ten sam runner obsłuży headless (B1) i ACP (B2).
+        runner = AgentRunner(backend, emit=emit, request_approval=request_approval,
+                             stop=stop_event.is_set)
 
-                state["team"] = TeamManager(
-                    registry=backend.subagents, gate=gate, llm_fn=stream_chat_with_tools,
-                    api_key_provider=backend.get_api_key, base_url=config.API_BASE,
-                    mcp=backend.mcp, hooks=backend.hooks, emit=emit,
-                    request_approval=request_approval, orchestrator_stop=stop_event.is_set,
-                    merges_provider=backend.get_team_merges,
-                    on_report=backend.record_team_report,
-                )
-            return state["team"]
-
-        def delegate_fn(tasks: list) -> str:
-            ws_obj = backend.get_workspace()
-            if ws_obj is None:
-                return "Error: no workspace selected for delegation"
-            team = get_team()
-            return team.run(tasks, model=state["model"], workspace=ws_obj,
-                            mode=state["mode"])
-
-        def run_turn(text: str, model: str, images: list, mode: str = "ask") -> None:
+        def run_turn(text: str, model: str, images: list, mode: str = "ask",
+                     reasoning_effort: Optional[str] = None) -> None:
             state["busy"] = True
-            state["last_assistant"] = ""  # M9-B2: reset przed turą
             try:
-                ws_obj = backend.get_workspace()
-                if ws_obj is None:
-                    emit({"type": "error", "error": "No workspace selected"})
-                    return
-                session = state["session"]
-                if session is None:
-                    session = AgentSession(
-                        ws_obj, gate, stream_chat_with_tools, backend.get_api_key,
-                        config.API_BASE, emit=emit, request_approval=request_approval,
-                        checkpoints_provider=backend.get_checkpoints,  # M13-B3/B5
-                        mcp=backend.mcp,        # M14-B2: narzędzia MCP w agencie
-                        hooks=backend.hooks,    # M14-B5: hooki cyklu życia narzędzi
-                        skills=backend.skills,  # M14-B6: wstrzykiwanie skilli do promptu
-                        delegate_fn=delegate_fn,  # M17-B2: orkiestrator deleguje subagentom
-                    )
-                    state["session"] = session
-                else:
-                    session.ws = ws_obj  # workspace mógł się zmienić
-                # M17: zapamiętaj model/tryb tury — delegate_fn użyje ich dla subagentów.
-                state["model"] = model
-                state["mode"] = mode
-                stop_event.clear()
-                session.run_turn(text, model, stop_flag=stop_event.is_set, images=images,
-                                 mode=mode)
-            except Exception:  # noqa: BLE001
-                # P1-13: nie wysyłaj surowego str(exc) (może zawierać szczegóły xAI/
-                # ścieżki). Loguj pełny ślad, do klienta — ogólny komunikat.
-                log.exception("Agent turn failed")
-                emit({"type": "error", "error": "Agent error (see server log for details)"})
+                stop_event.clear()  # nowa tura zaczyna od czystej flagi Stop
+                runner.run_turn(text, model, images=images, mode=mode,
+                                reasoning_effort=reasoning_effort)
             finally:
                 state["busy"] = False
-                # M9-B2: podsumowanie tury agenta do wspólnej historii huba (mode=code).
-                # Tekst = finalna odpowiedź agenta; instrukcja usera + workspace w meta.
-                if text or state.get("last_assistant"):
-                    wsp = backend.get_workspace()
-                    backend.record_event(
-                        mode="code", text=state.get("last_assistant") or "",
-                        meta={"prompt": text, "model": model,
-                              "workspace": wsp.root.as_posix() if wsp else None},
-                    )
                 emit({"type": "done"})
 
         try:
@@ -200,7 +141,12 @@ async def agent_stream(ws: WebSocket) -> None:
                         or backend.read_settings().get("code_model")
                         or "grok-build-0.1"
                     )
-                    t = threading.Thread(target=run_turn, args=(text, model, images, mode),
+                    # M19-B9: reasoning_effort z ramki (selektor UI agenta) z fallbackiem
+                    # na ustawienie `code_effort`; niepoprawne → None (pole pominięte).
+                    effort = V.normalize_effort(
+                        msg.get("effort") or backend.read_settings().get("code_effort"))
+                    t = threading.Thread(target=run_turn,
+                                         args=(text, model, images, mode, effort),
                                          daemon=True)
                     stream.track(t)   # P0-9: dołączony przy zamykaniu
                     t.start()

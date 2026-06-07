@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 import config  # type: ignore
 
+from caelo_core import validation as V
 from caelo_core.state import Backend, get_backend
 
 router = APIRouter(tags=["settings"])
@@ -28,6 +29,10 @@ class SettingsPatch(BaseModel):
     code_model: Optional[str] = None
     system_prompt: Optional[str] = None
     chat_temperature: Optional[float] = None
+    # M19-B9: domyślny reasoning_effort czatu / agenta (low|medium|high). Walidowane
+    # w put_settings (śmieć → pominięte), by w pliku ustawień nie wylądowała zła wartość.
+    chat_effort: Optional[str] = None
+    code_effort: Optional[str] = None
     # M10-F3: domyślny tryb live-searcha czatu + wybrane źródła (per aplikacja).
     chat_search_mode: Optional[str] = None
     chat_search_sources: Optional[List[str]] = None
@@ -51,6 +56,9 @@ def get_settings(b: Backend = Depends(get_backend)) -> dict:
         "code_model": s.get("code_model", "grok-build-0.1"),
         "system_prompt": s.get("system_prompt", ""),
         "chat_temperature": s.get("chat_temperature", 0.7),
+        # M19-B9: domyślny effort (pusty string = brak / dziedzicz; UI pokazuje „Auto").
+        "chat_effort": V.normalize_effort(s.get("chat_effort")) or "",
+        "code_effort": V.normalize_effort(s.get("code_effort")) or "",
         "chat_search_mode": mode,
         "chat_search_sources": sources or ["web", "x"],
         # M12-F4: domyślny głos/język audio (TTS, read-aloud, Talk).
@@ -62,5 +70,11 @@ def get_settings(b: Backend = Depends(get_backend)) -> dict:
 
 @router.put("/settings")
 def put_settings(patch: SettingsPatch, b: Backend = Depends(get_backend)) -> dict:
-    b.update_settings(patch.model_dump(exclude_none=True))
+    data = patch.model_dump(exclude_none=True)
+    # M19-B9: znormalizuj effort przed zapisem — śmieć/puste → "" (Auto/dziedzicz),
+    # poprawne → low/medium/high. Nigdy nie zapisujemy nieprawidłowej wartości.
+    for key in ("chat_effort", "code_effort"):
+        if key in data:
+            data[key] = V.normalize_effort(data[key]) or ""
+    b.update_settings(data)
     return {"ok": True}

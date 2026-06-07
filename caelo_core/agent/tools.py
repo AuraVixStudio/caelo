@@ -7,7 +7,11 @@ nie jest sandboxowany w treści polecenia — dlatego wymaga zatwierdzenia.
 from __future__ import annotations
 
 import difflib
+import html
+import ipaddress
+import logging
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -15,9 +19,16 @@ import threading
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, Optional
+from urllib.parse import urlparse
+
+import requests  # type: ignore
+
+import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
 
 from caelo_core.agent.permissions import command_metachars
 from caelo_core.agent.workspace import Workspace, WorkspaceError
+
+log = logging.getLogger(__name__)
 
 # P0-3: silnik regex z wall-clock timeoutem (ReDoS). Moduł `regex` wspiera
 # per-search `timeout=`, którego stdlib `re` nie ma (a wzorzec sterowany jest
@@ -419,6 +430,15 @@ def run_command(ws: Workspace, command: str, cwd: Optional[str] = None, timeout:
         use_shell = False
         # nowa sesja = własna grupa procesów → killpg ubije całe drzewo (P0-4)
         popen_kwargs["start_new_session"] = True
+        # M19-B7: opcjonalny sandbox OS (off-by-default → no-op). Owija argv launcherem
+        # (bwrap/sandbox-exec); brak wsparcia/platformy → bez zmian. FAIL-OPEN: błąd
+        # budowy sandboxa nie blokuje komendy (defense-in-depth, jak Grok CLI).
+        try:
+            from caelo_core import sandbox
+            popen_target = sandbox.wrap_command(argv, root=str(ws.root))
+        except Exception:  # noqa: BLE001
+            log.warning("sandbox wrap failed; running without OS sandbox", exc_info=True)
+            popen_target = argv
     try:
         proc = subprocess.Popen(
             popen_target, shell=use_shell, cwd=str(workdir),
@@ -484,6 +504,105 @@ def run_command(ws: Workspace, command: str, cwd: Optional[str] = None, timeout:
     return f"(exit {proc.returncode}){suffix}\n{out}".rstrip()
 
 
+# --- web_fetch (M19-B13) — egress agenta pod bramką ---
+_WEB_FETCH_UA = "Caelo-Agent/1.0"
+
+
+def _web_host_blocked(host: str) -> bool:
+    """SSRF-guard: blokuj localhost/loopback oraz sieci prywatne/link-local/zarezerwowane
+    podane jako LITERAŁ IP. Nazwy hostów (nie-IP) przepuszczamy — decyduje allowlista +
+    bramka (pełna ochrona DNS-rebinding poza zakresem [P3])."""
+    h = (host or "").strip().strip("[]").lower()
+    if not h or h == "localhost" or h.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False
+    return (ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def _web_host_allowed(host: str, allow: list) -> bool:
+    """Czy host pasuje do twardej allowlisty (`WEB_FETCH_ALLOW_DOMAINS`) — dokładnie
+    lub jako subdomena (bez `www.`)."""
+    h = (host or "").lower()
+    h = h[4:] if h.startswith("www.") else h
+    for d in allow:
+        d = (d or "").lower()
+        d = d[4:] if d.startswith("www.") else d
+        if d and (h == d or h.endswith("." + d)):
+            return True
+    return False
+
+
+def _html_to_text(s: str) -> str:
+    """Minimalna redukcja HTML→tekst (bez nowej zależności): usuń script/style + tagi,
+    odkoduj encje, zwiń białe znaki."""
+    s = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", s)
+    s = re.sub(r"(?s)<[^>]+>", " ", s)
+    s = html.unescape(s)
+    s = re.sub(r"[ \t\f\v]{2,}", " ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
+def web_fetch(ws: Workspace, url: str = "", max_bytes: Optional[int] = None, **_) -> str:
+    """M19-B13: pobierz treść URL (https-only, allowlista hostów, cap, SSRF-guard). Zwraca
+    tekst (HTML zredukowany do tekstu) albo `Error: …`. Egress jest bramkowany WYŻEJ
+    (MUTATING → approval / reguła WebFetch); tu wymuszamy twarde inwarianty sieciowe."""
+    u = (url or "").strip()
+    if not u.lower().startswith("https://"):
+        return "Error: web_fetch requires an https:// URL"
+    try:
+        host = urlparse(u).hostname or ""
+    except Exception:  # noqa: BLE001
+        host = ""
+    if _web_host_blocked(host):
+        return f"Error: web_fetch refused host '{host or u}' (loopback/private not allowed)"
+    allow = getattr(config, "WEB_FETCH_ALLOW_DOMAINS", []) or []
+    if allow and not _web_host_allowed(host, allow):
+        return f"Error: host '{host}' is not in the web_fetch allowlist (WEB_FETCH_ALLOW_DOMAINS)"
+    cap = getattr(config, "WEB_FETCH_MAX_BYTES", 512 * 1024)
+    try:
+        if max_bytes:
+            cap = min(int(max_bytes), cap)
+    except (TypeError, ValueError):
+        pass
+    timeout = getattr(config, "WEB_FETCH_TIMEOUT_S", 20)
+    try:
+        with requests.get(
+            u, stream=True, timeout=timeout, allow_redirects=True,
+            headers={"User-Agent": _WEB_FETCH_UA,
+                     "Accept": "text/html,text/plain,application/json,*/*"},
+        ) as r:
+            r.raise_for_status()
+            # Re-walidacja PO przekierowaniach (anti-SSRF: allowed host → blocked redirect).
+            final = urlparse(r.url)
+            if (r.url or "").lower()[:8] != "https://" or _web_host_blocked(final.hostname or ""):
+                return f"Error: web_fetch refused redirect to '{r.url}'"
+            if allow and not _web_host_allowed(final.hostname or "", allow):
+                return f"Error: redirect host '{final.hostname}' is not in the allowlist"
+            ctype = (r.headers.get("content-type") or "").lower()
+            data = bytearray()
+            for chunk in r.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                data.extend(chunk)
+                if len(data) >= cap:
+                    break
+    except Exception as exc:  # noqa: BLE001 (sieć od modelu — komunikat generyczny, log surowy)
+        log.warning("web_fetch failed for %s", u, exc_info=True)
+        return f"Error: web_fetch failed ({type(exc).__name__})"
+    truncated = len(data) >= cap
+    text = bytes(data[:cap]).decode("utf-8", "replace")
+    if "html" in ctype:
+        text = _html_to_text(text)
+    if not text.strip():
+        return "(empty response)"
+    return text + ("\n… (truncated)" if truncated else "")
+
+
 _EXECUTORS = {
     "read_file": read_file,
     "list_dir": list_dir,
@@ -492,6 +611,7 @@ _EXECUTORS = {
     "write_file": write_file,
     "edit_file": edit_file,
     "run_command": run_command,
+    "web_fetch": web_fetch,  # M19-B13 (advertowane warunkowo w session._all_tools)
 }
 
 
@@ -548,6 +668,8 @@ def preview_change(ws: Workspace, name: str, args: dict) -> Optional[dict]:
                     "diff": _udiff(old, new, args["path"])}
         if name == "run_command":
             return {"kind": "command", "command": args.get("command", ""), "cwd": args.get("cwd")}
+        if name == "web_fetch":  # M19-B13: karta zatwierdzenia egresu sieciowego
+            return {"kind": "web_fetch", "url": args.get("url", "")}
     except Exception as exc:  # noqa: BLE001
         return {"kind": "error", "detail": str(exc)}
     return None

@@ -125,11 +125,96 @@ def test_corrupt_config() -> None:
         mgr.shutdown()
 
 
+def test_interop() -> None:
+    """B5 §1.2: scalanie serwerów MCP z ekosystemu (~/.claude.json + <ws>/.mcp.json).
+    Importowane wchodzą WYŁĄCZONE (reżim M16); natywne i projektowe mają pierwszeństwo;
+    import nie wycieka do caelo_mcp.json; sekrety (env/authorization) zamaskowane w UI."""
+    import json
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        cfg_path = root / "caelo_mcp.json"
+        ws_dir = root / "ws"
+        ws_dir.mkdir()
+        claude_json = root / ".claude.json"
+
+        # Natywny serwer (autorytatywny) — kolizja id z globalnym importem "shared".
+        cfg_path.write_text(json.dumps({"servers": [
+            {"id": "shared", "name": "Native Shared", "transport": "stdio",
+             "command": ["echo", "native"], "enabled": True},
+        ]}), encoding="utf-8")
+        # Global ~/.claude.json: stdio + remote + kolizja "shared" + kolizja "dup".
+        claude_json.write_text(json.dumps({"mcpServers": {
+            "global-stdio": {"command": "node", "args": ["server.js"], "env": {"SECRET": "x"}},
+            "global-remote": {"type": "sse", "url": "https://example.com/mcp",
+                              "authorization": "Bearer GLOBALSECRET"},
+            "shared": {"command": "should-not-win"},
+            "dup": {"command": "global-dup"},
+        }}), encoding="utf-8")
+        # Projekt <ws>/.mcp.json: projektowy serwer + kolizja "dup" (projekt wygrywa nad global).
+        (ws_dir / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "proj-stdio": {"command": "python", "args": ["-m", "thing"]},
+            "dup": {"command": "project-dup"},
+        }}), encoding="utf-8")
+
+        mgr = McpManager(cfg_path, workspace_root=ws_dir, claude_json=claude_json)
+        by_id = {s["id"]: s for s in mgr.all_status()}
+
+        check("interop: native + global + project servers all visible",
+              {"shared", "global-stdio", "global-remote", "proj-stdio", "dup"} <= set(by_id))
+        check("interop: imported global stdio disabled (M16 regime)",
+              by_id["global-stdio"]["enabled"] is False)
+        check("interop: imported tagged with source",
+              by_id["global-stdio"]["source"] == "claude-global"
+              and by_id["proj-stdio"]["source"] == "claude-project")
+        check("interop: native keeps precedence over global id collision",
+              by_id["shared"]["source"] == "native" and by_id["shared"]["enabled"] is True
+              and by_id["shared"]["command"] == ["echo", "native"])
+        check("interop: project wins over global on id collision",
+              by_id["dup"]["source"] == "claude-project")
+
+        gs = mgr.public_config("global-stdio")
+        check("interop: command+args mapped to argv", gs["command"] == ["node", "server.js"])
+        check("interop: imported env values masked (keys only)", gs.get("env_keys") == ["SECRET"])
+
+        gr = mgr.public_config("global-remote")
+        check("interop: remote mapped (url + masked auth)",
+              gr["transport"] == "remote" and gr["url"] == "https://example.com/mcp"
+              and gr.get("has_authorization") is True and "authorization" not in gr)
+
+        # _save (tu: set_enabled natywnego) NIE persistuje importowanych do caelo_mcp.json.
+        mgr.set_enabled("shared", True)
+        persisted = json.loads(cfg_path.read_text(encoding="utf-8"))
+        persisted_ids = {s.get("id") for s in persisted.get("servers", [])}
+        check("interop: import does not leak into caelo_mcp.json", persisted_ids == {"shared"})
+
+        mgr.shutdown()
+
+        # Brak źródeł interop (domyślne None) → tylko natywne (czyste zachowanie dla testów).
+        mgr2 = McpManager(cfg_path)
+        check("interop: no extra sources by default (native only)",
+              {s["id"] for s in mgr2.all_status()} == {"shared"})
+        mgr2.shutdown()
+
+    # Niedestrukcyjność: uszkodzony plik ekosystemu NIE jest ruszany (nie nasz plik).
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        cfg_path = root / "caelo_mcp.json"
+        bad_claude = root / ".claude.json"
+        bad_claude.write_text("{ not valid json ", encoding="utf-8")
+        mgr = McpManager(cfg_path, claude_json=bad_claude)  # nie może rzucić
+        check("interop: corrupt external file tolerated", mgr.all_status() == [])
+        check("interop: corrupt external file NOT modified (no .corrupt)",
+              bad_claude.read_text(encoding="utf-8") == "{ not valid json "
+              and not bad_claude.with_suffix(".json.corrupt").exists())
+        mgr.shutdown()
+
+
 def main() -> int:
     test_client()
     test_manager()
     test_remote()
     test_corrupt_config()
+    test_interop()
 
     print("\n=== MCP client/manager self-check (M14-B1/B2) ===")
     ok = True

@@ -384,6 +384,10 @@ def _unit_commands_skills(checks: list) -> None:
         ids = {s["id"] for s in sm.list_skills()}
         checks.append(("B6: builtin skills discovered (Ren'Py/DAZ)",
                        {"renpy-new-scene", "daz-export-webm"} <= ids))
+        # M19-B6: wbudowane skille-orkiestratory (pętle wieloagentowe)
+        checks.append(("B6: orchestration builtin skills discovered",
+                       {"implement", "review", "design", "best-of-n",
+                        "check-work", "pr-babysit"} <= ids))
         sk = sm.get_skill("renpy-new-scene")
         checks.append(("B6: get_skill returns body + builtin flag",
                        sk and "Ren'Py" in sk["body"] and sk["builtin"] is True))
@@ -392,6 +396,12 @@ def _unit_commands_skills(checks: list) -> None:
         inj = sm.injected_text()
         checks.append(("B6: enabled skill injected into context",
                        "Ren'Py" in inj and "Active skills" in inj))
+        # M19-B6: skill-orkiestrator wstrzykuje instrukcję sterowania `delegate`
+        sm.set_enabled("implement", True)
+        inj_impl = sm.injected_text(["implement"])
+        checks.append(("B6: orchestration skill injects delegate-loop guidance",
+                       "delegate" in inj_impl.lower()
+                       and ("implementer" in inj_impl.lower() or "reviewer" in inj_impl.lower())))
         # tworzenie skilla użytkownika z szablonu + odkrycie
         sm.create_skill("my-flow", template="renpy", name="My Flow")
         checks.append(("B6: created skill discovered",
@@ -405,3 +415,53 @@ def _unit_commands_skills(checks: list) -> None:
         except ValueError:
             bad = True
         checks.append(("B6: skill id traversal rejected", bad))
+
+    # --- B5 §1.3: interop skilli (~/.claude/skills + <ws>/.claude|.grok/skills) ---
+    def _mk_skill(folder: Path, name: str) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\ntriggers: []\n---\n\n# {name}\n\nBODY-{name}\n",
+            encoding="utf-8")
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        user_dir, claude_home, ws = d / "skills", d / "claude_home", d / "ws"
+        _mk_skill(user_dir / "user-skill", "User Skill")
+        _mk_skill(claude_home / "skills" / "cc-global", "CC Global")
+        _mk_skill(ws / ".claude" / "skills" / "cc-proj", "CC Project")
+        _mk_skill(ws / ".grok" / "skills" / "grok-proj", "Grok Project")
+        # kolizje pierwszeństwa: builtin < user < claude-global < projekt
+        _mk_skill(user_dir / "dup", "Dup User")
+        _mk_skill(claude_home / "skills" / "dup", "Dup Global")        # > user
+        _mk_skill(ws / ".claude" / "skills" / "dup", "Dup Project")    # > global
+        _mk_skill(user_dir / "dup2", "Dup2 User")
+        _mk_skill(claude_home / "skills" / "dup2", "Dup2 Global")      # > user (brak projektu)
+
+        sm = SkillManager(user_dir, workspace_root=ws, claude_home=claude_home)
+        by_id = {s["id"]: s for s in sm.list_skills()}
+        checks.append(("B5: interop skills discovered from all sources",
+                       {"user-skill", "cc-global", "cc-proj", "grok-proj"} <= set(by_id)))
+        checks.append(("B5: source tags global/project/user",
+                       by_id["cc-global"]["source"] == "claude-global"
+                       and by_id["cc-proj"]["source"] == "claude-project"
+                       and by_id["grok-proj"]["source"] == "grok-project"
+                       and by_id["user-skill"]["source"] == "user"))
+        checks.append(("B5: project overrides global+user on id collision",
+                       by_id["dup"]["source"] == "claude-project"))
+        checks.append(("B5: claude-global overrides user on id collision",
+                       by_id["dup2"]["source"] == "claude-global"))
+
+        sm.set_enabled("cc-global", True)
+        inj = sm.injected_text()
+        checks.append(("B5: enabled interop skill injected", "BODY-CC Global" in inj))
+        checks.append(("B5: enabled-state written to SKILLS_DIR only (not interop dir)",
+                       (user_dir / "_state.json").is_file()
+                       and not (claude_home / "skills" / "_state.json").exists()))
+        checks.append(("B5: interop skill not deletable (foreign dir)",
+                       sm.delete_skill("cc-global") is False))
+        checks.append(("B5: interop SKILL.md untouched after delete attempt",
+                       (claude_home / "skills" / "cc-global" / "SKILL.md").is_file()))
+
+        srcs = {s["source"] for s in SkillManager(user_dir).list_skills()}
+        checks.append(("B5: no interop sources by default",
+                       not ({"claude-global", "claude-project", "grok-project"} & srcs)))

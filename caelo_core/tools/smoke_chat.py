@@ -90,6 +90,7 @@ def _unit_responses_client(checks: list) -> None:
              {"role": "assistant", "content": "prior"},
              {"role": "user", "content": "now"}],
             model="grok-4.3", api_key_provider=lambda: "KEY",
+            reasoning_effort="high",  # M19-B9
             tools=rc.build_search_tools("auto"),
             on_delta=lambda d, f: deltas.append((d, f)),
             on_tool=lambda ev: tools_seen.append(ev),
@@ -120,6 +121,9 @@ def _unit_responses_client(checks: list) -> None:
                    cit_urls == ["https://ex.com/n", "https://x.com/a"]))
     checks.append(("responses: usage captured", res["usage"].get("output_tokens") == 34))
     checks.append(("responses: mode=off attaches no tools", rc.build_search_tools("off") is None))
+    # M19-B9: reasoning_effort → `reasoning.effort` w payloadzie (tylko gdy poprawny).
+    checks.append(("responses: reasoning_effort -> reasoning.effort in payload (B9)",
+                   captured["json"].get("reasoning") == {"effort": "high"}))
 
     # M10-B4: document content part → Responses `input_file` (Q&A nad dokumentem inline).
     doc_in = rc.to_input([{"role": "user", "content": [
@@ -454,6 +458,27 @@ def _unit_chat_bridge(checks: list) -> None:
         checks.append(("chat bridge: single-flight rejects 2nd chat", bool(busy)))
     except Exception as exc:  # noqa: BLE001
         checks.append((f"chat bridge: single-flight scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 6: reasoning_effort z ramki dociera do stream_response (B9) ---
+    seen_eff: dict = {}
+
+    def stub_eff(messages, **kw):
+        seen_eff["effort"] = kw.get("reasoning_effort")
+        kw["on_delta"]("ok", "ok")
+        return {"text": "ok", "citations": [], "usage": {}, "tool_calls": 0}
+
+    try:
+        rc.stream_response = stub_eff
+        asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "hi"}],
+                         "model": "grok-4.3", "reasoning_effort": "high"})],
+            _backend()))
+        checks.append(("chat bridge: reasoning_effort from frame reaches stream_response (B9)",
+                       seen_eff.get("effort") == "high"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: effort scenario ran ({exc})", False))
     finally:
         rc.stream_response = orig_stream
 

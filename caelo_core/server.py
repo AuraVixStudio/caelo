@@ -43,6 +43,7 @@ from caelo_core.routes import (
     git,
     history,
     hooks,
+    lsp,
     mcp,
     media,
     models,
@@ -176,6 +177,7 @@ def create_app(
     app.include_router(agent_api.router, dependencies=guard)  # M13-B5: checkpoints/undo/CAELO.md
     app.include_router(team.router, dependencies=guard)  # M17: subagenci (role/scalenia/przebiegi)
     app.include_router(mcp.router, dependencies=guard)  # M14-B1: serwery MCP
+    app.include_router(lsp.router, dependencies=guard)  # M19-B3: serwery LSP (intel kodu)
     app.include_router(hooks.router, dependencies=guard)  # M14-B5: hooki + audyt
     app.include_router(commands.router, dependencies=guard)  # M14-B4: komendy slash
     app.include_router(skills.router, dependencies=guard)  # M14-B6: biblioteka skilli

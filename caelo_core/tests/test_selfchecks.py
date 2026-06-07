@@ -20,8 +20,13 @@ SUITES = [
     "mcp_check",
     "genjobs_check",
     "history_check",
+    "embeddings_check",
+    "sandbox_check",
     "packages_check",
     "agent_selfcheck",
+    "headless_check",
+    "acp_check",
+    "lsp_check",
     "handshake_check",
     "api_smoke",
 ]

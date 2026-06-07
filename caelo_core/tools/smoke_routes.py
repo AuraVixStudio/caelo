@@ -167,6 +167,29 @@ def _unit_history_routes(checks: list) -> None:
             r = H(limit=1)
             checks.append(("/history paginates (limit)", len(r["events"]) == 1 and r["limit"] == 1))
 
+            # M19-B10: eksport historii do Markdown (tekst + prompt/model z meta)
+            store.record_event(mode="code", text="Refactored the parser.",
+                               meta={"prompt": "refactor the parser", "model": "grok-build"})
+
+            def X(**kw):
+                p = dict(q=None, mode=None, project_id=None, from_=None, to=None,
+                         limit=200, offset=0)
+                p.update(kw)
+                return hist_route.export_history(b=b, **p)
+
+            resp = X()
+            body = resp.body.decode("utf-8")
+            checks.append(("/history/export -> text/markdown",
+                           "text/markdown" in (resp.media_type or "")))
+            checks.append(("/history/export includes recorded text (response)",
+                           "hello about dragons" in body and "Refactored the parser." in body))
+            checks.append(("/history/export includes prompt + model from meta",
+                           "refactor the parser" in body and "grok-build" in body))
+            body_code = X(mode="code").body.decode("utf-8")
+            checks.append(("/history/export honors mode filter",
+                           "Refactored the parser." in body_code
+                           and "hello about dragons" not in body_code))
+
             r = A()
             checks.append(("/artifacts lists artifacts", len(r["artifacts"]) == 1))
             r = A(mode="video")
@@ -380,6 +403,87 @@ def _unit_agent_routes(checks: list) -> None:
                        gm2["exists"] is True and "never touch /vendor" in gm2["content"]))
 
 
+def _unit_permissions_routes(checks: list) -> None:
+    """M19-B4: trasy /permissions/rules (GET/PUT) — walidacja + persystencja do ustawień
+    + przebudowa bramki. In-process: Backend bez __init__, read/write_settings na pamięci
+    (bez I/O), reload_permission_rules() prawdziwy (workspace None → tylko globalne)."""
+    sys.path.insert(0, REPO_DIR)
+    from fastapi import HTTPException  # noqa: E402
+    from caelo_core.agent.permissions import PermissionGate  # noqa: E402
+    from caelo_core.routes import permissions as pr  # noqa: E402
+    from caelo_core.state import Backend  # noqa: E402
+
+    b = Backend.__new__(Backend)  # bez __init__ (bez I/O / sieci)
+    b._workspace = None
+    b.permissions = PermissionGate(None)
+    store: dict = {}
+    b.read_settings = lambda: dict(store)             # type: ignore[assignment]
+    b.write_settings = lambda data: store.update(data)  # type: ignore[assignment]
+
+    r = pr.get_glob_rules(b=b)
+    checks.append(("/permissions/rules initially empty", r == {"allow": [], "deny": []}))
+
+    r = pr.put_glob_rules(pr.RulesBody(allow=["Bash(npm*)"], deny=["Edit(secret/**)"]), b=b)
+    checks.append(("/permissions/rules PUT stores + rebuilds gate",
+                   "Bash(npm*)" in r["allow"] and "Edit(secret/**)" in r["deny"]
+                   and b.permissions.evaluate_rules("edit_file", {"path": "secret/k"}) == "deny"
+                   and store.get("permission_rules", {}).get("allow") == ["Bash(npm*)"]))
+
+    bad400 = False
+    try:
+        pr.put_glob_rules(pr.RulesBody(allow=["Nope(x)"]), b=b)
+    except HTTPException as e:
+        bad400 = e.status_code == 400
+    checks.append(("/permissions/rules invalid -> 400 (fail-closed)", bad400))
+    checks.append(("/permissions/rules 400 leaves prior rules intact",
+                   "Bash(npm*)" in pr.get_glob_rules(b=b)["allow"]))
+
+
+def _unit_lsp_routes(checks: list) -> None:
+    """M19-B3: trasy /lsp (lista/dodaj/usuń) — in-process, globalny lsp.json w temp
+    DATA_DIR (bez I/O realnych danych, bez startu serwerów języka)."""
+    import tempfile
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+    from fastapi import HTTPException  # noqa: E402
+    from caelo_core.routes import lsp as lr  # noqa: E402
+    from caelo_core.state import Backend  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as d:
+        orig = config.DATA_DIR
+        config.DATA_DIR = Path(d)  # globalny lsp.json czytany/pisany tu
+        try:
+            b = Backend.__new__(Backend)  # bez __init__ (bez I/O / sieci)
+            b._workspace = None
+            b._lsp = None
+
+            r = lr.list_servers(b=b)
+            checks.append(("/lsp initially empty", r["servers"] == [] and r["has_workspace"] is False))
+
+            lr.add_server(lr.LspServerBody(name="pyright", command="pyright-langserver",
+                          args=["--stdio"], extensionToLanguage={".py": "python"}), b=b)
+            r = lr.list_servers(b=b)
+            checks.append(("/lsp add persists server",
+                           any(s["name"] == "pyright" and "python" in s["languages"]
+                               for s in r["servers"])))
+
+            lr.remove_server("pyright", b=b)
+            checks.append(("/lsp delete removes server",
+                           not any(s["name"] == "pyright" for s in lr.list_servers(b=b)["servers"])))
+
+            bad = False
+            try:
+                lr.add_server(lr.LspServerBody(name="x", command="",
+                              extensionToLanguage={".x": "y"}), b=b)
+            except HTTPException as e:
+                bad = e.status_code == 400
+            checks.append(("/lsp add invalid (no command) -> 400", bad))
+        finally:
+            config.DATA_DIR = orig
+
+
 def _unit_mcp_routes(checks: list) -> None:
     """M14-B1/F1: trasy /mcp — add/list/enable/start/stop/remove in-process. Remote
     bez podprocesu (maskowanie sekretu); stdio startuje mock-serwer (pełna ścieżka
@@ -473,6 +577,23 @@ def _unit_team_routes(checks: list) -> None:
         tr.remove_role("docs", b=b)
         checks.append(("/team/roles remove deletes role",
                        all(r["id"] != "docs" for r in tr.list_roles(b=b)["roles"])))
+
+        # M19-B9/B11: effort + persona + kontrakt I/O round-trip przez trasę (RoleReq
+        # musi je przepuścić — inaczej UI by ich nie zapisał).
+        tr.upsert_role(tr.RoleReq(
+            id="io-role", label="IO", tools=["read_file"], mcp="readonly",
+            reasoning_effort="high", instructions="Be precise.",
+            inputs=[{"name": "spec", "io_type": "file", "required": True, "description": "the spec"}],
+            outputs=[{"name": "report", "required": True, "description": "the report"}],
+        ), b=b)
+        got = next((r for r in tr.list_roles(b=b)["roles"] if r["id"] == "io-role"), None)
+        checks.append(("/team/roles round-trips effort + persona + I/O (B9/B11)",
+                       got is not None and got["reasoning_effort"] == "high"
+                       and got["instructions"] == "Be precise."
+                       and got["inputs"][0]["name"] == "spec"
+                       and got["outputs"][0]["name"] == "report"
+                       and got["outputs"][0]["required"] is True))
+        tr.remove_role("io-role", b=b)
 
         # limity walidowane (clamp)
         lim = tr.set_limits(tr.LimitsReq(max_parallel=99, max_total_turns=5), b=b)["limits"]

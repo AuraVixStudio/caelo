@@ -36,6 +36,12 @@ class RoleReq(BaseModel):
     mcp: Optional[str] = None
     worktree: Optional[bool] = None
     model: Optional[str] = None
+    # M19-B9: per-role reasoning_effort; M19-B11: persona + I/O contract. Bez tych pól
+    # Pydantic dropowałby je z żądania (UI by ich nie zapisał) — walidacja w _clean_role.
+    reasoning_effort: Optional[str] = None
+    instructions: Optional[str] = None
+    inputs: Optional[list[dict]] = None
+    outputs: Optional[list[dict]] = None
     prompt: Optional[str] = None
 
 

@@ -84,7 +84,7 @@ def test_agent_loop() -> None:
 
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             calls["n"] += 1
             if calls["n"] == 1:
                 # poproś o utworzenie pliku
@@ -127,7 +127,7 @@ def test_interrupted_tool_calls() -> None:
         events: list[dict] = []
         handled = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             # jedna tura: assistant z DWOMA tool_calls
             return {
                 "role": "assistant", "content": None,
@@ -169,7 +169,7 @@ def test_history_balanced_after_tools() -> None:
         gate = PermissionGate()
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             calls["n"] += 1
             if calls["n"] == 1:
                 return {"role": "assistant", "content": None, "tool_calls": [
@@ -499,7 +499,7 @@ def test_plan_mode() -> None:
 
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             calls["n"] += 1
             if calls["n"] == 1:  # READONLY — dozwolone w plan mode
                 return {"role": "assistant", "content": None, "tool_calls": [
@@ -537,7 +537,7 @@ def test_plan_mode() -> None:
         calls["n"] = 0
         events.clear()
 
-        def mock_exec(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_exec(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             calls["n"] += 1
             if calls["n"] == 1:
                 return {"role": "assistant", "content": None, "tool_calls": [
@@ -566,7 +566,7 @@ def test_agent_modes() -> None:
 
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             i = calls["n"]
             calls["n"] += 1
             if i == 0:
@@ -627,7 +627,7 @@ def test_checkpoints() -> None:
         ]
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             i = calls["n"]
             calls["n"] += 1
             if i < len(steps):
@@ -738,6 +738,40 @@ def test_caelo_md() -> None:
         check("B4: oversize CAELO.md capped",
               len(capped) <= MAX_CAELO_MD_BYTES + 200 and "truncated" in capped)
 
+    # --- M19-Tier2 B5 §1.1: interop AGENTS.md / CLAUDE.md ---
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        # Bez natywnego CAELO.md — same pliki ekosystemu.
+        (root / "AGENTS.md").write_text("AGENTS_RULE_A", encoding="utf-8")
+        (root / "CLAUDE.md").write_text("CLAUDE_RULE_C", encoding="utf-8")
+        loaded = load_caelo_md(root, None)
+        check("B5: AGENTS.md + CLAUDE.md both loaded (no CAELO.md)",
+              "AGENTS_RULE_A" in loaded and "CLAUDE_RULE_C" in loaded)
+        check("B5: source annotation per file",
+              "From AGENTS.md" in loaded and "From CLAUDE.md" in loaded)
+        check("B5: AGENTS.md placed before CLAUDE.md (priority order)",
+              loaded.index("AGENTS_RULE_A") < loaded.index("CLAUDE_RULE_C"))
+
+        # Dodaj natywny CAELO.md — ma pierwszeństwo (idzie pierwszy), reszta dołączona.
+        (root / "CAELO.md").write_text("NATIVE_RULE_N", encoding="utf-8")
+        loaded2 = load_caelo_md(root, None)
+        check("B5: CAELO.md takes priority over interop files",
+              loaded2.index("NATIVE_RULE_N") < loaded2.index("AGENTS_RULE_A")
+              and loaded2.index("NATIVE_RULE_N") < loaded2.index("CLAUDE_RULE_C"))
+        check("B5: interop files still appended alongside CAELO.md",
+              "AGENTS_RULE_A" in loaded2 and "CLAUDE_RULE_C" in loaded2)
+
+    # Legacy GROK.md pozostaje czystym fallbackiem: czytany TYLKO gdy brak CAELO.md.
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "GROK.md").write_text("LEGACY_GROK_G", encoding="utf-8")
+        check("B5: GROK.md read when CAELO.md absent",
+              "LEGACY_GROK_G" in load_caelo_md(root, None))
+        (root / "CAELO.md").write_text("NATIVE_RULE_N", encoding="utf-8")
+        with_native = load_caelo_md(root, None)
+        check("B5: GROK.md ignored once CAELO.md exists (no double native)",
+              "NATIVE_RULE_N" in with_native and "LEGACY_GROK_G" not in with_native)
+
 
 class _FakeMcp:
     """Stub menedżera MCP (duck-typed kontrakt z caelo_core/mcp/manager.py) — bez sieci.
@@ -786,7 +820,7 @@ def test_mcp_in_agent() -> None:
         seen: dict = {}
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             i = calls["n"]
             calls["n"] += 1
             seen["names"] = {t["function"]["name"] for t in tools if t.get("type") == "function"}
@@ -834,7 +868,7 @@ def test_mcp_in_agent() -> None:
         approvals = {"n": 0}
         calls = {"n": 0}
 
-        def mock_llm2(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm2(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             i = calls["n"]
             calls["n"] += 1
             if i == 0:
@@ -900,7 +934,7 @@ def test_hooks() -> None:
         asked: list[str] = []
         calls = {"n": 0}
 
-        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             i = calls["n"]
             calls["n"] += 1
             if i == 0:
@@ -935,7 +969,7 @@ def test_hooks() -> None:
                      "command": [sys.executable, "-c", "open('hook_ran.txt','w').write('x')"]})
         calls = {"n": 0}
 
-        def mock_llm2(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def mock_llm2(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             i = calls["n"]
             calls["n"] += 1
             if i == 0:
@@ -1006,7 +1040,7 @@ def test_team_isolation_and_roles() -> None:
         reg = _make_registry(d)
         seen: dict[str, set] = {}
 
-        def llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             sys = messages[0]["content"]
             names = _tool_names(tools)
             if "delegate" in names:  # ORKIESTRATOR
@@ -1076,7 +1110,7 @@ def test_team_parallel_stop_budget() -> None:
         reg = _make_registry(d, {"max_parallel": 2})
         store = MergeStore(ws.root)
 
-        def llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             sys = messages[0]["content"]
             if "IMPLEMENTER subagent" in sys:
                 task = _find_user(messages)
@@ -1112,7 +1146,7 @@ def test_team_parallel_stop_budget() -> None:
         reg = _make_registry(d)
         stopped = {"v": True}
 
-        def llm_loop(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def llm_loop(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             # researcher pętli się w nieskończoność (gdyby nie stop/budżet)
             return {"role": "assistant", "content": None, "tool_calls": [
                 {"id": "r", "type": "function", "function": {
@@ -1130,7 +1164,7 @@ def test_team_parallel_stop_budget() -> None:
         gate = PermissionGate()
         reg = _make_registry(d, {"max_total_turns": 2, "max_iters": 16})
 
-        def llm_loop(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def llm_loop(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             return {"role": "assistant", "content": None, "tool_calls": [
                 {"id": "r", "type": "function", "function": {
                     "name": "read_file", "arguments": '{"path":"nope.txt"}'}}]}
@@ -1225,7 +1259,7 @@ def test_team_cost() -> None:
         reg = _make_registry(d)
         reports: list = []
 
-        def llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None):
+        def llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
             sys = messages[0]["content"]
             if "RESEARCH subagent" in sys:
                 if _n_assist(messages) == 0:
@@ -1250,6 +1284,712 @@ def test_team_cost() -> None:
         check("B6: totals aggregate across subagents",
               rep["totals"]["input_tokens"] == 17 and rep["totals"]["tool_calls"] == 1
               and rep["totals"]["subagents"] == 1)
+
+
+def test_permission_rules() -> None:
+    """M19-B4: reguły glob (ToolPrefix), deny>allow, `*` vs `**`, oraz integracja w
+    pętli agenta — deny blokuje też READONLY i tryb bypass; allow auto-akceptuje;
+    P0-1 (metaznaki run_command) NIE jest obchodzone regułą allow."""
+    from caelo_core.agent.permission_rules import RuleSet, parse_rule, _match_webfetch
+
+    # --- jednostkowo: parser + dopasowanie ---
+    check("B4: parse ToolPrefix(glob)", parse_rule("Bash(npm*)") == ("Bash", "npm*"))
+    check("B4: bare prefix = match-all", parse_rule("Bash") == ("Bash", "**"))
+    check("B4: invalid rule rejected", parse_rule("Nope(x)") is None and parse_rule("Bash(x") is None)
+    check("B4: deny beats allow",
+          RuleSet(allow=["Bash(**)"], deny=["Bash(rm*)"]).evaluate_tool(
+              "run_command", {"command": "rm -rf x"}) == "deny")
+    rs_star = RuleSet(deny=["Edit(src/*)"])
+    check("B4: '*' stays within one path segment",
+          rs_star.evaluate_tool("edit_file", {"path": "src/a.py"}) == "deny"
+          and rs_star.evaluate_tool("edit_file", {"path": "src/a/b.py"}) is None)
+    check("B4: '**' spans path segments",
+          RuleSet(deny=["Edit(src/**)"]).evaluate_tool("edit_file", {"path": "src/a/b.py"}) == "deny")
+    check("B4: write_file checks both Write and Edit",
+          RuleSet(allow=["Write(out/**)"]).evaluate_tool("write_file", {"path": "out/x"}) == "allow"
+          and RuleSet(allow=["Edit(out/**)"]).evaluate_tool("write_file", {"path": "out/x"}) == "allow")
+    check("B4: MCPTool matches qualified name",
+          RuleSet(deny=["MCPTool(gh__*)"]).evaluate_tool("gh__issue", {}, is_mcp=True) == "deny")
+    check("B4: WebFetch domain + subdomain",
+          _match_webfetch("domain:x.ai", "https://api.x.ai/v1")
+          and _match_webfetch("domain:docs.rs", "https://docs.rs/foo")
+          and not _match_webfetch("domain:evil.com", "https://x.ai"))
+    check("B4: empty ruleset = no effect (pre-B4 behavior)",
+          RuleSet().evaluate_tool("run_command", {"command": "rm -rf /"}) is None)
+
+    # --- integracja w pętli agenta: jedno narzędzie -> done ---
+    def _run_one_tool(ws, gate, tool_name, args, mode="ask"):
+        events: list[dict] = []
+        approvals = {"n": 0}
+        calls = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "c1", "type": "function",
+                     "function": {"name": tool_name, "arguments": json.dumps(args)}}]}
+            return {"role": "assistant", "content": "done"}
+
+        def req(call_id, name, detail):
+            approvals["n"] += 1
+            return "accept"
+
+        AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                     emit=events.append, request_approval=req).run_turn("go", model="mock", mode=mode)
+        return events, approvals["n"]
+
+    # deny blokuje narzędzie READONLY (read_file) — treść nie wraca do modelu
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        (ws.root / "secret").mkdir()
+        (ws.root / "secret" / "k.txt").write_text("TOPSECRET", encoding="utf-8")
+        gate = PermissionGate()
+        gate.set_rules(deny=["Read(secret/**)"])
+        events, _ = _run_one_tool(ws, gate, "read_file", {"path": "secret/k.txt"})
+        tr = [e for e in events if e.get("type") == "tool_result"]
+        check("B4: deny blocks a READONLY read",
+              bool(tr) and tr[0].get("ok") is False
+              and tr[0].get("summary") == "Blocked by permission rule")
+        check("B4: denied read leaks no file content",
+              all("TOPSECRET" not in (e.get("summary") or "") for e in events))
+
+    # allow auto-akceptuje write (bez dialogu zatwierdzenia)
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        gate.set_rules(allow=["Write(out/**)"])
+        events, n_appr = _run_one_tool(ws, gate, "write_file",
+                                       {"path": "out/x.txt", "content": "hi"}, mode="ask")
+        check("B4: allow auto-accepts write (no approval dialog)", n_appr == 0)
+        check("B4: allowed write is applied",
+              (ws.root / "out" / "x.txt").read_text(encoding="utf-8") == "hi")
+
+    # deny ma pierwszeństwo nad trybem bypass (twardy zakaz)
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        gate.set_rules(deny=["Edit(**)"])
+        events, _ = _run_one_tool(ws, gate, "write_file",
+                                  {"path": "a.txt", "content": "x"}, mode="bypass")
+        check("B4: deny overrides bypass mode (write blocked)", not (ws.root / "a.txt").exists())
+        tr = [e for e in events if e.get("type") == "tool_result"]
+        check("B4: deny-in-bypass emits blocked result",
+              bool(tr) and tr[0].get("summary") == "Blocked by permission rule")
+
+    # P0-1: allow Bash(**) NIE może dopuścić komendy z metaznakami (łańcuchowanie)
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        (ws.root / "victim.txt").write_text("alive", encoding="utf-8")
+        gate = PermissionGate()
+        gate.set_rules(allow=["Bash(**)"])
+        cmd = "echo hi & del victim.txt" if os.name == "nt" else "echo hi && rm victim.txt"
+        events, n_appr = _run_one_tool(ws, gate, "run_command", {"command": cmd})
+        check("B4: allow does NOT bypass P0-1 (metachar cmd not executed)",
+              (ws.root / "victim.txt").exists())
+        tr = [e for e in events if e.get("type") == "tool_result"]
+        check("B4: metachar cmd refused (ok=False), no approval dialog",
+              bool(tr) and tr[0].get("ok") is False and n_appr == 0)
+
+
+def test_orchestration_roles() -> None:
+    """M19-B6: nowe role orkiestracji zarejestrowane; klasyfikacja READONLY vs worktree
+    poprawna; `effective_tools` NIGDY nie eskaluje ponad narzędzia rodzica."""
+    from caelo_core.agent.permissions import MUTATING
+    from caelo_core.agent.roles import (
+        ALL_FILE_TOOLS, RoleRegistry, effective_tools, role_is_mutating,
+    )
+    with tempfile.TemporaryDirectory() as d:
+        reg = RoleRegistry(Path(d) / "subagents.json")
+        ids = {r["id"] for r in reg.list()}
+        check("B6: orchestration roles registered",
+              {"design-doc-writer", "design-doc-reviewer",
+               "security-auditor", "test-writer"} <= ids)
+
+        for rid in ("design-doc-reviewer", "security-auditor"):
+            r = reg.get(rid)
+            check(f"B6: {rid} is read-only (no mutation, no worktree)",
+                  r is not None and not role_is_mutating(r) and r["worktree"] is False
+                  and not (set(r["tools"]) & MUTATING))
+
+        for rid in ("design-doc-writer", "test-writer"):
+            r = reg.get(rid)
+            check(f"B6: {rid} mutates in an isolated worktree",
+                  r is not None and role_is_mutating(r) and r["worktree"] is True)
+
+        # Brak eskalacji: rola ∩ rodzic ⊆ rodzic; pod readonly-rodzicem writer traci write.
+        writer = reg.get("design-doc-writer")
+        ro_parent = {"read_file", "list_dir", "glob", "grep"}
+        eff_ro = effective_tools(writer, ro_parent)
+        check("B6: effective_tools never exceeds a read-only parent (no escalation)",
+              set(eff_ro) <= ro_parent and "write_file" not in eff_ro)
+        # Pod pełnym rodzicem writer zachowuje narzędzia mutujące.
+        eff_full = effective_tools(writer, set(ALL_FILE_TOOLS))
+        check("B6: writer keeps its write tools under a full parent",
+              {"write_file", "edit_file"} <= set(eff_full))
+        # test-writer: run_command tylko jeśli rodzic je ma.
+        check("B6: test-writer run_command dropped when parent lacks it",
+              "run_command" not in effective_tools(reg.get("test-writer"), ro_parent))
+
+
+def test_memory_injection() -> None:
+    """M19-B8: na 1. turze AgentSession wstrzykuje blok pamięci (mock memory) do system
+    promptu; tylko raz na sesję; `memory=None` → brak bloku (zero regresji)."""
+    class FakeMemory:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def injected_text(self, query, project_id=None):
+            self.calls += 1
+            return ("--- Relevant memory ---\n- [chat] earlier you set up the parser"
+                    if "parser" in (query or "") else "")
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        seen: dict = {"systems": []}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools,
+                     on_text=None, stop_flag=None):
+            seen["systems"].append(messages[0]["content"])
+            return {"role": "assistant", "content": "ok"}
+
+        mem = FakeMemory()
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda ev: None, request_approval=lambda *a: "accept",
+                               memory=mem)
+        session.run_turn("fix the parser bug", model="mock")
+        check("B8: memory injected into system prompt on first turn",
+              "Relevant memory" in seen["systems"][-1] and "parser" in seen["systems"][-1])
+
+        session.run_turn("now run tests", model="mock")
+        check("B8: memory recall happens once per session (first turn only)", mem.calls == 1)
+        check("B8: cached memory block persists across later turns",
+              "Relevant memory" in seen["systems"][-1])
+
+        s2 = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                          emit=lambda ev: None, request_approval=lambda *a: "accept")
+        s2.run_turn("hello", model="mock")
+        check("B8: no memory provider -> no memory block (no regression)",
+              "Relevant memory" not in seen["systems"][-1])
+
+
+def test_reasoning_effort() -> None:
+    """M19-B9: reasoning_effort dochodzi do llm_fn (domyślny sesji + override per tura);
+    brak/niepoprawny → brak kwargu (zero regresji); role mają poprawny effort + walidacja;
+    payload chat/completions niesie pole tylko gdy poprawne."""
+    import types as _types
+
+    from caelo_core import validation as V
+    from caelo_core.agent import llm as _llm
+    from caelo_core.agent.roles import RoleRegistry, _clean_role
+
+    check("B9: normalize_effort accepts valid (case-insensitive)",
+          V.normalize_effort("HIGH") == "high" and V.normalize_effort("low") == "low")
+    check("B9: normalize_effort rejects junk/empty/None",
+          V.normalize_effort("turbo") is None and V.normalize_effort("") is None
+          and V.normalize_effort(None) is None)
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        seen: dict = {"effort": "MISSING"}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools,
+                     on_text=None, stop_flag=None, **kw):
+            seen["effort"] = kw.get("reasoning_effort", "MISSING")
+            return {"role": "assistant", "content": "ok"}
+
+        s = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                         emit=lambda e: None, request_approval=lambda *a: "accept",
+                         reasoning_effort="high")
+        s.run_turn("hi", model="mock")
+        check("B9: session default effort reaches llm_fn", seen["effort"] == "high")
+
+        s.run_turn("again", model="mock", reasoning_effort="low")
+        check("B9: per-turn effort overrides session default", seen["effort"] == "low")
+
+        s.run_turn("again2", model="mock")
+        check("B9: per-turn None keeps session default", seen["effort"] == "high")
+
+        # Brak effortu → kwarg NIE jest przekazany (mock BEZ **kw również działa).
+        ran = {"ok": False}
+
+        def mock_strict(api_key, base_url, messages, model, temperature, tools,
+                        on_text=None, stop_flag=None):
+            ran["ok"] = True
+            return {"role": "assistant", "content": "ok"}
+
+        s2 = AgentSession(ws, gate, mock_strict, lambda: "k", "http://unused",
+                          emit=lambda e: None, request_approval=lambda *a: "accept")
+        s2.run_turn("no effort", model="mock")
+        check("B9: no effort -> llm_fn called without reasoning_effort kwarg (no regression)",
+              ran["ok"] is True)
+
+    # Role: wartości wbudowane + walidacja user-roli.
+    with tempfile.TemporaryDirectory() as d:
+        reg = RoleRegistry(Path(d) / "subagents.json")
+        researcher = reg.get("researcher")
+        tester = reg.get("tester")
+        check("B9: builtin roles carry reasoning_effort",
+              researcher and researcher.get("reasoning_effort") == "high"
+              and tester and tester.get("reasoning_effort") == "low")
+        check("B9: _clean_role drops invalid effort to ''",
+              _clean_role({"id": "x", "reasoning_effort": "TURBO"})["reasoning_effort"] == "")
+        check("B9: _clean_role normalizes valid effort",
+              _clean_role({"id": "y", "reasoning_effort": "Medium"})["reasoning_effort"] == "medium")
+
+    # llm.py: payload chat/completions niesie reasoning_effort tylko gdy poprawne.
+    captured: dict = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_lines(self, decode_unicode=False):
+            return iter([b'data: {"choices":[{"delta":{"content":"hi"}}]}', b"data: [DONE]"])
+
+    def _post(url, **kw):
+        captured["json"] = kw.get("json")
+        return _Resp()
+
+    orig = _llm.requests
+    _llm.requests = _types.SimpleNamespace(post=_post, get=getattr(orig, "get", None))
+    try:
+        _llm.stream_chat_with_tools("k", "http://x", [{"role": "user", "content": "hi"}],
+                                    "grok", 0.2, [], reasoning_effort="high")
+        with_eff = (captured.get("json") or {}).get("reasoning_effort")
+        _llm.stream_chat_with_tools("k", "http://x", [{"role": "user", "content": "hi"}],
+                                    "grok", 0.2, [], reasoning_effort="bogus")
+        omitted = "reasoning_effort" not in (captured.get("json") or {})
+    finally:
+        _llm.requests = orig
+    check("B9: llm payload carries valid reasoning_effort", with_eff == "high")
+    check("B9: llm payload omits invalid reasoning_effort", omitted)
+
+
+def test_persona_io() -> None:
+    """M19-B11: persona (instructions) + kontrakt I/O (inputs/outputs) — walidacja,
+    fallback prompt→instructions, złożenie system promptu, normalizacja builtinów,
+    round-trip user roli przez rejestr."""
+    from caelo_core.agent.roles import (
+        RoleRegistry, _clean_role, role_io_contract, role_persona, role_system_prompt,
+    )
+
+    cleaned = _clean_role({
+        "id": "x", "instructions": "Be precise.",
+        "inputs": [{"name": "spec", "io_type": "file", "required": True, "description": "d"},
+                   {"description": "no name -> dropped"}],
+        "outputs": [{"name": "report", "io_type": "weird"}],
+    })
+    check("B11: _clean_role keeps instructions", cleaned["instructions"] == "Be precise.")
+    check("B11: _clean_role drops I/O field without name + normalizes io_type/required",
+          len(cleaned["inputs"]) == 1 and cleaned["inputs"][0]["name"] == "spec"
+          and cleaned["outputs"][0]["io_type"] == "text"
+          and cleaned["outputs"][0]["required"] is False)
+
+    check("B11: persona prefers instructions over prompt",
+          role_persona({"instructions": "I", "prompt": "P"}) == "I")
+    check("B11: persona falls back to prompt (legacy M17 roles)",
+          role_persona({"prompt": "P"}) == "P")
+
+    contract = role_io_contract(cleaned)
+    check("B11: I/O contract mentions inputs + outputs",
+          "Inputs you may be given" in contract and "Outputs to produce" in contract
+          and "spec" in contract and "report" in contract)
+    sysp = role_system_prompt(cleaned)
+    check("B11: system prompt = persona + contract",
+          sysp.startswith("Be precise.") and "Outputs to produce" in sysp)
+    check("B11: role with neither persona nor I/O -> empty system prompt",
+          role_system_prompt({}) == "")
+
+    with tempfile.TemporaryDirectory() as d:
+        reg = RoleRegistry(Path(d) / "subagents.json")
+        rev = reg.get("reviewer")
+        check("B11: builtin role normalized (inputs/outputs/instructions keys present)",
+              isinstance(rev.get("inputs"), list) and isinstance(rev.get("outputs"), list)
+              and "instructions" in rev)
+        check("B11: reviewer declares findings + verdict outputs",
+              {o["name"] for o in rev["outputs"]} >= {"findings", "verdict"})
+        check("B11: builtin reviewer system prompt includes its I/O contract",
+              "Outputs to produce" in role_system_prompt(rev))
+
+        reg.upsert_role({"id": "io-role", "instructions": "Do X",
+                         "outputs": [{"name": "result", "required": True}]})
+        got = reg.get("io-role")
+        check("B11: user role round-trips instructions + outputs",
+              got["instructions"] == "Do X" and got["outputs"][0]["name"] == "result"
+              and got["outputs"][0]["required"] is True)
+
+
+def test_autocompact() -> None:
+    """M19-B10: compact_history zwija najstarsze tury (balans tool_call↔tool zachowany);
+    off / pod progiem = bez zmian; AgentSession kompaktuje gdy AGENT_AUTOCOMPACT + próg."""
+    import config as CFG
+    from caelo_core.agent.session import (
+        AgentSession, COMPACT_SUMMARY_HEADER, _history_chars, compact_history,
+    )
+
+    def turn(q, a, tool=False):
+        msgs = [{"role": "user", "content": q}]
+        if tool:
+            msgs.append({"role": "assistant", "content": "", "tool_calls": [
+                {"id": "t", "type": "function",
+                 "function": {"name": "read_file", "arguments": "{}"}}]})
+            msgs.append({"role": "tool", "tool_call_id": "t", "content": "R" * 400})
+        msgs.append({"role": "assistant", "content": a})
+        return msgs
+
+    big = (turn("q1 " + "x" * 400, "a1 " + "y" * 400, tool=True)
+           + turn("q2 " + "x" * 400, "a2 " + "y" * 400, tool=True)
+           + turn("q3 latest", "a3 latest"))
+
+    def balanced(h):
+        for i, m in enumerate(h):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                k = len(m["tool_calls"])
+                if any(i + j >= len(h) or h[i + j].get("role") != "tool"
+                       for j in range(1, k + 1)):
+                    return False
+        return True
+
+    out = compact_history(big, threshold_chars=300)
+    check("B10: compaction shrinks history over threshold", len(out) < len(big))
+    check("B10: first message is the summary block",
+          out[0].get("role") == "user" and COMPACT_SUMMARY_HEADER in (out[0].get("content") or ""))
+    check("B10: compacted history stays balanced (no split tool pairs)", balanced(out))
+    check("B10: total size not increased", _history_chars(out) <= _history_chars(big))
+    check("B10: current (last) turn preserved verbatim", out[-1] == big[-1])
+    check("B10: threshold 0 = no change (off)", compact_history(big, threshold_chars=0) is big)
+    small = turn("only", "one")
+    check("B10: under threshold = unchanged",
+          compact_history(small, threshold_chars=100000) is small)
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools,
+                     on_text=None, stop_flag=None, **_):
+            return {"role": "assistant", "content": "ok"}
+
+        prev_on, prev_th = CFG.AGENT_AUTOCOMPACT, CFG.AGENT_COMPACT_THRESHOLD_CHARS
+        CFG.AGENT_AUTOCOMPACT = True
+        CFG.AGENT_COMPACT_THRESHOLD_CHARS = 300
+        try:
+            s = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                             emit=lambda e: None, request_approval=lambda *a: "accept")
+            s.history = list(big)
+            s.run_turn("new question", model="mock")
+            joined = "\n".join(str(m.get("content") or "") for m in s.history)
+            check("B10: AgentSession compacts when enabled + over threshold",
+                  COMPACT_SUMMARY_HEADER in joined and len(s.history) < len(big))
+        finally:
+            CFG.AGENT_AUTOCOMPACT, CFG.AGENT_COMPACT_THRESHOLD_CHARS = prev_on, prev_th
+
+        CFG.AGENT_AUTOCOMPACT = False
+        s2 = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                          emit=lambda e: None, request_approval=lambda *a: "accept")
+        s2.history = list(big)
+        s2.run_turn("another", model="mock")
+        joined2 = "\n".join(str(m.get("content") or "") for m in s2.history)
+        check("B10: no compaction when disabled (off = no change)",
+              COMPACT_SUMMARY_HEADER not in joined2)
+
+
+def test_git_worktree() -> None:
+    """M19-B12: realny git worktree jako OPCJA obok kopii — fallback do kopii poza repo,
+    kształt zwrotu compute_changes identyczny dla obu wariantów, discard sprząta. Ścieżka
+    git pod guardem: brak gita w środowisku → testuje tylko kopię/fallback (bez fail)."""
+    import shutil as _sh
+    import subprocess as _sp
+
+    from caelo_core.agent import worktree as WT
+
+    # 1) fallback: use_git=True, ale katalog NIE jest repo → wariant "copy"
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "ws"
+        src.mkdir()
+        (src / "a.txt").write_text("hello\n", encoding="utf-8")
+        dest = Path(d) / "wt"
+        kind = WT.create_worktree(src, dest, use_git=True)
+        check("B12: non-repo + use_git falls back to copy", kind == "copy" and dest.exists())
+        check("B12: copy worktree mirrors files",
+              (dest / "a.txt").read_text(encoding="utf-8") == "hello\n")
+        (dest / "a.txt").write_text("hello world\n", encoding="utf-8")
+        (dest / "b.txt").write_text("new\n", encoding="utf-8")
+        ch = WT.compute_changes(src, dest, kind="copy")
+        kinds = {f["path"]: f["kind"] for f in ch["files"]}
+        check("B12: copy compute_changes shape + kinds",
+              set(ch.keys()) == {"files", "diff", "paths"}
+              and kinds.get("a.txt") == "modified" and kinds.get("b.txt") == "created")
+        WT.discard_worktree(dest, kind="copy")
+        check("B12: copy discard removes dir", not dest.exists())
+
+    if _sh.which("git") is None:
+        check("B12: git unavailable -> git path skipped (note)", True)
+        return
+
+    # 2) wariant git na realnym repo
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "repo"
+        repo.mkdir()
+
+        def g(*args):
+            return _sp.run(["git", *args], cwd=str(repo), env=T.scrubbed_env(),
+                           stdout=_sp.PIPE, stderr=_sp.PIPE, text=True)
+
+        g("init", "-q")
+        g("config", "user.email", "t@example.com")
+        g("config", "user.name", "Test")
+        (repo / "keep.txt").write_text("keep\n", encoding="utf-8")
+        (repo / "mod.txt").write_text("original\n", encoding="utf-8")
+        (repo / "del.txt").write_text("bye\n", encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-q", "-m", "init")
+
+        check("B12: is_git_repo true for repo top-level", WT.is_git_repo(repo))
+        check("B12: is_git_repo false for plain dir", not WT.is_git_repo(Path(d)))
+
+        dest = Path(d) / "gwt"
+        kind = WT.create_worktree(repo, dest, use_git=True)
+        check("B12: repo + use_git creates a git worktree",
+              kind == "git" and dest.exists() and (dest / "keep.txt").exists())
+
+        (dest / "mod.txt").write_text("changed\n", encoding="utf-8")
+        (dest / "new.txt").write_text("brand new\n", encoding="utf-8")
+        (dest / "del.txt").unlink()
+
+        ch = WT.compute_changes(repo, dest, kind="git")
+        kinds = {f["path"]: f["kind"] for f in ch["files"]}
+        check("B12: git compute_changes shape identical to copy",
+              set(ch.keys()) == {"files", "diff", "paths"})
+        check("B12: git detects modified/created/deleted",
+              kinds.get("mod.txt") == "modified" and kinds.get("new.txt") == "created"
+              and kinds.get("del.txt") == "deleted")
+        check("B12: git ignores unchanged files", "keep.txt" not in kinds)
+        check("B12: git diff text present", "changed" in ch["diff"] or "brand new" in ch["diff"])
+
+        ws = Workspace(str(repo))
+        WT.apply_changes(ws, dest, ch["files"])
+        check("B12: apply writes modified/created back to workspace",
+              (repo / "mod.txt").read_text(encoding="utf-8") == "changed\n"
+              and (repo / "new.txt").read_text(encoding="utf-8") == "brand new\n")
+        check("B12: apply deletes removed file", not (repo / "del.txt").exists())
+
+        before_n = len(g("worktree", "list").stdout.splitlines())
+        WT.discard_worktree(dest, kind="git", src_root=str(repo))
+        after_n = len(g("worktree", "list").stdout.splitlines())
+        check("B12: git discard removes worktree (dir gone + admin record pruned)",
+              not dest.exists() and after_n == 1 and after_n < before_n)
+
+
+def test_web_fetch() -> None:
+    """M19-B13: web_fetch — https-only, SSRF-guard, twarda allowlista, cap, HTML→text,
+    re-walidacja redirectu, generyczny błąd; gating (MUTATING + reguły WebFetch + klucz
+    per-host); advertowanie warunkowe (ukryte gdy off / dla subagenta)."""
+    import types as _types
+
+    import config as CFG
+    from caelo_core.agent.permission_rules import RuleSet, targets_for_tool
+    from caelo_core.agent.permissions import MUTATING, PermissionGate
+
+    class _Resp:
+        def __init__(self, body=b"x", ctype="text/html", url=""):
+            self._body = body
+            self.headers = {"content-type": ctype}
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size=8192):
+            for i in range(0, len(self._body), chunk_size):
+                yield self._body[i:i + chunk_size]
+
+    def _getter(resp_factory):
+        def _get(u, **kw):
+            return resp_factory(u)
+        return _get
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        orig_req = T.requests
+        try:
+            T.requests = _types.SimpleNamespace(
+                get=_getter(lambda u: _Resp(b"<html><body>Hello <b>World</b></body></html>",
+                                            "text/html; charset=utf-8", u)))
+            out = T.web_fetch(ws, url="https://example.com/page")
+            check("B13: web_fetch reduces HTML to text",
+                  "Hello World" in out and "<b>" not in out)
+            check("B13: web_fetch rejects non-https",
+                  T.web_fetch(ws, url="http://example.com").startswith("Error"))
+            check("B13: web_fetch refuses loopback",
+                  "refused" in T.web_fetch(ws, url="https://127.0.0.1/x"))
+            check("B13: web_fetch refuses localhost",
+                  "refused" in T.web_fetch(ws, url="https://localhost/x"))
+            check("B13: web_fetch refuses private IP",
+                  "refused" in T.web_fetch(ws, url="https://10.0.0.5/x"))
+
+            prev = CFG.WEB_FETCH_ALLOW_DOMAINS
+            CFG.WEB_FETCH_ALLOW_DOMAINS = ["example.com"]
+            try:
+                check("B13: allowlist permits listed host (subdomain)",
+                      "Hello World" in T.web_fetch(ws, url="https://docs.example.com/a"))
+                check("B13: allowlist blocks unlisted host",
+                      "allowlist" in T.web_fetch(ws, url="https://evil.org/a"))
+            finally:
+                CFG.WEB_FETCH_ALLOW_DOMAINS = prev
+
+            T.requests = _types.SimpleNamespace(
+                get=_getter(lambda u: _Resp(b"x", "text/plain", "https://169.254.169.254/meta")))
+            check("B13: web_fetch refuses redirect to blocked host",
+                  "redirect" in T.web_fetch(ws, url="https://example.com/r"))
+
+            prev_cap = CFG.WEB_FETCH_MAX_BYTES
+            CFG.WEB_FETCH_MAX_BYTES = 50
+            try:
+                T.requests = _types.SimpleNamespace(
+                    get=_getter(lambda u: _Resp(b"A" * 500, "text/plain", u)))
+                out = T.web_fetch(ws, url="https://example.com/big")
+                check("B13: web_fetch caps size + truncation note",
+                      "truncated" in out and len(out) < 200)
+            finally:
+                CFG.WEB_FETCH_MAX_BYTES = prev_cap
+
+            def _boom(u, **kw):
+                raise RuntimeError("connect 10.1.2.3:443 failed SECRET-DETAIL")
+
+            T.requests = _types.SimpleNamespace(get=_boom)
+            err = T.web_fetch(ws, url="https://example.com/e")
+            check("B13: web_fetch network error is generic (no leak)",
+                  err.startswith("Error: web_fetch failed") and "SECRET-DETAIL" not in err)
+        finally:
+            T.requests = orig_req
+
+    # --- gating + reguły ---
+    check("B13: web_fetch is gated (MUTATING, not READONLY)", "web_fetch" in MUTATING)
+    gate = PermissionGate()
+    check("B13: web_fetch needs approval by default",
+          gate.needs_approval("web_fetch", {"url": "https://example.com/x"}))
+    rs = RuleSet(allow=["WebFetch(domain:example.com)"], deny=["WebFetch(domain:evil.org)"])
+    check("B13: WebFetch allow rule matches host (subdomain)",
+          rs.evaluate_tool("web_fetch", {"url": "https://docs.example.com/x"}) == "allow")
+    check("B13: WebFetch deny rule matches host",
+          rs.evaluate_tool("web_fetch", {"url": "https://evil.org/x"}) == "deny")
+    check("B13: targets_for_tool maps web_fetch -> WebFetch(url)",
+          targets_for_tool("web_fetch", {"url": "https://h/x"}) == [("WebFetch", "https://h/x")])
+    g2 = PermissionGate()
+    g2.allow("web_fetch", {"url": "https://example.com/a"})
+    check("B13: Always-allow web_fetch is per-host",
+          not g2.needs_approval("web_fetch", {"url": "https://example.com/other"})
+          and g2.needs_approval("web_fetch", {"url": "https://evil.org/x"}))
+
+    # --- advertowanie warunkowe ---
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        g3 = PermissionGate()
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools,
+                     on_text=None, stop_flag=None, **_):
+            return {"role": "assistant", "content": "ok"}
+
+        prev_en = CFG.WEB_FETCH_ENABLED
+        try:
+            CFG.WEB_FETCH_ENABLED = False
+            off = AgentSession(ws, g3, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda e: None, request_approval=lambda *a: "accept")
+            check("B13: web_fetch hidden when disabled",
+                  "web_fetch" not in {t["function"]["name"] for t in off._all_tools()})
+            CFG.WEB_FETCH_ENABLED = True
+            on = AgentSession(ws, g3, mock_llm, lambda: "k", "http://unused",
+                              emit=lambda e: None, request_approval=lambda *a: "accept")
+            check("B13: web_fetch advertised when enabled (main agent)",
+                  "web_fetch" in {t["function"]["name"] for t in on._all_tools()})
+            sub = AgentSession(ws, g3, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda e: None, request_approval=lambda *a: "accept",
+                               tool_names={"read_file"})
+            check("B13: web_fetch not advertised to a scoped subagent",
+                  "web_fetch" not in {t["function"]["name"] for t in sub._all_tools()})
+        finally:
+            CFG.WEB_FETCH_ENABLED = prev_en
+
+
+def test_project_config() -> None:
+    """M19-B14: hierarchiczny config cwd→root — find_project_root (.git walk),
+    project_dir_chain (deeper-wins), dziedziczenie CAELO.md i `.caelo/{permissions,lsp}.json`
+    z przodków (monorepo); pojedynczy root = zachowanie sprzed B14."""
+    from caelo_core.agent.caelomd import load_caelo_md
+    from caelo_core.agent.project import find_project_root, project_dir_chain
+
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "repo"
+        mid = repo / "pkg"
+        ws = mid / "app"
+        ws.mkdir(parents=True)
+        (repo / ".git").mkdir()  # symuluj korzeń repo
+
+        check("B14: find_project_root finds .git ancestor",
+              find_project_root(ws) == repo.resolve())
+        plain = Path(d) / "plain"
+        plain.mkdir()
+        check("B14: find_project_root returns start when no repo",
+              find_project_root(plain) == plain.resolve())
+
+        check("B14: project_dir_chain is root->ws (shallowest first)",
+              project_dir_chain(ws) == [repo.resolve(), mid.resolve(), ws.resolve()])
+        check("B14: chain for repo-root is just itself",
+              project_dir_chain(repo) == [repo.resolve()])
+        check("B14: chain for non-repo dir is just itself",
+              project_dir_chain(plain) == [plain.resolve()])
+
+        # CAELO.md: przodek + workspace (deeper = workspace, ostatni)
+        (repo / "CAELO.md").write_text("Repo-wide rule: use tabs.", encoding="utf-8")
+        (ws / "CAELO.md").write_text("App rule: 100 char lines.", encoding="utf-8")
+        md = load_caelo_md(ws, None)
+        check("B14: CAELO.md inherits ancestor + workspace",
+              "Repo-wide rule" in md and "App rule" in md)
+        check("B14: workspace CAELO.md is the deepest (labeled workspace, ancestor labeled)",
+              "## Workspace project rules" in md and "ancestor: repo" in md)
+
+        # Backend.__new__ (bez I/O) do testu discovery permissions + lsp
+        from caelo_core.state import Backend
+        (repo / ".caelo").mkdir()
+        (repo / ".caelo" / "permissions.json").write_text('{"allow": ["Read(src/**)"]}',
+                                                          encoding="utf-8")
+        (ws / ".caelo").mkdir()
+        (ws / ".caelo" / "permissions.json").write_text('{"deny": ["Bash(rm*)"]}',
+                                                        encoding="utf-8")
+        b = Backend.__new__(Backend)
+        b.permissions = PermissionGate()
+        b.read_settings = lambda: {}
+        b._workspace = Workspace(str(ws))
+        b.reload_permission_rules()
+        rs = b.permissions.rule_strings()
+        check("B14: permission rules inherit ancestor allow + workspace deny",
+              "Read(src/**)" in rs["allow"] and "Bash(rm*)" in rs["deny"])
+
+        # .caelo/lsp.json: przodek + workspace (deeper wygrywa per nazwa serwera)
+        (repo / ".caelo" / "lsp.json").write_text(
+            '{"py": {"command": "ancestor-ls"}, "rs": {"command": "rust-ls"}}', encoding="utf-8")
+        (ws / ".caelo" / "lsp.json").write_text('{"py": {"command": "ws-pyright"}}',
+                                               encoding="utf-8")
+        cfg = b._discover_lsp_configs(Workspace(str(ws)).root)
+        check("B14: lsp config inherits ancestor + workspace (deeper wins per server)",
+              cfg.get("rs", {}).get("command") == "rust-ls"
+              and cfg.get("py", {}).get("command") == "ws-pyright")
 
 
 def main() -> int:
@@ -1282,6 +2022,24 @@ def main() -> int:
     test_team_parallel_stop_budget()
     test_team_merge()
     test_team_cost()
+    # M19 — B4: reguły uprawnień jako globy (ToolPrefix), deny>allow, integracja w pętli
+    test_permission_rules()
+    # M19 — B6: role skilli-orkiestratorów (rejestracja + brak eskalacji)
+    test_orchestration_roles()
+    # M19 — B8: wstrzyknięcie pamięci hybrydowej na 1. turze (mock memory)
+    test_memory_injection()
+    # M19 — B9: poziomy reasoning_effort (sesja/per-tura/role/payload llm)
+    test_reasoning_effort()
+    # M19 — B10: auto-compact kontekstu agenta (zwijanie najstarszych tur)
+    test_autocompact()
+    # M19 — B11: persony + kontrakt I/O subagentów (persona/contract/round-trip)
+    test_persona_io()
+    # M19 — B12: realne git worktree jako opcja (fallback do kopii, kształt, discard)
+    test_git_worktree()
+    # M19 — B13: web_fetch w agencie (https-only/SSRF/allowlista/cap + gating + advertise)
+    test_web_fetch()
+    # M19 — B14: config projektowy hierarchiczny (find_project_root + walk cwd→root)
+    test_project_config()
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

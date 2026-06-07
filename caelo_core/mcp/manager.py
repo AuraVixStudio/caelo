@@ -142,24 +142,65 @@ class McpServer:
 class McpManager:
     """Wiele serwerów MCP + agregacja narzędzi + routing wywołań + klasyfikacja gate."""
 
-    def __init__(self, config_path: Optional[Path] = None) -> None:
+    def __init__(self, config_path: Optional[Path] = None, *,
+                 workspace_root: Optional[Path] = None,
+                 claude_json: Optional[Path] = None) -> None:
         self._path = config_path or config.MCP_FILE
+        # M19-B5 §1.2 (interop): dodatkowe ŹRÓDŁA discovery (poza natywnym caelo_mcp.json).
+        # Jawne parametry — domyślnie None = brak interopu (czyste zachowanie dla testów;
+        # Backend wstrzykuje realne `config.CLAUDE_JSON` + korzeń workspace).
+        self._workspace_root = Path(workspace_root) if workspace_root else None
+        self._claude_json = Path(claude_json) if claude_json else None
         self._lock = threading.RLock()
         self._servers: dict[str, McpServer] = {}
         # qualified_name -> (server_id, raw_tool_name) — adresowanie odporne na sanityzację.
         self._routes: dict[str, tuple[str, str]] = {}
         self._load()
 
+    @property
+    def workspace_root(self) -> Optional[Path]:
+        """Korzeń workspace, dla którego zbudowano menedżera (None = brak/global-only).
+        Backend porównuje go, by przebudować menedżera przy zmianie workspace (jak LSP)."""
+        return self._workspace_root
+
     # --- trwałość ---
     def _load(self) -> None:
+        # 1) Natywne serwery (caelo_mcp.json) — autorytatywne, mogą być włączone.
         data = config.load_json_or_backup(self._path, {}) or {}
         servers = data.get("servers") if isinstance(data, dict) else None
         for cfg in servers or []:
             if isinstance(cfg, dict) and cfg.get("id"):
                 self._servers[cfg["id"]] = McpServer(dict(cfg))
+        # 2) Interop (B5 §1.2): scal serwery z ekosystemu Claude Code / Grok CLI. Projekt
+        #    (<ws>/.mcp.json) ma pierwszeństwo nad globalnym (~/.claude.json); natywne wpisy
+        #    NIE są nadpisywane. Import NIC nie uruchamia — serwery wchodzą WYŁĄCZONE (M16).
+        if self._workspace_root is not None:
+            self._merge_claude_servers(self._workspace_root / ".mcp.json", "claude-project")
+        if self._claude_json is not None:
+            self._merge_claude_servers(self._claude_json, "claude-global")
+
+    def _merge_claude_servers(self, path: Path, source: str) -> None:
+        """Wczytaj plik w formacie Claude Code / Grok CLI (`{"mcpServers": {<name>: {…}}}`)
+        i dodaj serwery, których id jeszcze nie ma (natywne/wcześniejszy import wygrywają).
+        Importowane wchodzą WYŁĄCZONE (`enabled=False`). Błąd pliku = po cichu pomiń."""
+        raw = _read_interop_servers(path)
+        if not raw:
+            return
+        with self._lock:
+            for name, spec in raw.items():
+                if not isinstance(spec, dict):
+                    continue
+                sid = _slug(name)
+                if sid in self._servers:
+                    continue  # natywny / wcześniejszy import ma pierwszeństwo
+                cfg = _claude_server_to_cfg(sid, str(name), spec, source)
+                if cfg is not None:
+                    self._servers[sid] = McpServer(cfg)
 
     def _save(self) -> None:
-        data = {"servers": [s.cfg for s in self._servers.values()]}
+        # Persistujemy WYŁĄCZNIE natywne serwery — importowane (Claude/Grok CLI) są
+        # odkrywane dynamicznie i nie mogą wyciekać do naszego caelo_mcp.json.
+        data = {"servers": [s.cfg for s in self._servers.values() if not _is_imported(s.cfg)]}
         try:
             config.atomic_write_text(self._path, json.dumps(data, indent=2, ensure_ascii=False))
         except Exception:  # noqa: BLE001
@@ -399,6 +440,8 @@ class McpManager:
             "name": cfg.get("name") or srv.id,
             "transport": srv.transport,
             "enabled": srv.enabled,
+            # B5 §1.2: skąd przyszedł serwer — "native" (nasz config) lub "claude-*" (interop).
+            "source": cfg.get("source") or "native",
         }
         if srv.transport == "stdio":
             out["command"] = list(cfg.get("command") or [])
@@ -432,6 +475,65 @@ class McpManager:
     def all_status(self) -> list[dict]:
         with self._lock:
             return [self.status(sid) for sid in self._servers]
+
+
+def _read_interop_servers(path: Path) -> dict:
+    """Niedestrukcyjny odczyt pliku ekosystemu (NIE nasz plik — np. `~/.claude.json`
+    Claude Code, `<ws>/.mcp.json`). W przeciwieństwie do `config.load_json_or_backup`
+    NIGDY nie przenosi/nie modyfikuje pliku przy błędzie (nie wolno psuć cudzej
+    konfiguracji) — przy braku/uszkodzeniu/złym kształcie zwraca `{}`. Wynik = słownik
+    `mcpServers` (`{<name>: {command/args/env|url…}}`) albo `{}`."""
+    try:
+        if not path.is_file():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        log.warning("Skipping unreadable MCP interop file %s", path, exc_info=True)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    servers = data.get("mcpServers")
+    return servers if isinstance(servers, dict) else {}
+
+
+def _is_imported(cfg: dict) -> bool:
+    """Czy serwer pochodzi z importu interop (Claude/Grok CLI), nie z natywnego configu.
+    Importowane NIE są persistowane do caelo_mcp.json (odkrywane dynamicznie)."""
+    return str(cfg.get("source") or "").startswith("claude")
+
+
+def _claude_server_to_cfg(sid: str, name: str, spec: dict, source: str) -> Optional[dict]:
+    """Zmapuj wpis serwera w formacie Claude Code / Grok CLI na nasz wewnętrzny kształt.
+
+    - stdio: `command` (str) + `args` (list) → argv; `env`/`cwd` zachowane.
+    - remote: `url` (z opcjonalnym `type` sse/http) → transport `remote` (native remote MCP,
+      wykonanie po stronie xAI); `authorization` zmapowane, jeśli podane.
+    Zwraca None dla wpisów bez rozpoznawalnej komendy/url. Importowane wchodzą WYŁĄCZONE."""
+    base = {"id": sid, "name": name or sid, "enabled": False, "source": source}
+    command = spec.get("command")
+    if command:  # stdio
+        argv = [str(command)] + [str(a) for a in (spec.get("args") or [])]
+        env = spec.get("env")
+        return {
+            **base,
+            "transport": "stdio",
+            "command": argv,
+            "cwd": spec.get("cwd") or None,
+            "env": {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {},
+        }
+    url = spec.get("url")
+    stype = str(spec.get("type") or "").lower()
+    if url and stype in ("", "sse", "http", "streamable-http", "remote"):
+        cfg = {
+            **base,
+            "transport": "remote",
+            "url": str(url),
+            "server_label": _slug(spec.get("server_label") or name or sid),
+        }
+        if spec.get("authorization"):
+            cfg["authorization"] = str(spec["authorization"])
+        return cfg
+    return None
 
 
 def _is_readonly(tool: dict) -> bool:

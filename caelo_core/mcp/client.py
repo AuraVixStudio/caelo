@@ -106,6 +106,13 @@ class StdioTransport(McpTransport):
 
     def start(self, on_message: Callable[[dict], None]) -> None:
         argv = _prepare_argv(self.command)
+        # M19-B7: opcjonalny sandbox OS (off-by-default → no-op). Owija argv launcherem;
+        # FAIL-OPEN (błąd nie blokuje startu serwera). Root = skonfigurowany cwd serwera.
+        try:
+            from caelo_core import sandbox
+            argv = sandbox.wrap_command(argv, root=self.cwd)
+        except Exception:  # noqa: BLE001
+            pass
         popen_kwargs: dict = {}
         if os.name != "nt":
             popen_kwargs["start_new_session"] = True  # własna grupa → tree-kill (killpg)

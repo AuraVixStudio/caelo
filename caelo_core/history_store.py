@@ -23,8 +23,10 @@ API publiczne (stabilne dla B2/B3):
 
 from __future__ import annotations
 
+import array
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -33,7 +35,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import config
 
@@ -264,6 +266,12 @@ class HistoryStore:
                     event_id UNINDEXED,
                     tokenize='unicode61'
                 );
+                CREATE TABLE IF NOT EXISTS event_embeddings (
+                    event_id   TEXT PRIMARY KEY,
+                    dim        INTEGER NOT NULL,
+                    vec        BLOB NOT NULL,
+                    created_at REAL NOT NULL DEFAULT 0
+                );
                 """
             )
             # M10-B5: migracje kolumn (CREATE TABLE IF NOT EXISTS nie dodaje kolumn
@@ -385,6 +393,119 @@ class HistoryStore:
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_event(r) for r in rows]
+
+    def event_metas(self, event_ids: Sequence[str]) -> dict[str, dict]:
+        """M19-B10: zwróć `{event_id: meta}` dla podanych zdarzeń. `meta` żyje w
+        `history_fts` (nie w dataclass HistoryEvent), więc czytamy je tu — używane
+        przez eksport historii do markdown (prompt/model w meta). Jeden przebieg
+        kursora z wczesnym zakończeniem (FTS5 bez MATCH = pełny skan; export rzadki)."""
+        want = {str(i) for i in event_ids if i}
+        if not want:
+            return {}
+        out: dict[str, dict] = {}
+        with self._lock:
+            cur = self._conn.execute("SELECT event_id, meta FROM history_fts")
+            for row in cur:
+                eid = row["event_id"]
+                if eid in want and eid not in out:
+                    try:
+                        out[eid] = json.loads(row["meta"]) if row["meta"] else {}
+                    except Exception:  # noqa: BLE001
+                        out[eid] = {}
+                    if len(out) == len(want):
+                        break
+        return out
+
+    # --- pamięć semantyczna: embeddingi + KNN + hybryda (M19-B8) ---------------
+    # Wektory zdarzeń (float32 BLOB) liczone przez `caelo_core.embeddings` w warstwie
+    # wyżej (`caelo_core.memory.MemoryIndex`) — tu trzymamy WYŁĄCZNIE magazyn i KNN
+    # (brak importu klienta/sieci, jak genjobs nie importuje api_manager). KNN to
+    # brute-force cosine w Pythonie nad zdekodowanymi blobami (skala = tysiące → OK,
+    # bez `sqlite-vec`/numpy). Hybryda scala FTS5 (MATCH) z KNN semantycznym.
+
+    def set_event_embedding(self, event_id: str, vec: Sequence[float],
+                            *, created_at: Optional[float] = None) -> None:
+        """Zapisz/zaktualizuj wektor zdarzenia (float32 BLOB). Idempotentne po event_id."""
+        blob = array.array("f", [float(x) for x in vec]).tobytes()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO event_embeddings (event_id, dim, vec, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (event_id, len(vec), blob,
+                 time.time() if created_at is None else float(created_at)),
+            )
+
+    def count_event_embeddings(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM event_embeddings").fetchone()
+        return int(row[0]) if row else 0
+
+    @staticmethod
+    def _decode_vec(blob) -> array.array:
+        a = array.array("f")
+        a.frombytes(bytes(blob))
+        return a
+
+    def knn_events(self, query_vec: Sequence[float], *, k: int = 5,
+                   project_id: Optional[str] = None, min_score: float = 0.0
+                   ) -> list[tuple[HistoryEvent, float]]:
+        """Brute-force cosine KNN nad `event_embeddings` ∩ `history_events`. Zwraca
+        listę `(HistoryEvent, score)` malejąco po score (cosinus), powyżej `min_score`.
+        Wektory o innym wymiarze niż zapytanie (np. po zmianie modelu) są pomijane."""
+        q = [float(x) for x in query_vec]
+        qnorm = math.sqrt(sum(v * v for v in q))
+        if qnorm == 0.0:
+            return []
+        sql = ("SELECT e.*, m.vec AS _vec FROM event_embeddings m "
+               "JOIN history_events e ON e.id = m.event_id")
+        params: list[Any] = []
+        if project_id:
+            sql += " WHERE e.project_id = ?"
+            params.append(project_id)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        scored: list[tuple[HistoryEvent, float]] = []
+        for row in rows:
+            vec = self._decode_vec(row["_vec"])
+            if len(vec) != len(q):
+                continue
+            dot = 0.0
+            vnorm = 0.0
+            for a, b in zip(q, vec):
+                dot += a * b
+                vnorm += b * b
+            vnorm = math.sqrt(vnorm)
+            if vnorm == 0.0:
+                continue
+            score = dot / (qnorm * vnorm)
+            if score >= min_score:
+                scored.append((self._row_to_event(row), score))
+        scored.sort(key=lambda t: t[1], reverse=True)
+        return scored[:k]
+
+    def hybrid_search(self, *, q_text: Optional[str] = None,
+                      query_vec: Optional[Sequence[float]] = None, k: int = 5,
+                      project_id: Optional[str] = None, min_score: float = 0.0
+                      ) -> list[HistoryEvent]:
+        """Hybryda: KNN semantyczny (jeśli `query_vec`) + FTS5 (jeśli `q_text`), scalone
+        po id zdarzenia. KNN-trafienia (score≥min_score) idą pierwsze (rerank), potem
+        dopełnienie z FTS aż do `k`. Zwraca listę `HistoryEvent`."""
+        out: list[HistoryEvent] = []
+        seen: set[str] = set()
+        if query_vec is not None:
+            for ev, _score in self.knn_events(query_vec, k=k, project_id=project_id,
+                                              min_score=min_score):
+                if ev.id not in seen:
+                    seen.add(ev.id)
+                    out.append(ev)
+        if q_text and q_text.strip() and len(out) < k:
+            for ev in self.list_events(q=q_text, project_id=project_id, limit=k):
+                if ev.id not in seen:
+                    seen.add(ev.id)
+                    out.append(ev)
+                    if len(out) >= k:
+                        break
+        return out[:k]
 
     # --- projekty (M9-B5) -----------------------------------------------------
 

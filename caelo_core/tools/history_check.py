@@ -401,6 +401,79 @@ def test_project_scoping() -> None:
             store.close()
 
 
+def test_memory_knn_hybrid() -> None:
+    """M19-B8: magazyn embeddingów + brute-force cosine KNN + hybryda FTS, oraz
+    `MemoryIndex` ze STUB-embedderem (indeksowanie / recall / wstrzyknięcie / opt-in).
+    Zero sieci — wektory wstrzykiwane wprost (xAI endpoint = osobny spike, live)."""
+    from caelo_core.memory import MemoryIndex
+
+    vocab = {"cats": [1.0, 0.0, 0.0], "dogs": [0.0, 1.0, 0.0], "fish": [0.0, 0.0, 1.0]}
+
+    def stub_embed(texts):
+        out = []
+        for t in texts:
+            v = [0.0, 0.0, 0.0]
+            tl = (t or "").lower()
+            for w, wv in vocab.items():
+                if w in tl:
+                    v = [a + b for a, b in zip(v, wv)]
+            out.append(v)
+        return out
+
+    with _tmp() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        try:
+            e_cat = store.record_event(mode="chat", text="I really love cats and kittens")
+            e_dog = store.record_event(mode="chat", text="dogs are loyal companions")
+            e_fish = store.record_event(mode="chat", text="fish swim in the sea")
+            for ev in (e_cat, e_dog, e_fish):
+                store.set_event_embedding(ev.id, stub_embed([ev.text])[0])
+            check("memory: embeddings stored (count)", store.count_event_embeddings() == 3)
+
+            knn = store.knn_events(stub_embed(["cats"])[0], k=2, min_score=0.1)
+            check("memory: KNN nearest is the cat event",
+                  bool(knn) and knn[0][0].id == e_cat.id)
+            check("memory: KNN scores sorted descending",
+                  all(knn[i][1] >= knn[i + 1][1] for i in range(len(knn) - 1)))
+
+            only_cat = store.knn_events(stub_embed(["cats"])[0], k=5, min_score=0.5)
+            check("memory: min_score filters unrelated", [e.id for e, _ in only_cat] == [e_cat.id])
+
+            # wektor o innym wymiarze (np. po zmianie modelu) jest pomijany, nie wywala
+            e_bad = store.record_event(mode="chat", text="weird dimension event")
+            store.set_event_embedding(e_bad.id, [0.5, 0.5])  # 2-dim
+            mixed = store.knn_events([1.0, 0.0, 0.0], k=10, min_score=-1.0)
+            check("memory: mismatched-dim vector skipped (no crash)",
+                  all(e.id != e_bad.id for e, _ in mixed))
+
+            # hybryda: KNN (query_vec→fish) + FTS ("loyal"→dog), dedup, KNN pierwszy
+            hyb = store.hybrid_search(q_text="loyal", query_vec=stub_embed(["fish"])[0],
+                                      k=5, min_score=0.5)
+            ids = [e.id for e in hyb]
+            check("memory: hybrid merges KNN + FTS (both, dedup)",
+                  e_fish.id in ids and e_dog.id in ids and len(ids) == len(set(ids)))
+            check("memory: hybrid puts KNN hit first", bool(ids) and ids[0] == e_fish.id)
+
+            # MemoryIndex opt-in: OFF → no-op
+            off = MemoryIndex(store, stub_embed, enabled=False)
+            check("memory: disabled index/recall/inject are no-ops",
+                  off.index_event("x", "cats") is False and off.recall("cats") == []
+                  and off.injected_text("cats") == "")
+
+            # MemoryIndex ON: index + recall + injected_text
+            idx = MemoryIndex(store, stub_embed, enabled=True, max_results=3, min_score=0.5)
+            e_new = store.record_event(mode="code", text="refactor the cats module")
+            check("memory: index_event stores a vector", idx.index_event(e_new.id, e_new.text) is True)
+            check("memory: recall returns cat-related events",
+                  any(r.id == e_cat.id for r in idx.recall("cats")))
+            inj = idx.injected_text("tell me about cats")
+            check("memory: injected_text formats a memory block",
+                  "Relevant memory" in inj and "cats" in inj.lower())
+            check("memory: empty query -> no injection", idx.injected_text("   ") == "")
+        finally:
+            store.close()
+
+
 def _raises_status(fn, status: int) -> bool:
     from fastapi import HTTPException
     try:
@@ -425,6 +498,7 @@ def main() -> int:
     test_backend_wiring()
     test_input_blocks()
     test_project_scoping()
+    test_memory_knn_hybrid()  # M19-B8: embeddingi + KNN + hybryda + MemoryIndex (stub)
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

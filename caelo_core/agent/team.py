@@ -27,13 +27,18 @@ from typing import Callable, Optional
 import config  # type: ignore
 
 from caelo_core.agent.permissions import MUTATING, READONLY
-from caelo_core.agent.roles import RoleRegistry, effective_tools, role_is_mutating
+from caelo_core.agent.roles import (
+    RoleRegistry,
+    effective_tools,
+    role_is_mutating,
+    role_system_prompt,
+)
 from caelo_core.agent.session import AgentSession
 from caelo_core.agent.workspace import Workspace
 from caelo_core.agent.worktree import (
     apply_changes,
     compute_changes,
-    copy_worktree,
+    create_worktree,
     discard_worktree,
 )
 
@@ -125,6 +130,7 @@ class SubAgent:
         self.done = threading.Event()
         self.thread: Optional[threading.Thread] = None
         self._worktree: Optional[Path] = None
+        self._worktree_kind = "copy"  # M19-B12: 'copy' | 'git' (rzeczywisty wariant)
 
     # --- domknięcia kontekstu pod-sesji ---
     def _scoped_emit(self, ev: dict) -> None:
@@ -159,8 +165,12 @@ class SubAgent:
                 mcp=mcp, hooks=self.team.hooks, skills=None,
                 tool_names=tools,                 # B1: zawężony zbiór narzędzi
                 delegate_fn=None,                 # B5: głębia = 1 (brak wnuków)
-                extra_system=self.role.get("prompt") or None,
+                # M19-B11: persona (instructions/prompt) + kontrakt I/O (inputs/outputs).
+                extra_system=role_system_prompt(self.role) or None,
                 on_turn=self._on_turn,            # B5: budżet tur
+                # M19-B9: effort roli ma pierwszeństwo; brak → globalny effort przebiegu.
+                reasoning_effort=(self.role.get("reasoning_effort")
+                                  or self.team.reasoning_effort or None),
             )
             # Mutująca rola pracuje w worktree → auto-akceptuj edycje (przegląd przy
             # scalaniu, B4 — nie pytaj per-edit). run_command nadal pyta (routowane do
@@ -191,11 +201,13 @@ class SubAgent:
             self.duration = time.monotonic() - self.started_at
 
     def _workspace_for_role(self) -> Workspace:
-        """READONLY rola → realny workspace (bez kopii). Mutująca → izolowany worktree."""
+        """READONLY rola → realny workspace (bez kopii). Mutująca → izolowany worktree
+        (M19-B12: realny `git worktree`, gdy włączone i repo; inaczej kopia katalogu)."""
         if not role_is_mutating(self.role):
             return self.team.workspace
         wt = self.team.new_worktree_path(self.agent_id)
-        copy_worktree(self.team.workspace.root, wt)
+        self._worktree_kind = create_worktree(
+            self.team.workspace.root, wt, use_git=self.team.use_git_worktree)
         self._worktree = wt
         return Workspace(str(wt))
 
@@ -211,7 +223,8 @@ class SubAgent:
         if self._worktree is None:
             return
         try:
-            changes = compute_changes(self.team.workspace.root, self._worktree)
+            changes = compute_changes(self.team.workspace.root, self._worktree,
+                                      kind=self._worktree_kind)
         except Exception:  # noqa: BLE001
             log.warning("compute_changes failed for %s", self.agent_id, exc_info=True)
             self._cleanup_worktree()
@@ -220,14 +233,18 @@ class SubAgent:
             self._cleanup_worktree()
             return
         self.files_changed = len(changes["files"])
+        # M19-B12: rodzaj worktree + korzeń repo idą do scalenia, by discard użył
+        # właściwego sprzątania (git worktree remove vs rmtree).
         merge = self.team.register_merge(
             agent_id=self.agent_id, role=self.role_id, task=self.task,
-            worktree_dir=str(self._worktree), files=changes["files"], diff=changes["diff"])
+            worktree_dir=str(self._worktree), files=changes["files"], diff=changes["diff"],
+            kind=self._worktree_kind, src_root=str(self.team.workspace.root))
         self.merge_id = merge.id if merge else None
 
     def _cleanup_worktree(self) -> None:
         if self._worktree is not None:
-            discard_worktree(self._worktree)
+            discard_worktree(self._worktree, kind=self._worktree_kind,
+                             src_root=str(self.team.workspace.root))
             self._worktree = None
 
     def report(self) -> dict:
@@ -252,7 +269,8 @@ def _last_assistant_text(session: AgentSession) -> str:
 # --- magazyn oczekujących scaleń (współdzielony WS↔REST) ------------------------
 class PendingMerge:
     def __init__(self, *, id: str, agent_id: str, role: str, task: str,
-                 worktree_dir: str, files: list[dict], diff: str, created_at: int) -> None:
+                 worktree_dir: str, files: list[dict], diff: str, created_at: int,
+                 kind: str = "copy", src_root: str = "") -> None:
         self.id = id
         self.agent_id = agent_id
         self.role = role
@@ -261,6 +279,10 @@ class PendingMerge:
         self.files = files
         self.diff = diff
         self.created_at = created_at
+        # M19-B12: rodzaj worktree + korzeń repo — do poprawnego sprzątania przy
+        # apply/reject (git worktree remove vs rmtree).
+        self.kind = kind
+        self.src_root = src_root
         self.conflicts: list[str] = []
 
     def summary(self) -> dict:
@@ -280,13 +302,14 @@ class MergeStore:
         self._seq = 0
 
     def add(self, *, agent_id: str, role: str, task: str, worktree_dir: str,
-            files: list[dict], diff: str, created_at: int) -> PendingMerge:
+            files: list[dict], diff: str, created_at: int,
+            kind: str = "copy", src_root: str = "") -> PendingMerge:
         with self._lock:
             self._seq += 1
             mid = f"m{self._seq}"
             pm = PendingMerge(id=mid, agent_id=agent_id, role=role, task=task,
                               worktree_dir=worktree_dir, files=files, diff=diff,
-                              created_at=created_at)
+                              created_at=created_at, kind=kind, src_root=src_root)
             self._merges[mid] = pm
             self._recompute_conflicts_locked()
             return pm
@@ -319,7 +342,7 @@ class MergeStore:
             res = apply_changes(workspace, Path(pm.worktree_dir), pm.files,
                                 checkpoints=checkpoints,
                                 label=f"Merge {pm.role} subagent")
-            discard_worktree(Path(pm.worktree_dir))
+            discard_worktree(Path(pm.worktree_dir), kind=pm.kind, src_root=pm.src_root or None)
             del self._merges[mid]
             self._recompute_conflicts_locked()
             res["ok"] = True
@@ -331,14 +354,15 @@ class MergeStore:
             pm = self._merges.pop(mid, None)
             if pm is None:
                 raise ValueError("unknown merge")
-            discard_worktree(Path(pm.worktree_dir))
+            discard_worktree(Path(pm.worktree_dir), kind=pm.kind, src_root=pm.src_root or None)
             self._recompute_conflicts_locked()
             return {"ok": True, "merge_id": mid}
 
     def clear(self) -> dict:
         with self._lock:
             for pm in self._merges.values():
-                discard_worktree(Path(pm.worktree_dir))
+                discard_worktree(Path(pm.worktree_dir), kind=pm.kind,
+                                 src_root=pm.src_root or None)
             n = len(self._merges)
             self._merges.clear()
             return {"ok": True, "cleared": n}
@@ -369,6 +393,12 @@ class TeamManager:
         self.on_report = on_report
 
         self.limits = registry.limits()
+        # M19-B9: globalny reasoning_effort tego przebiegu (fallback, gdy rola nie ma
+        # własnego). Ustawiany w `run()` z effortu tury orkiestratora.
+        self.reasoning_effort: Optional[str] = None
+        # M19-B12: wariant worktree — realny `git worktree` zamiast kopii (opt-in).
+        # Odświeżany w `run()` z `config.AGENT_GIT_WORKTREE` (env / headless --worktree).
+        self.use_git_worktree = bool(getattr(config, "AGENT_GIT_WORKTREE", False))
         self.workspace: Optional[Workspace] = None
         # baza worktree (nadpisywalna w testach, by nie pisać do repo).
         self.worktrees_base = Path(config.WORKTREES_DIR)
@@ -408,8 +438,12 @@ class TeamManager:
         return store.add(created_at=int(time.time()), **kw)
 
     # --- przebieg delegacji ---
-    def run(self, tasks: list, *, model: str, workspace: Workspace, mode: str = "ask") -> str:
+    def run(self, tasks: list, *, model: str, workspace: Workspace, mode: str = "ask",
+            reasoning_effort: Optional[str] = None) -> str:
         self.workspace = workspace
+        self.reasoning_effort = reasoning_effort  # M19-B9: fallback effortu subagentów
+        # M19-B12: odśwież wariant worktree (config mógł się zmienić, np. headless --worktree).
+        self.use_git_worktree = bool(getattr(config, "AGENT_GIT_WORKTREE", False))
         self.limits = self.registry.limits()  # świeże (UI mógł zmienić)
         self._turns_used = 0
         self._stopped = False

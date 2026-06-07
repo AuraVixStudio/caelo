@@ -36,6 +36,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import config  # type: ignore
 
 from caelo_core import responses_client
+from caelo_core import validation as V
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
 
@@ -96,7 +97,7 @@ async def chat_stream(ws: WebSocket) -> None:
     async with WsStream(ws) as stream:
 
         def start_worker(messages, model: str, temperature: float,
-                         search_mode: str, sources) -> None:
+                         search_mode: str, sources, reasoning_effort=None) -> None:
             stop = threading.Event()        # P1-3: stop_event PER-REQUEST
             current["stop"] = stop
             got = {"any": False}
@@ -142,7 +143,9 @@ async def chat_stream(ws: WebSocket) -> None:
                         result = responses_client.stream_response(
                             messages, model=model,
                             api_key_provider=backend.get_api_key,
-                            temperature=temperature, tools=tools,
+                            temperature=temperature,
+                            reasoning_effort=reasoning_effort,  # M19-B9
+                            tools=tools,
                             # "on" wymusza search; "auto" zostawia decyzję modelowi.
                             tool_choice="required" if search_mode == "on" else None,
                             on_delta=on_delta, on_tool=on_tool, stop_flag=stop.is_set,
@@ -232,6 +235,12 @@ async def chat_stream(ws: WebSocket) -> None:
                     if search_mode not in ("auto", "on", "off"):
                         search_mode = "off"
                     sources = msg.get("sources") or None
+                    # M19-B9: reasoning_effort z ramki (selektor UI) z fallbackiem na
+                    # ustawienie aplikacji (`chat_effort`); niepoprawne → None (pominięte).
+                    reasoning_effort = V.normalize_effort(
+                        msg.get("reasoning_effort")
+                        or backend.read_settings().get("chat_effort")
+                    )
                     # M10-B3/B4: wizja i dokumenty wymagają rodziny grok-4 — czytelny
                     # komunikat zamiast niejasnego błędu API na modelu text-only.
                     if _has_rich_input(messages) and not _is_grok4(model):
@@ -239,7 +248,8 @@ async def chat_stream(ws: WebSocket) -> None:
                             f"Image and document input require a grok-4 model. The selected "
                             f"model '{model}' is text-only — switch models or remove the attachment.")})
                         continue
-                    start_worker(messages, model, temperature, search_mode, sources)
+                    start_worker(messages, model, temperature, search_mode, sources,
+                                 reasoning_effort)
         except WebSocketDisconnect:
             pass
         finally:

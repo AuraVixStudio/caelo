@@ -40,6 +40,37 @@ DELEGATE_TOOL = {"type": "function", "function": {
                   }, "required": ["role", "task"]}},
     }, "required": ["tasks"]}}}
 
+# M19-B3: narzędzie LSP (intel kodu, READONLY → bez bramki). Advertowane TYLKO gdy
+# skonfigurowano serwer języka (ukryte gdy brak — by model nie planował wokół braku).
+LSP_TOOL = {"type": "function", "function": {
+    "name": "lsp",
+    "description": (
+        "Query the language server for code intelligence (read-only). Actions: "
+        "'definition' (go to a symbol's definition), 'references' (find usages), "
+        "'hover' (type/signature/docs at a position), 'documentSymbol' (symbols in a file). "
+        "Give a workspace-relative path and 0-based line/character for cursor-based actions."),
+    "parameters": {"type": "object", "properties": {
+        "action": {"type": "string",
+                   "enum": ["definition", "references", "hover", "documentSymbol"]},
+        "path": {"type": "string", "description": "File path relative to the workspace root."},
+        "line": {"type": "integer", "description": "0-based line (cursor-based actions)."},
+        "character": {"type": "integer", "description": "0-based column (cursor-based actions)."},
+    }, "required": ["action", "path"]}}}
+
+# M19-B13: narzędzie web_fetch (egress sieciowy POD BRAMKĄ — MUTATING). Advertowane TYLKO
+# gdy włączone (`config.WEB_FETCH_ENABLED`) i tylko orkiestratorowi (subagenci go nie mają —
+# zakres roli ich nie obejmuje). https-only/allowlista/cap/SSRF egzekwuje `tools.web_fetch`.
+WEB_FETCH_TOOL = {"type": "function", "function": {
+    "name": "web_fetch",
+    "description": (
+        "Fetch the text content of an https:// URL (network read; REQUIRES approval). "
+        "Returns the page text (HTML is reduced to text). Only https is allowed, the size "
+        "is capped, and loopback/private hosts are refused. Use for docs/reference lookups."),
+    "parameters": {"type": "object", "properties": {
+        "url": {"type": "string", "description": "The https:// URL to fetch."},
+        "max_bytes": {"type": "integer", "description": "Optional cap on bytes to read."},
+    }, "required": ["url"]}}}
+
 SYSTEM_PROMPT = (
     "You are Caelo Code, an agentic coding assistant working in the user's local workspace.\n"
     "You can read, search, write and edit files, and run shell commands via tools.\n"
@@ -66,6 +97,90 @@ PLAN_MODE_PROMPT = (
 #   bypass       — auto-akceptuj wszystko (write/edit/run) bez pytania (ryzykowne)
 AGENT_MODES = ("ask", "accept-edits", "plan", "bypass")
 DEFAULT_MODE = "ask"
+
+# M19-B10: auto-compact — zwijanie najstarszych ZAMKNIĘTYCH tur, gdy historia rośnie.
+COMPACT_SUMMARY_HEADER = "[Earlier conversation summarized to save context]"
+
+
+def _content_text(content) -> str:
+    """Tekst wiadomości: string wprost albo sklejone części tekstowe (multimodal)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text" and p.get("text")
+        )
+    return ""
+
+
+def _msg_chars(m: dict) -> int:
+    n = len(_content_text(m.get("content")))
+    for tc in m.get("tool_calls") or []:
+        fn = tc.get("function", {}) or {}
+        n += len(str(fn.get("name", ""))) + len(str(fn.get("arguments", "")))
+    return n
+
+
+def _history_chars(history: list) -> int:
+    return sum(_msg_chars(m) for m in history if isinstance(m, dict))
+
+
+def _compact_boundary(history: list, target_chars: int) -> int:
+    """Najwcześniejszy indeks wiadomości `user` taki, że zachowany SUFIKS (od niego do
+    końca) mieści się w `target_chars`, zawsze zostawiając ≥ ostatnią turę. Zwraca 0,
+    gdy nie ma czego bezpiecznie zwinąć (potrzeba ≥2 tur). Cięcie NA GRANICY `user`
+    gwarantuje balans (każdy assistant.tool_calls ma swoje `tool` w obrębie tury)."""
+    user_idxs = [i for i, m in enumerate(history)
+                 if isinstance(m, dict) and m.get("role") == "user"]
+    if len(user_idxs) < 2:
+        return 0
+    boundary = user_idxs[-1]  # minimum: zachowaj ostatnią turę
+    for idx in reversed(user_idxs[:-1]):
+        if _history_chars(history[idx:]) <= target_chars:
+            boundary = idx
+        else:
+            break
+    return boundary
+
+
+def _digest_prefix(prefix: list, max_chars: int) -> str:
+    """Deterministyczny digest zwijanych wiadomości (BEZ sieci): role + skrócona treść,
+    z twardym capem całości. Zachowuje wątek (co proszono / co zrobiono)."""
+    parts: list[str] = []
+    for m in prefix:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role", "?")
+        text = _content_text(m.get("content")).strip()
+        if not text:
+            tcs = m.get("tool_calls") or []
+            if tcs:
+                names = ", ".join((t.get("function", {}) or {}).get("name", "?") for t in tcs)
+                text = f"(called tools: {names})"
+            else:
+                continue
+        parts.append(f"- {role}: {text[:300]}")
+    digest = "\n".join(parts)
+    if len(digest) > max_chars:
+        digest = digest[:max_chars].rstrip() + "\n… (older details omitted)"
+    return digest
+
+
+def compact_history(history: list, *, threshold_chars: int) -> list:
+    """M19-B10: zwiń najstarsze zamknięte tury w jeden blok-streszczenie, gdy historia
+    przekracza próg. CZYSTA funkcja (testowalna). Zwraca NOWĄ listę; **balans zachowany**
+    (cięcie na granicy `user`). Bez zmian, gdy nic bezpiecznego do zwinięcia / pod progiem."""
+    if threshold_chars <= 0 or _history_chars(history) <= threshold_chars:
+        return history
+    target = max(1, threshold_chars // 2)
+    boundary = _compact_boundary(history, target)
+    if boundary <= 0:
+        return history
+    prefix, suffix = history[:boundary], history[boundary:]
+    digest = _digest_prefix(prefix, target)
+    summary = {"role": "user", "content": COMPACT_SUMMARY_HEADER + "\n" + digest}
+    return [summary] + suffix
 
 # Sygnatura llm_fn:
 #   (api_key, base_url, messages, model, temperature, tools, on_text, stop_flag) -> assistant_msg
@@ -94,6 +209,9 @@ class AgentSession:
         delegate_fn: Optional[Callable[[list], str]] = None,
         extra_system: Optional[str] = None,
         on_turn: Optional[Callable[[], None]] = None,
+        lsp_provider: Optional[Callable[[], object]] = None,
+        memory: Optional[object] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> None:
         self.ws = workspace
         self.gate = gate
@@ -130,6 +248,18 @@ class AgentSession:
         self.checkpoints_provider = checkpoints_provider
         # M13-B4: katalog globalnego CAELO.md (domyślnie config.DATA_DIR).
         self.caelo_md_global_dir = caelo_md_global_dir
+        # M19-B3: dostawca menedżera LSP (duck-typed: enabled()/query()/diagnostics()).
+        # None → narzędzie lsp i pasywna diagnostyka wyłączone (ukryte przed modelem).
+        self.lsp_provider = lsp_provider
+        # M19-B8: pamięć hybrydowa (duck-typed: injected_text(query, project_id=) -> str).
+        # None → wyłączona. Wstrzykiwana RAZ, na 1. turze (z pierwszego promptu usera).
+        self.memory = memory
+        self._memory_block = ""
+        self._memory_done = False
+        # M19-B9: domyślny poziom reasoning_effort (np. globalny z ustawień / rola
+        # subagenta); per-tura `run_turn(reasoning_effort=…)` może go nadpisać.
+        self._default_effort = reasoning_effort
+        self._reasoning_effort = reasoning_effort
         self.history: List[dict] = []
         self._mode = DEFAULT_MODE  # M13: tryb bieżącej tury (ask/accept-edits/plan/bypass)
 
@@ -138,6 +268,17 @@ class AgentSession:
             return None
         try:
             return self.checkpoints_provider()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _lsp(self):
+        """M19-B3: menedżer LSP dla bieżącego workspace (lub None). Włączony, gdy
+        zwraca obiekt z `enabled()==True` (są skonfigurowane serwery)."""
+        if not self.lsp_provider:
+            return None
+        try:
+            mgr = self.lsp_provider()
+            return mgr if (mgr is not None and mgr.enabled()) else None
         except Exception:  # noqa: BLE001
             return None
 
@@ -156,12 +297,40 @@ class AgentSession:
                     prompt += "\n\n" + extra
             except Exception:  # noqa: BLE001
                 pass
+        # M19-B8: pamięć hybrydowa — top-K wspomnień policzone na 1. turze (po CAELO.md
+        # i skillach, jak rekomenduje plan). Pusty blok, gdy wyłączone/brak trafień.
+        if self._memory_block:
+            prompt += "\n\n" + self._memory_block
         # M17-B1: persona roli subagenta (zawężony prompt). Idzie po CAELO.md/skillach.
         if self._extra_system:
             prompt += "\n\n" + self._extra_system
         if self._mode == "plan":
             prompt += PLAN_MODE_PROMPT
         return prompt
+
+    def _maybe_compact(self) -> None:
+        """M19-B10: opt-in zwijanie historii przy przekroczeniu progu (przed budową
+        `messages`). Błąd połknięty — kompakcja nigdy nie wywraca tury."""
+        if not getattr(config, "AGENT_AUTOCOMPACT", False):
+            return
+        try:
+            self.history = compact_history(
+                self.history,
+                threshold_chars=getattr(config, "AGENT_COMPACT_THRESHOLD_CHARS", 0),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _maybe_inject_memory(self, query: str) -> None:
+        """M19-B8: na PIERWSZEJ turze policz blok pamięci z promptu usera (raz na sesję).
+        Błąd połknięty — pamięć nigdy nie wywraca tury."""
+        if self.memory is None or self._memory_done:
+            return
+        self._memory_done = True
+        try:
+            self._memory_block = self.memory.injected_text(query) or ""
+        except Exception:  # noqa: BLE001
+            self._memory_block = ""
 
     def _auto_approves(self, name: str) -> bool:
         """M13: czy bieżący tryb pomija dialog zatwierdzenia dla narzędzia `name`.
@@ -190,6 +359,13 @@ class AgentSession:
                 pass
         if self._delegate_fn is not None:
             tools.append(DELEGATE_TOOL)
+        # M19-B3: advertuj `lsp` tylko gdy skonfigurowano serwer języka (ukryte inaczej).
+        if self._lsp() is not None:
+            tools.append(LSP_TOOL)
+        # M19-B13: web_fetch tylko gdy włączone i tylko dla orkiestratora (subagenci mają
+        # zawężony zbiór plikowy — `_tool_allowed` i tak by je odrzucił, więc nie advertuj).
+        if getattr(config, "WEB_FETCH_ENABLED", False) and self._tool_names is None:
+            tools.append(WEB_FETCH_TOOL)
         return tools
 
     def _tool_allowed(self, name: str) -> bool:
@@ -214,9 +390,12 @@ class AgentSession:
 
     def run_turn(self, user_text: str, model: str, temperature: float = 0.2,
                  stop_flag: Optional[Callable[[], bool]] = None,
-                 images: Optional[List[str]] = None, mode: str = DEFAULT_MODE) -> None:
+                 images: Optional[List[str]] = None, mode: str = DEFAULT_MODE,
+                 reasoning_effort: Optional[str] = None) -> None:
         stop = stop_flag or (lambda: False)
         self._mode = mode if mode in AGENT_MODES else DEFAULT_MODE
+        # M19-B9: None = zachowaj domyślny effort sesji; podany = nadpisz na tę turę.
+        self._reasoning_effort = reasoning_effort if reasoning_effort is not None else self._default_effort
         # M13-B3: otwórz grupę checkpointów dla tej tury (leniwa — powstanie dopiero
         # przy 1. mutacji). W trybie planowania NIE zaczynamy tury (nic nie zmienia).
         cp = self._checkpoints()
@@ -235,6 +414,12 @@ class AgentSession:
             content = user_text
         self.history.append({"role": "user", "content": content})
 
+        # M19-B10: zwiń najstarsze tury, gdy historia przekroczy próg (opt-in; przed
+        # budową `messages`). Bieżąca tura (ostatni `user`) jest zawsze zachowana.
+        self._maybe_compact()
+
+        # M19-B8: na 1. turze policz blok pamięci z promptu usera (przed system promptem).
+        self._maybe_inject_memory(user_text)
         system_prompt = self._build_system_prompt()  # M13-B4: CAELO.md + (B2) plan mode
         # M14-B5: hook pre_session (deterministyczny; np. skrypt setup / wpis audytu).
         if self.hooks is not None:
@@ -263,10 +448,17 @@ class AgentSession:
             # self.history jest jedynym źródłem prawdy (P0-5) — budujemy z niego
             # `messages` co iterację, by zawsze zawierało odpowiedzi `tool`.
             messages = [{"role": "system", "content": system_prompt}] + self.history
+            # M19-B9: `reasoning_effort` dokładane TYLKO gdy ustawione — mock LLM bez
+            # tego parametru (selfchecki) nie dostaje nieoczekiwanego kwargu (zero regresji).
+            llm_kwargs: dict = {
+                "on_text": lambda full: self.emit({"type": "text", "full": full}),
+                "stop_flag": stop,
+            }
+            if self._reasoning_effort:
+                llm_kwargs["reasoning_effort"] = self._reasoning_effort
             assistant = self.llm_fn(
                 self.api_key_provider(), self.base_url, messages, model, temperature, all_tools,
-                on_text=lambda full: self.emit({"type": "text", "full": full}),
-                stop_flag=stop,
+                **llm_kwargs,
             )
             # M17-B6: zbierz usage (tokeny) i NIE wysyłaj go z powrotem do xAI —
             # zdejmij z wiadomości przed dopisaniem do historii (czysty kontrakt).
@@ -325,6 +517,11 @@ class AgentSession:
             self._handle_delegate(call_id, args)
             return
 
+        # M19-B3: narzędzie LSP — READONLY (bez bramki/hooków mutacji), własna ścieżka.
+        if name == "lsp":
+            self._handle_lsp(call_id, args)
+            return
+
         # M17-B1: odrzuć narzędzie spoza zakresu roli (gdyby model je wyhalucynował) —
         # twarda granica zakresu, nie tylko brak w advertised tools (brak eskalacji).
         if not self._tool_allowed(name):
@@ -357,6 +554,17 @@ class AgentSession:
                                  "content": f"Blocked by hook: {blocked}"})
             return
 
+        # M19-B4: reguła deny (glob) — TWARDA odmowa, też dla narzędzi READONLY
+        # (Read/Grep) i niezależnie od trybu (też bypass). Po hookach (audit-all zdąży
+        # zalogować próbę), przed bramką/wykonaniem. deny>allow egzekwuje RuleSet.
+        if self.gate.evaluate_rules(name, args, is_mcp=is_mcp) == "deny":
+            note = (f"Blocked by a permission rule (deny) for '{name}'. This action is "
+                    "not permitted by the current allow/deny rules.")
+            self.emit({"type": "tool_result", "id": call_id, "ok": False,
+                       "summary": "Blocked by permission rule"})
+            self.history.append({"role": "tool", "tool_call_id": call_id, "content": note})
+            return
+
         # M13: tryby accept-edits/bypass pomijają dialog dla odpowiednich narzędzi
         # (zmiany nadal trafiają do checkpointów → „Undo" działa). Komendy z metaznakami
         # i tak odrzuci execute_tool (P0-1).
@@ -387,6 +595,9 @@ class AgentSession:
         self._run_post_tool_hooks(call_id, name, args, ok, result)
         self.emit({"type": "tool_result", "id": call_id, "ok": ok, "summary": result[:600]})
         self.history.append({"role": "tool", "tool_call_id": call_id, "content": result})
+        # M19-B3: pasywna diagnostyka po udanej edycji pliku (jak Grok CLI). Best-effort.
+        if ok and not is_mcp and name in ("write_file", "edit_file"):
+            self._emit_diagnostics(args.get("path"))
 
     def _handle_delegate(self, call_id: str, args: dict) -> None:
         """M17-B2: uruchom delegację (subagenci) i oddaj modelowi streszczenia.
@@ -406,6 +617,52 @@ class AgentSession:
         self.emit({"type": "tool_result", "id": call_id, "ok": ok, "summary": str(summary)[:600]})
         self.history.append({"role": "tool", "tool_call_id": call_id, "content": str(summary)})
 
+    def _handle_lsp(self, call_id: str, args: dict) -> None:
+        """M19-B3: zapytanie do serwera języka (READONLY). Ścieżka sandboxowana przez
+        Workspace.resolve; wynik (Location/hover/symbole) wraca do modelu jako JSON."""
+        mgr = self._lsp()
+        if mgr is None:
+            note = "LSP is not available (no language server configured for this workspace)."
+            self.emit({"type": "tool_result", "id": call_id, "ok": False, "summary": note})
+            self.history.append({"role": "tool", "tool_call_id": call_id, "content": note})
+            return
+        action = args.get("action") or "hover"
+        try:
+            p = self.ws.resolve(args.get("path") or "")
+        except Exception:  # noqa: BLE001 (WorkspaceError — ucieczka poza workspace)
+            note = f"Invalid path: {args.get('path')!r}"
+            self.emit({"type": "tool_result", "id": call_id, "ok": False, "summary": note})
+            self.history.append({"role": "tool", "tool_call_id": call_id, "content": note})
+            return
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            text = ""
+        try:
+            result = mgr.query(action, str(p), text,
+                               int(args.get("line") or 0), int(args.get("character") or 0))
+            out = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+            if not out or out == "null":
+                out = "No result."
+            ok = not out.startswith("Error")
+        except Exception as exc:  # noqa: BLE001
+            out, ok = f"Error: LSP query failed: {exc}", False
+        self.emit({"type": "tool_result", "id": call_id, "ok": ok, "summary": out[:600]})
+        self.history.append({"role": "tool", "tool_call_id": call_id, "content": out})
+
+    def _emit_diagnostics(self, path: Optional[str]) -> None:
+        """M19-B3: po edycie pliku poślij ramkę `diagnostics` (best-effort). No-op gdy
+        LSP wyłączone / brak serwera dla rozszerzenia. Nigdy nie wywraca tury."""
+        mgr = self._lsp()
+        if mgr is None or not path:
+            return
+        try:
+            p = self.ws.resolve(path)
+            items = mgr.diagnostics(str(p), p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return
+        self.emit({"type": "diagnostics", "path": p.as_posix(), "items": items or []})
+
     def _accumulate_usage(self, usage: Optional[dict]) -> None:
         """M17-B6: dolicz tokeny z `usage` LLM (gdy serwer je zwrócił). Tolerancyjne
         na warianty pól (prompt/input, completion/output)."""
@@ -423,6 +680,12 @@ class AgentSession:
         """Bramka zatwierdzenia mutacji. Zwraca 'accept'/'reject'/'always' (lub 'accept'
         gdy już dopuszczone). Obsługuje plikowe (preview diff/komenda) i MCP (karta
         narzędzia). Komendy z metaznakami pomijają dialog — execute_tool je odrzuci (P0-1)."""
+        # M19-B4: reguła allow (glob) auto-akceptuje mutację. NIGDY nie obchodzi P0-1:
+        # run_command z metaznakami NIE może być dopuszczona regułą — spada niżej, gdzie
+        # execute_tool ją odrzuci. (deny obsłużone wcześniej w _handle_tool_call.)
+        if self.gate.evaluate_rules(name, args, is_mcp=is_mcp) == "allow":
+            if not (name == "run_command" and command_metachars(args.get("command") or "")):
+                return "accept"
         if is_mcp:
             key = f"mcp:{name}"
             if not self.gate.needs_approval_key(key):

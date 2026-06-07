@@ -16,11 +16,12 @@ dowolnego pliku z dysku).
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 import config  # type: ignore
 
@@ -48,6 +49,65 @@ def list_history(
     )
     return {"events": [e.to_dict() for e in events],
             "limit": limit, "offset": offset, "count": len(events)}
+
+
+def _iso(ts) -> str:
+    """Epoka (sekundy) → czytelny znacznik UTC. Puste, gdy nie da się sparsować."""
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def events_to_markdown(events: list[dict], *, title: str = "Caelo history export") -> str:
+    """M19-B10: serializuj zdarzenia historii huba (to_dict + opcjonalny 'meta') do
+    Markdown. CZYSTA funkcja (bez I/O) — łatwa do testów. Każde zdarzenie → sekcja:
+    tryb + znacznik czasu, opcjonalny model/prompt (z meta) i zapisany tekst (odpowiedź)."""
+    out: list[str] = [f"# {title}", "", f"_{len(events)} event(s)_", ""]
+    for ev in events:
+        mode = str(ev.get("mode") or "?")
+        ts = _iso(ev.get("created_at"))
+        out.append(f"## {mode}" + (f" — {ts}" if ts else ""))
+        meta = ev.get("meta") if isinstance(ev.get("meta"), dict) else {}
+        model = meta.get("model")
+        prompt = meta.get("prompt")
+        if model:
+            out.append(f"*Model: {model}*")
+        if prompt:
+            out += ["", "**Prompt:**", "", str(prompt).strip()]
+        text = (ev.get("text") or "").strip()
+        if text:
+            out += ["", "**Response:**", "", text]
+        out += ["", "---", ""]
+    return "\n".join(out).rstrip() + "\n"
+
+
+@router.get("/history/export")
+def export_history(
+    b: Backend = Depends(get_backend),
+    q: Optional[str] = Query(None, max_length=V.MAX_HISTORY_QUERY),
+    mode: Optional[str] = Query(None, max_length=V.MAX_ID_LEN),
+    project_id: Optional[str] = Query(None, max_length=V.MAX_ID_LEN),
+    from_: Optional[float] = Query(None, alias="from"),
+    to: Optional[float] = Query(None),
+    limit: int = Query(V.MAX_HISTORY_LIMIT, ge=1, le=V.MAX_HISTORY_LIMIT),
+    offset: int = Query(0, ge=0),
+) -> Response:
+    """M19-B10: eksport historii (te same filtry co /history) do Markdown. Dołącza
+    prompt/model z `meta` (czytane z FTS). Zwraca text/markdown jako załącznik."""
+    events = b.history_store.list_events(
+        q=q, mode=mode, project_id=project_id, since=from_, until=to,
+        limit=limit, offset=offset,
+    )
+    dicts = [e.to_dict() for e in events]
+    metas = b.history_store.event_metas([d["id"] for d in dicts])
+    for d in dicts:
+        d["meta"] = metas.get(d["id"], {})
+    md = events_to_markdown(dicts)
+    return Response(
+        content=md, media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="caelo-history.md"'},
+    )
 
 
 @router.get("/artifacts")

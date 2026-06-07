@@ -14,14 +14,18 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
+
+from caelo_core.agent.permission_rules import RuleSet
 
 log = logging.getLogger(__name__)
 
 
-READONLY = {"read_file", "list_dir", "glob", "grep"}
-MUTATING = {"write_file", "edit_file", "run_command"}
+READONLY = {"read_file", "list_dir", "glob", "grep", "lsp"}  # M19-B3: lsp = intel kodu (read-only)
+# M19-B13: web_fetch = egress sieciowy → bramkowane (NIE readonly). „Always allow" per-host.
+MUTATING = {"write_file", "edit_file", "run_command", "web_fetch"}
 
 # --- polityka bezpieczeństwa run_command (P0-1) ---
 # Metaznaki powłoki zawsze niebezpieczne (podstawianie poleceń/zmiennych, nowe
@@ -96,10 +100,15 @@ def command_metachars(command: str, posix: Optional[bool] = None) -> set[str]:
 
 
 class PermissionGate:
-    def __init__(self, store_path: Optional[Path] = None) -> None:
+    def __init__(self, store_path: Optional[Path] = None,
+                 rules: Optional[RuleSet] = None) -> None:
         self._store_path = store_path
         self._allowed: set[str] = set()
         self._load()
+        # M19-B4: warstwa reguł glob (allow/deny, deny>allow) NAD allowlistą „Always
+        # allow". Pusty zbiór = brak wpływu (zachowanie sprzed B4). Budowany przez
+        # Backend z caelo_settings.json + <ws>/.caelo/permissions.json.
+        self.ruleset: RuleSet = rules if rules is not None else RuleSet()
 
     # --- trwałość (caelo_permissions.json) ---
     def _load(self) -> None:
@@ -135,6 +144,15 @@ class PermissionGate:
             if not command or command_metachars(command):
                 return None
             return "cmd:" + " ".join(command.split())
+        if name == "web_fetch":
+            # M19-B13: „Always allow" web_fetch PER-HOST (nie per-URL i nie globalnie),
+            # by zatwierdzenie jednego pobrania nie autoryzowało dowolnego hosta.
+            url = (args.get("url") or "").strip()
+            try:
+                host = urlsplit(url if "://" in url else "//" + url).netloc.split("@")[-1].split(":")[0].lower()
+            except Exception:  # noqa: BLE001
+                host = ""
+            return f"webfetch:{host}" if host else None
         return f"tool:{name}:{_norm_path(args.get('path', ''))}"
 
     def needs_approval(self, name: str, args: dict) -> bool:
@@ -172,3 +190,21 @@ class PermissionGate:
     def clear(self) -> None:
         self._allowed.clear()
         self._save()
+
+    # --- reguły glob (M19-B4) — warstwa NAD allowlistą; deny>allow ---
+    def set_rules(self, allow: Optional[list[str]] = None,
+                  deny: Optional[list[str]] = None) -> None:
+        """Przebuduj zbiór reguł (z ustawień globalnych + projektowych). Niepoprawne
+        wpisy są pomijane (REST waliduje osobno)."""
+        self.ruleset = RuleSet(allow, deny)
+
+    def evaluate_rules(self, name: str, args: dict, *, is_mcp: bool = False) -> Optional[str]:
+        """'deny' / 'allow' / None dla wywołania narzędzia. None gdy brak reguł — wtedy
+        wołający spada do allowlisty/zatwierdzenia (zachowanie sprzed B4)."""
+        if self.ruleset.empty:
+            return None
+        return self.ruleset.evaluate_tool(name, args, is_mcp=is_mcp)
+
+    def rule_strings(self) -> dict:
+        """Reguły w formie tekstowej (`ToolPrefix(glob)`) — dla REST/UI."""
+        return self.ruleset.as_strings()

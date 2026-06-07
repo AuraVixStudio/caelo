@@ -252,6 +252,7 @@ def stream_response(
     model: str,
     api_key_provider: Callable[[], str],
     temperature: Optional[float] = 0.7,
+    reasoning_effort: Optional[str] = None,
     tools: Optional[List[dict]] = None,
     tool_choice: Optional[str] = None,
     on_delta: Optional[Callable[[str, str], None]] = None,
@@ -270,6 +271,8 @@ def stream_response(
             cała historia idzie w żądaniu (jak legacy).
         model: id modelu (np. 'grok-4.3'). Wizja/file_search wymagają rodziny grok-4.
         api_key_provider: zwraca Bearer (OAuth → klucz → XAI_API_KEY).
+        reasoning_effort: M19-B9 — 'low'/'medium'/'high' dla modeli rozumujących
+            (→ `reasoning.effort`); None/niepoprawne = pole pominięte (czyste żądanie).
         tools: narzędzia serwerowe (z `build_search_tools`); None = czysty czat.
         on_delta(delta, full): callback przyrostu tekstu (jak `chat_completion_stream`).
         on_tool(ev): callback aktywności narzędzia, ev = {"tool","status","query"}.
@@ -309,6 +312,11 @@ def stream_response(
         payload: dict = {"model": model, "input": turn_input, "stream": True}
         if temperature is not None:
             payload["temperature"] = temperature
+        # M19-B9: reasoning_effort → `reasoning.effort` (tylko gdy poprawny — modele
+        # nie-rozumujące dostałyby 4xx; pole xAI weryfikowane live na maszynie usera).
+        eff = V.normalize_effort(reasoning_effort)
+        if eff:
+            payload["reasoning"] = {"effort": eff}
         if all_tools:
             payload["tools"] = all_tools
             if tool_choice and with_tool_choice:

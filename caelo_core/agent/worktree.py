@@ -21,10 +21,11 @@ import difflib
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional
 
-from caelo_core.agent.tools import IGNORE_DIRS, atomic_write_bytes
+from caelo_core.agent.tools import IGNORE_DIRS, atomic_write_bytes, scrubbed_env
 from caelo_core.agent.workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,82 @@ _BINARY_SNIFF = 4096
 
 def _is_binary_bytes(data: bytes) -> bool:
     return b"\x00" in data[:_BINARY_SNIFF]
+
+
+# --- wariant git worktree (M19-B12) ---------------------------------------------
+# Opcja obok kopii katalogu: gdy workspace jest TOP-LEVEL repo git, używamy realnego
+# `git worktree` (szybszy, naturalny diff, respektuje .gitignore). Off-by-default —
+# wybierane przez `config.AGENT_GIT_WORKTREE` / headless `--worktree`. Każda operacja
+# git biegnie ze `scrubbed_env` (jak run_command/MCP), shell=False, z timeoutem; błąd →
+# graceful fallback do kopii (defense-in-depth — nigdy nie wywraca delegacji).
+
+def _git(args: list[str], cwd) -> tuple[int, str]:
+    """Uruchom `git <args>` w `cwd` (scrubbed env, shell=False, timeout). Zwraca
+    (returncode, stdout). Wyjątek/brak gita → (1, "")."""
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=str(cwd), env=scrubbed_env(),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+        return proc.returncode, proc.stdout
+    except Exception:  # noqa: BLE001 (brak gita / timeout / OSError)
+        return 1, ""
+
+
+def is_git_repo(root) -> bool:
+    """True, gdy `root` jest TOP-LEVEL repozytorium git (nie podkatalogiem) — tylko
+    wtedy `git worktree` obejmuje dokładnie ten workspace, nie cały nadrzędny repo."""
+    rc, out = _git(["rev-parse", "--show-toplevel"], cwd=root)
+    if rc != 0 or not out.strip():
+        return False
+    try:
+        return Path(out.strip()).resolve() == Path(root).resolve()
+    except OSError:
+        return False
+
+
+def _git_worktree_add(src_root, dest_root) -> bool:
+    """`git worktree add --detach <dest> HEAD`. Wymaga istniejącego HEAD (≥1 commit)
+    i nieistniejącego `dest`. Zwraca True przy sukcesie."""
+    dest = Path(dest_root)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rc, _ = _git(["worktree", "add", "--detach", str(dest), "HEAD"], cwd=src_root)
+    return rc == 0 and dest.exists()
+
+
+def create_worktree(src_root, dest_root, *, use_git: bool = False) -> str:
+    """Stwórz worktree dla subagenta. `use_git` + repo top-level + udany `git worktree
+    add` → wariant 'git'; w każdym innym przypadku kopia katalogu (M17). Zwraca rodzaj
+    ('git' | 'copy') — wołający użyje go przy compute_changes/discard."""
+    if use_git and is_git_repo(src_root) and _git_worktree_add(src_root, dest_root):
+        return "git"
+    copy_worktree(src_root, dest_root)
+    return "copy"
+
+
+def _compute_changes_git(src_root, wt_root) -> Optional[dict]:
+    """Zmiany w worktree git względem HEAD: `git add -A` + `git diff --cached`. Zwraca
+    {files,diff,paths} (ten sam kształt co wariant kopii) albo None, gdy git zawiódł."""
+    rc, _ = _git(["add", "-A"], cwd=wt_root)
+    if rc != 0:
+        return None
+    rc, name_status = _git(["diff", "--cached", "--no-renames", "--name-status"], cwd=wt_root)
+    if rc != 0:
+        return None
+    code_to_kind = {"A": "created", "M": "modified", "D": "deleted"}
+    files: list[dict] = []
+    for line in name_status.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        kind = code_to_kind.get(parts[0].strip()[:1])
+        path = parts[1].strip()
+        if kind and path:
+            files.append({"path": path, "kind": kind})
+    rc, diff = _git(["diff", "--cached"], cwd=wt_root)
+    return {"files": files, "diff": diff if rc == 0 else "",
+            "paths": [f["path"] for f in files]}
 
 
 def copy_worktree(src_root: Path, dest_root: Path) -> None:
@@ -109,10 +186,18 @@ def _file_diff(rel: str, old: Optional[bytes], new: Optional[bytes]) -> tuple[st
     return kind, diff or f"# {kind}: {rel} (no textual change)\n"
 
 
-def compute_changes(orig_root: Path, wt_root: Path) -> dict:
+def compute_changes(orig_root: Path, wt_root: Path, *, kind: str = "copy") -> dict:
     """Porównaj worktree z oryginałem. Zwraca:
     {files:[{path,kind}], diff:str, paths:[rel]} — `diff` to złączony unified diff
-    wszystkich zmienionych plików (do przeglądu jako JEDEN diff, B4)."""
+    wszystkich zmienionych plików (do przeglądu jako JEDEN diff, B4). Kształt zwrotu
+    JEST IDENTYCZNY dla obu wariantów (MergeStore/UI nie wiedzą, który użyto).
+    M19-B12: `kind='git'` liczy zmiany przez `git diff` (vs HEAD); fallback do
+    porównania drzew, gdy git zawiedzie."""
+    if kind == "git":
+        git_result = _compute_changes_git(orig_root, wt_root)
+        if git_result is not None:
+            return git_result
+        log.warning("git worktree diff failed; falling back to tree compare")
     orig_root, wt_root = Path(orig_root), Path(wt_root)
     orig_files = _rel_files(orig_root)
     wt_files = _rel_files(wt_root)
@@ -175,9 +260,18 @@ def apply_changes(workspace: Workspace, wt_root: Path, files: list[dict],
     return {"applied": applied, "deleted": deleted, "skipped": skipped}
 
 
-def discard_worktree(wt_root: Path) -> None:
-    """Usuń katalog worktree (odrzucenie scalenia / sprzątanie)."""
+def discard_worktree(wt_root: Path, *, kind: str = "copy", src_root=None) -> None:
+    """Usuń worktree (odrzucenie scalenia / sprzątanie). M19-B12: dla wariantu 'git'
+    użyj `git worktree remove --force` (+ `prune`), by nie zostawić wpisów admin w
+    `.git/worktrees`; przy braku src_root lub porażce — fallback do rmtree."""
+    if kind == "git" and src_root is not None:
+        rc, _ = _git(["worktree", "remove", "--force", str(wt_root)], cwd=src_root)
+        if rc == 0:
+            _git(["worktree", "prune"], cwd=src_root)
+            return
     try:
         shutil.rmtree(wt_root, ignore_errors=True)
     except Exception:  # noqa: BLE001
         pass
+    if kind == "git" and src_root is not None:
+        _git(["worktree", "prune"], cwd=src_root)  # sprzątnij wpis po rmtree

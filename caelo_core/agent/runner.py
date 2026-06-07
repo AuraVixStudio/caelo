@@ -1,0 +1,179 @@
+"""Transport-neutralny runner agenta kodowania (M19-§0).
+
+Wydziela budowę i prowadzenie `AgentSession` (z checkpointami / MCP / hookami /
+skillami / delegacją subagentów) z handlera WebSocket `routes/agent.py`, by ten
+SAM kod okablowania mógł obsłużyć WS, tryb headless (M19-B1) i ACP (M19-B2).
+Transporty różni tylko: `emit(dict)` (sink ramek), `request_approval(id, name,
+detail) -> str` i `stop() -> bool`.
+
+Refaktor zachowawczy: logika identyczna jak dotąd w `routes/agent.py` (leniwa
+`AgentSession`, leniwy `TeamManager`, `delegate_fn`, zapis tury do historii huba —
+M9-B2). Warstwa transportu (flaga zajętości, słownik `pending`, ramka `done`,
+czyszczenie `stop`) zostaje w handlerze — runner jej nie zna.
+
+`emit` runnera opakowuje `emit` transportu: łapie finalną odpowiedź tury z ramki
+`assistant_done` najwyższego poziomu (subagenci są opakowani w `subagent`, więc ich
+wewnętrzne `assistant_done` nie nadpiszą odpowiedzi orkiestratora — jak dotąd).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Callable, List, Optional
+
+import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
+
+from caelo_core.agent.session import AgentSession
+
+log = logging.getLogger(__name__)
+
+Emit = Callable[[dict], None]
+RequestApproval = Callable[[str, str, Optional[dict]], str]  # (id, name, detail) -> decision
+Stop = Callable[[], bool]
+
+
+class AgentRunner:
+    """Prowadzi tury agenta dla dowolnego transportu. Trzyma leniwą sesję, leniwy
+    `TeamManager` oraz model/tryb bieżącej tury (czytane przez `delegate_fn`)."""
+
+    def __init__(self, backend, *, emit: Emit, request_approval: RequestApproval,
+                 stop: Stop, tool_names: Optional[set] = None,
+                 max_iters: Optional[int] = None, allow_delegate: bool = True,
+                 initial_history: Optional[List[dict]] = None,
+                 reasoning_effort: Optional[str] = None) -> None:
+        self.backend = backend
+        self._emit_transport = emit
+        self.request_approval = request_approval
+        self.stop = stop
+        self._session: Optional[AgentSession] = None
+        self._team = None
+        # M17: model/tryb bieżącej tury — świeże per tura (delegate_fn ich używa).
+        self._model = ""
+        self._mode = "ask"
+        # M19-B9: poziom reasoning_effort — domyślny (konstruktor, np. headless --effort)
+        # + efektywny per tura (`run_turn(reasoning_effort=…)`, np. selektor UI agenta).
+        self._reasoning_effort = reasoning_effort
+        self._effort = reasoning_effort
+        # M9-B2: finalna odpowiedź tury (do zapisu w historii huba).
+        self._last_assistant = ""
+        # M19-B1: opcje transportów nie-WS (headless/ACP). Domyślne = zachowanie WS:
+        #   tool_names=None (wszystkie narzędzia), max_iters=None (default sesji = 25),
+        #   allow_delegate=True (orkiestrator deleguje), initial_history=None (świeża).
+        self._tool_names = set(tool_names) if tool_names is not None else None
+        self._max_iters = max_iters
+        self._allow_delegate = allow_delegate
+        self._initial_history = initial_history
+
+    @property
+    def last_assistant(self) -> str:
+        return self._last_assistant
+
+    @property
+    def history(self) -> List[dict]:
+        """Historia bieżącej sesji (do utrwalenia/wznowienia w headless/ACP)."""
+        return self._session.history if self._session is not None else []
+
+    def emit(self, ev: dict) -> None:
+        """Sink ramek: łapie finalną odpowiedź tury (M9-B2), potem przekazuje do
+        transportu. Tylko `assistant_done` najwyższego poziomu (subagenci opakowani)."""
+        if ev.get("type") == "assistant_done":
+            self._last_assistant = ev.get("content") or ""
+        self._emit_transport(ev)
+
+    def _get_team(self):
+        """Leniwy TeamManager (M17). Współdzieli emit/approval/stop orkiestratora;
+        scalenia rejestruje w magazynie Backendu (REST je stosuje)."""
+        if self._team is None:
+            from caelo_core.agent.llm import stream_chat_with_tools
+            from caelo_core.agent.team import TeamManager
+
+            self._team = TeamManager(
+                registry=self.backend.subagents, gate=self.backend.permissions,
+                llm_fn=stream_chat_with_tools, api_key_provider=self.backend.get_api_key,
+                base_url=config.API_BASE, mcp=self.backend.mcp, hooks=self.backend.hooks,
+                emit=self.emit, request_approval=self.request_approval,
+                orchestrator_stop=self.stop, merges_provider=self.backend.get_team_merges,
+                on_report=self.backend.record_team_report,
+            )
+        return self._team
+
+    def _delegate_fn(self, tasks: list) -> str:
+        ws_obj = self.backend.get_workspace()
+        if ws_obj is None:
+            return "Error: no workspace selected for delegation"
+        team = self._get_team()
+        return team.run(tasks, model=self._model, workspace=ws_obj, mode=self._mode,
+                        reasoning_effort=self._effort)
+
+    def _ensure_session(self, ws_obj) -> AgentSession:
+        session = self._session
+        if session is None:
+            from caelo_core.agent.llm import stream_chat_with_tools
+
+            extra = {"max_iters": self._max_iters} if self._max_iters else {}
+            session = AgentSession(
+                ws_obj, self.backend.permissions, stream_chat_with_tools,
+                self.backend.get_api_key, config.API_BASE,
+                emit=self.emit, request_approval=self.request_approval,
+                checkpoints_provider=self.backend.get_checkpoints,  # M13-B3/B5
+                mcp=self.backend.mcp,        # M14-B2: narzędzia MCP w agencie
+                hooks=self.backend.hooks,    # M14-B5: hooki cyklu życia narzędzi
+                skills=self.backend.skills,  # M14-B6: wstrzykiwanie skilli do promptu
+                # M19-B1: delegacja wyłączalna (--disallowed-tools Agent); zawężenie
+                # narzędzi (--tools/--disallowed-tools) przez tool_names roli M17-B1.
+                delegate_fn=(self._delegate_fn if self._allow_delegate else None),
+                tool_names=self._tool_names,
+                # M19-B3: dostawca LSP (getattr — atrapy backendu bez get_lsp → None).
+                lsp_provider=getattr(self.backend, "get_lsp", None),
+                # M19-B8: pamięć hybrydowa (getattr — atrapy backendu bez memory → None).
+                memory=getattr(self.backend, "memory", None),
+                # M19-B9: domyślny effort sesji (per-tura nadpisywany w run_turn).
+                reasoning_effort=self._reasoning_effort,
+                **extra,
+            )
+            # M19-B1: wznowiona sesja (headless -s/-c/ACP session/load) — wstrzyknij
+            # historię PRZED pierwszą turą (run_turn dopisze do niej user message).
+            if self._initial_history:
+                session.history = list(self._initial_history)
+            self._session = session
+        else:
+            session.ws = ws_obj  # workspace mógł się zmienić
+        return session
+
+    def run_turn(self, text: str, model: str, *, images: Optional[List[str]] = None,
+                 mode: str = "ask", reasoning_effort: Optional[str] = None) -> str:
+        """Uruchom jedną turę agenta. Zwraca finalną odpowiedź (`last_assistant`) i
+        zapisuje turę do historii huba (M9-B2). Błąd tury → ramka `error` (jak WS;
+        P1-13: bez surowego str(exc)). Transport zarządza busy/done wokół wywołania;
+        `stop` jest tylko czytany — czyszczenie należy do transportu. M19-B9:
+        `reasoning_effort` (None = domyślny runnera) trafia do sesji i delegacji."""
+        self._last_assistant = ""
+        try:
+            ws_obj = self.backend.get_workspace()
+            if ws_obj is None:
+                self.emit({"type": "error", "error": "No workspace selected"})
+                return ""
+            session = self._ensure_session(ws_obj)
+            # M17: zapamiętaj model/tryb tury — delegate_fn użyje ich dla subagentów.
+            self._model = model
+            self._mode = mode
+            # M19-B9: efektywny effort tej tury (per-tura nadpisuje domyślny runnera) —
+            # używany przez delegate_fn dla subagentów bez własnego effortu roli.
+            self._effort = reasoning_effort if reasoning_effort is not None else self._reasoning_effort
+            session.run_turn(text, model, stop_flag=self.stop, images=images or [],
+                             mode=mode, reasoning_effort=reasoning_effort)
+        except Exception:  # noqa: BLE001
+            # P1-13: nie wysyłaj surowego str(exc) (może zawierać szczegóły xAI/ścieżki).
+            log.exception("Agent turn failed")
+            self.emit({"type": "error", "error": "Agent error (see server log for details)"})
+        finally:
+            # M9-B2: podsumowanie tury do wspólnej historii huba (mode=code). Tekst =
+            # finalna odpowiedź agenta; instrukcja usera + workspace w meta.
+            if text or self._last_assistant:
+                wsp = self.backend.get_workspace()
+                self.backend.record_event(
+                    mode="code", text=self._last_assistant or "",
+                    meta={"prompt": text, "model": model,
+                          "workspace": wsp.root.as_posix() if wsp else None},
+                )
+        return self._last_assistant

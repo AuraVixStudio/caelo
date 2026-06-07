@@ -60,5 +60,19 @@ def main() -> None:
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
-if __name__ == "__main__":
+def _dispatch(argv: list[str]) -> None:
+    """Subkomendy CLI. Brak argumentów (lub `serve`) → serwer + handshake (ścieżka
+    Electrona — stdout MUSI zostać czysty). `run` → tryb headless (M19-B1)."""
+    if argv and argv[0] == "run":
+        from caelo_core.headless import main as run_headless
+        raise SystemExit(run_headless(argv[1:]))
+    if argv and argv[0] == "acp":
+        from caelo_core.acp.server import serve as run_acp
+        raise SystemExit(run_acp())
+    if argv and argv[0] == "serve":
+        argv = argv[1:]  # jawne `serve` — równoważne brakowi argumentów
     main()
+
+
+if __name__ == "__main__":
+    _dispatch(sys.argv[1:])

@@ -140,6 +140,64 @@ MAX_PACKAGE_BYTES = 8 * 1024 * 1024        # rozmiar pliku .caelopkg
 MAX_PACKAGE_UNPACKED_BYTES = 32 * 1024 * 1024  # suma rozpakowanych payloadów (zip-bomba)
 MAX_PACKAGE_FILES = 512                     # liczba plików w payloadzie
 
+# M19-Tier2 B5 (interop ekosystemu Claude Code / Grok CLI) — odkrywamy konfigurację z
+# plików ekosystemu, by istniejące projekty „po prostu działały" (format = schemat
+# Anthropica). Import NIC nie uruchamia: serwery MCP z tych plików wchodzą WYŁĄCZONE
+# (reżim M16); start = osobna, gejtowana akcja. `~/.claude.json` = globalny plik MCP
+# użytkownika (klucz `mcpServers`); projektowy `<ws>/.mcp.json` czytany per workspace.
+CLAUDE_JSON = Path.home() / ".claude.json"  # M19-B5 §1.2: globalna konfiguracja MCP (mcpServers)
+CLAUDE_HOME = Path.home() / ".claude"       # M19-B5 §1.3: globalny katalog ekosystemu (skills/)
+
+# M19-B8 (pamięć hybrydowa: FTS5 + embeddingi) — semantyczny recall ponad pełnotekstowy
+# FTS5 + wstrzyknięcie najtrafniejszych wspomnień na 1. turze agenta. Embeddingi liczy
+# cienki klient xAI (`caelo_core/embeddings.py`), wektory leżą w `caelo_history.db`
+# (tabela `event_embeddings`), KNN to brute-force cosine w Pythonie (bez `sqlite-vec`/
+# torch — „tylko Grok", bez ciężkich zależności). **Opt-in** (koszt embeddingów +
+# prywatność): domyślnie OFF; włącz przez env `CAELO_MEMORY=1` lub headless flagą.
+MEMORY_ENABLED = os.environ.get("CAELO_MEMORY", "").strip().lower() in ("1", "true", "yes", "on")
+MEMORY_MAX_RESULTS = 5            # ile wspomnień wstrzykiwanych na 1. turze
+MEMORY_MIN_SCORE = 0.55           # próg podobieństwa cosinusowego (0..1) dla recall/inject
+EMBED_MODEL = "embedding-beta-3-small"  # model embeddingów xAI (wymiary ~1024; live = spike §9)
+
+# M19-B7 (sandbox OS-kernel) — DODATKOWA warstwa nad istniejącą fosą (`Workspace.resolve`
+# + `scrubbed_env` + tree-kill): izolacja procesów potomnych `run_command`/MCP/LSP na
+# poziomie jądra (Linux `bwrap`, macOS `sandbox-exec`; Windows best-effort no-op). **Opt-in,
+# domyślnie OFF** — `off` nie zmienia zachowania. Profil globalny z env `CAELO_SANDBOX`
+# (off|workspace|read-only|strict), nadpisywalny przez `DATA_DIR/sandbox.json` (globalny) i
+# `<ws>/.caelo/sandbox.json` (projekt; jak `lsp.json`/`permissions.json` — JSON, NIE TOML,
+# by trzymać konwencję repo: `load_json_or_backup`). Ścieżki wrażliwe (`~/.ssh`/`~/.aws`/
+# `~/.gnupg`/`caelo_auth.json`) są ZAWSZE na deny-liście.
+SANDBOX_PROFILE = os.environ.get("CAELO_SANDBOX", "off").strip().lower() or "off"
+
+# M19-B10 (auto-compact kontekstu agenta) — gdy historia tury przekroczy próg znaków,
+# najstarsze ZAMKNIĘTE tury (granica = wiadomość `user`) są zwijane w jeden blok-
+# streszczenie (deterministycznie, BEZ sieci — digest skrócony), zachowując balans
+# tool_call↔tool (kontrakt xAI). Chroni długie sesje (headless `-c`, ACP, wielotura)
+# przed nieograniczonym wzrostem kontekstu/kosztu. **Opt-in, domyślnie OFF** — `off`
+# nie zmienia zachowania. Włącz env `CAELO_AUTOCOMPACT=1`.
+AGENT_AUTOCOMPACT = os.environ.get("CAELO_AUTOCOMPACT", "").strip().lower() in ("1", "true", "yes", "on")
+AGENT_COMPACT_THRESHOLD_CHARS = 48000  # próg rozmiaru historii (znaki) uruchamiający zwijanie
+
+# M19-B12 (realne git worktree dla mutujących subagentów) — OPCJA obok kopii katalogu
+# (M17): gdy workspace jest top-level repo git, użyj `git worktree add` (szybsze, naturalny
+# `git diff`, respektuje .gitignore). **Opt-in, domyślnie OFF** — kopia zostaje domyślna
+# (działa też poza repo). Włącz env `CAELO_GIT_WORKTREE=1` lub headless flagą `--worktree`.
+AGENT_GIT_WORKTREE = os.environ.get("CAELO_GIT_WORKTREE", "").strip().lower() in ("1", "true", "yes", "on")
+
+# M19-B13 (web tools w agencie) — narzędzie `web_fetch` (pobranie treści URL) dla agenta
+# kodowania. Egress sieciowy POD BRAMKĄ (mutujące: approval w WS / reguła `WebFetch(...)`
+# z B4 / fail-closed w headless) + https-only + opcjonalna twarda allowlista hostów +
+# cap rozmiaru + SSRF-guard (blok loopback/sieci prywatnych). **Opt-in, domyślnie OFF**
+# (jak inne M19) — narzędzie UKRYTE przed modelem, gdy wyłączone. Włącz `CAELO_WEB_FETCH=1`.
+# `CAELO_WEB_FETCH_DOMAINS` (CSV hostów) = dodatkowa twarda restrykcja na poziomie
+# egzekutora (pusta = bez restrykcji tam; decyduje bramka/reguły). `web_search` odłożony
+# (decyzja PLAN_M19_TIER3 §11 — najpierw prosty, gated `web_fetch`).
+WEB_FETCH_ENABLED = os.environ.get("CAELO_WEB_FETCH", "").strip().lower() in ("1", "true", "yes", "on")
+WEB_FETCH_ALLOW_DOMAINS = [d.strip().lower() for d in
+                          os.environ.get("CAELO_WEB_FETCH_DOMAINS", "").split(",") if d.strip()]
+WEB_FETCH_MAX_BYTES = 512 * 1024   # cap pobranej treści (bajty przed dekodowaniem)
+WEB_FETCH_TIMEOUT_S = 20           # timeout pojedynczego pobrania (sekundy)
+
 
 def atomic_write_text(path, text: str) -> None:
     """Zapis atomowy tekstu/JSON-a (P1-7): temp w tym samym katalogu + os.replace.

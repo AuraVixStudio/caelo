@@ -8,6 +8,22 @@ chronią przed nadużyciem/OOM. Naruszenie w polu Pydantic → automatyczne 422.
 from __future__ import annotations
 
 import re
+from typing import Optional
+
+# M19-B9: dozwolone poziomy reasoning_effort (CLI: low/medium/high). Wspólny słownik
+# dla obu ścieżek inferencji (Responses/chat), ról subagentów i tras — leaf, bez cykli.
+REASONING_EFFORTS = ("low", "medium", "high")
+
+
+def normalize_effort(value) -> Optional[str]:
+    """Znormalizuj reasoning_effort do `low`/`medium`/`high` albo None (M19-B9).
+    Cokolwiek poza dozwolonymi (None/""/śmieć) → None, by NIE dokładać pola do
+    payloadu xAI (modele nie-rozumujące mogłyby zwrócić 4xx)."""
+    if not value:
+        return None
+    v = str(value).strip().lower()
+    return v if v in REASONING_EFFORTS else None
+
 
 # Limity (sekundy/sztuki/znaki).
 MAX_PROMPT = 8000           # długość promptu (obraz/wideo)

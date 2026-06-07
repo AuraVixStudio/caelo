@@ -11,6 +11,8 @@ from typing import Callable, List, Optional
 
 import requests  # type: ignore
 
+from caelo_core import validation as V
+
 
 def stream_chat_with_tools(
     api_key: str,
@@ -21,6 +23,7 @@ def stream_chat_with_tools(
     tools: list,
     on_text: Optional[Callable[[str], None]] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
+    reasoning_effort: Optional[str] = None,
 ) -> dict:
     payload = {
         "model": model,
@@ -30,6 +33,12 @@ def stream_chat_with_tools(
         "tools": tools,
         "tool_choice": "auto",
     }
+    # M19-B9: reasoning_effort dla modeli rozumujących. Pole DOKŁADANE tylko gdy
+    # poprawne (low/medium/high) — na krytycznej ścieżce agenta złe pole = 4xx co tura,
+    # a wariant pola (chat/completions) potwierdza user na żywo (jak `include_usage`).
+    eff = V.normalize_effort(reasoning_effort)
+    if eff:
+        payload["reasoning_effort"] = eff
     # M17-B6: NIE dokładamy `stream_options.include_usage` do payloadu — to nowy parametr
     # na krytycznej ścieżce agenta, której nie da się zweryfikować w sandboxie (TLS),
     # a 400 zepsułby każdą turę. Jeśli serwer i tak wyśle `usage` w strumieniu — zbierzemy

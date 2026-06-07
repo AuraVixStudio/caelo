@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from typing import List, Optional
 
 log = logging.getLogger(__name__)
@@ -70,6 +71,10 @@ class Backend(MediaMixin, CollectionsMixin):
         self._genjobs = None
         # M14-B1: menedżer serwerów MCP — leniwy (per proces).
         self._mcp = None
+        # M19-B8: indeks pamięci hybrydowej — leniwy (per proces); opt-in (config).
+        self._memory = None
+        # M19-B3: menedżer LSP — leniwy per workspace (rebuild przy zmianie korzenia).
+        self._lsp = None
         # M14-B5: menedżer hooków cyklu życia narzędzi — leniwy (per proces).
         self._hooks = None
         # M14-B4/B6: rejestr komend slash + biblioteka skilli — leniwe (per proces).
@@ -84,14 +89,24 @@ class Backend(MediaMixin, CollectionsMixin):
         self._team_reports: list[dict] = []
         # M9-B5: ostatnio wybrany projekt (przeżywa restart przez caelo_settings.json).
         self.current_project_id = self.read_settings().get("current_project_id")
+        # M19-B4: zbuduj reguły glob bramki z ustawień globalnych (workspace jeszcze None
+        # → tylko globalne; projektowe doczytane przy set_workspace).
+        self.reload_permission_rules()
 
     # --- workspace agenta kodowania (Faza 4) ---
     def set_workspace(self, path: str):
         from caelo_core.agent.workspace import Workspace
 
+        old_root = self._workspace.root if self._workspace is not None else None
         self._workspace = Workspace(path)
-        root = self._workspace.root.as_posix()
+        new_root = self._workspace.root
+        root = new_root.as_posix()
         self._record_recent(root)
+        # M19-B5 §1.2: inny workspace → inny <ws>/.mcp.json. Przebuduj MCP (tree-kill
+        # starych podprocesów). Property `mcp` i tak self-healuje po korzeniu, ale tu
+        # robimy to deterministycznie w momencie przełączenia (jak intencja get_lsp).
+        if new_root != old_root:
+            self.reload_mcp()
         # M9-B5: workspace kodu staje się aktywnym projektem (most, nie duplikat) —
         # dzięki temu czat/media/voice w tej sesji też trafiają do tego projektu.
         try:
@@ -99,10 +114,37 @@ class Backend(MediaMixin, CollectionsMixin):
             self.select_project(proj.id)
         except Exception:
             log.warning("Could not bind workspace to a project", exc_info=True)
+        # M19-B4: dociągnij reguły uprawnień projektowe (<ws>/.caelo/permissions.json).
+        self.reload_permission_rules()
         return self._workspace
 
     def get_workspace(self):
         return self._workspace
+
+    # --- reguły uprawnień glob (M19-B4) ---
+    def reload_permission_rules(self) -> None:
+        """Zbuduj `RuleSet` bramki z reguł GLOBALNYCH (`caelo_settings.json` →
+        `permission_rules.{allow,deny}`) + PROJEKTOWYCH (`<ws>/.caelo/permissions.json`).
+        Wołane przy starcie i przy zmianie workspace; deny>allow egzekwuje bramka."""
+        allow: list[str] = []
+        deny: list[str] = []
+        g = self.read_settings().get("permission_rules") or {}
+        allow += list(g.get("allow") or [])
+        deny += list(g.get("deny") or [])
+        ws = getattr(self, "_workspace", None)
+        if ws is not None:
+            # M19-B14: czytaj `.caelo/permissions.json` z KAŻDEGO katalogu od korzenia
+            # repo do workspace (przodkowie + workspace); reguły są sumowane (deny>allow
+            # i tak globalne). Pojedynczy root (GUI) → tylko workspace (jak przed B14).
+            from caelo_core.agent.project import project_dir_chain
+            try:
+                for d in project_dir_chain(ws.root):
+                    data = config.load_json_or_backup(d / ".caelo" / "permissions.json", {}) or {}
+                    allow += list(data.get("allow") or [])
+                    deny += list(data.get("deny") or [])
+            except Exception:
+                log.warning("Could not load project permission rules", exc_info=True)
+        self.permissions.set_rules(allow, deny)
 
     # --- checkpointy agenta (M13-B3/B5) ---
     def get_checkpoints(self):
@@ -220,6 +262,41 @@ class Backend(MediaMixin, CollectionsMixin):
         from caelo_core.history_store import get_store
         return get_store()
 
+    # --- M19-B8: pamięć hybrydowa (FTS5 + embeddingi) ------------------------
+    @property
+    def memory(self):
+        """Leniwy `MemoryIndex`: embedder xAI (`embeddings.embed_texts` z naszym
+        `get_api_key`) + magazyn historii. **Opt-in** (`config.MEMORY_ENABLED`); gdy OFF,
+        `injected_text`/`recall`/`index_event` są no-opami (zero kosztu/sieci)."""
+        from caelo_core import embeddings
+        from caelo_core.memory import MemoryIndex
+
+        if getattr(self, "_memory", None) is None:
+            self._memory = MemoryIndex(
+                self.history_store,
+                lambda texts: embeddings.embed_texts(texts, api_key_provider=self.get_api_key),
+                enabled=bool(getattr(config, "MEMORY_ENABLED", False)),
+                max_results=int(getattr(config, "MEMORY_MAX_RESULTS", 5)),
+                min_score=float(getattr(config, "MEMORY_MIN_SCORE", 0.55)),
+            )
+        return self._memory
+
+    def _maybe_index_memory(self, ev) -> None:
+        """M19-B8: zaindeksuj zdarzenie w pamięci semantycznej (opt-in). Embedding = sieć,
+        więc puszczamy je w wątku w tle (fire-and-forget) — gorąca ścieżka nie czeka.
+        Błąd połknięty."""
+        if ev is None or not getattr(config, "MEMORY_ENABLED", False):
+            return
+        text = (getattr(ev, "text", "") or "").strip()
+        if not text:
+            return
+        try:
+            mem = self.memory
+            threading.Thread(target=mem.index_event, args=(ev.id, text),
+                             daemon=True).start()
+        except Exception:  # noqa: BLE001
+            log.warning("Could not schedule memory indexing", exc_info=True)
+
     # --- M11-B1: zadania generacji (jednolita kolejka obrazu/wideo) ----------
     @property
     def genjobs(self):
@@ -234,13 +311,88 @@ class Backend(MediaMixin, CollectionsMixin):
     # --- M14-B1: menedżer serwerów MCP (rozszerzalność) ----------------------
     @property
     def mcp(self):
-        """Leniwy `McpManager` (per proces): skonfigurowane serwery MCP + ich narzędzia.
-        Współdzielony przez REST (/mcp), czat (responses) i agenta (session)."""
+        """Leniwy `McpManager`: skonfigurowane serwery MCP + ich narzędzia. Współdzielony
+        przez REST (/mcp), czat (responses) i agenta (session).
+
+        M19-B5 §1.2 (interop): poza natywnym `caelo_mcp.json` scala serwery z ekosystemu —
+        globalny `~/.claude.json` (klucz `mcpServers`) i projektowy `<ws>/.mcp.json`.
+        Workspace-aware jak `get_lsp`: gdy korzeń się zmieni, przebuduj (tree-kill starych
+        podprocesów). Importowane serwery wchodzą WYŁĄCZONE (reżim M16)."""
         from caelo_core.mcp.manager import McpManager
 
-        if getattr(self, "_mcp", None) is None:
-            self._mcp = McpManager(config.MCP_FILE)
+        ws = getattr(self, "_workspace", None)
+        root = ws.root if ws is not None else None
+        cur = getattr(self, "_mcp", None)
+        if cur is None or cur.workspace_root != root:
+            if cur is not None:
+                try:
+                    cur.shutdown()
+                except Exception:  # noqa: BLE001
+                    log.warning("MCP shutdown failed during rebuild", exc_info=True)
+                self._packages = None  # zależy od mcp_manager — odbuduj ze świeżym
+            claude_json = getattr(config, "CLAUDE_JSON", None)
+            self._mcp = McpManager(config.MCP_FILE, workspace_root=root, claude_json=claude_json)
         return self._mcp
+
+    def reload_mcp(self) -> None:
+        """Wymuś przebudowę `McpManager` (po zmianie configu/workspace). Tree-kill bieżących
+        serwerów (jak `reload_lsp`); następny dostęp do `.mcp` odbuduje (interop + workspace)."""
+        cur = getattr(self, "_mcp", None)
+        if cur is not None:
+            try:
+                cur.shutdown()
+            except Exception:  # noqa: BLE001
+                log.warning("MCP shutdown failed", exc_info=True)
+        self._mcp = None
+        self._packages = None  # PackageManager trzyma referencję do mcp_manager
+
+    # --- M19-B3: serwery LSP (intel kodu w trybie Code) -----------------------
+    def _discover_lsp_configs(self, root) -> dict:
+        """Scal `lsp.json` globalny (DATA_DIR) + projektowy (<ws>/.caelo/lsp.json);
+        projekt wygrywa per nazwa serwera. Schemat: {name: {command,args,extensionToLanguage,…}}."""
+        cfg: dict = {}
+        g = config.load_json_or_backup(config.DATA_DIR / "lsp.json", {}) or {}
+        if isinstance(g, dict):
+            cfg.update(g)
+        if root is not None:
+            # M19-B14: scal `.caelo/lsp.json` z łańcucha korzeń-repo→workspace (deeper
+            # wygrywa per nazwa serwera). Pojedynczy root → jeden update (jak przed B14).
+            from caelo_core.agent.project import project_dir_chain
+            for d in project_dir_chain(root):
+                proj = config.load_json_or_backup(d / ".caelo" / "lsp.json", {}) or {}
+                if isinstance(proj, dict):
+                    cfg.update(proj)
+        return cfg
+
+    def get_lsp(self):
+        """Leniwy `LspManager` dla AKTYWNEGO workspace (rebuild przy zmianie korzenia;
+        tree-kill starego). None bez workspace. Współdzielony przez agenta (narzędzie
+        lsp + pasywna diagnostyka) i REST (/lsp)."""
+        from caelo_core.lsp.manager import LspManager
+
+        ws = self._workspace
+        root = ws.root if ws is not None else None
+        if root is None:
+            return None
+        cur = getattr(self, "_lsp", None)
+        if cur is None or cur.root != root:
+            if cur is not None:
+                try:
+                    cur.shutdown()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._lsp = LspManager(self._discover_lsp_configs(root), workspace_root=root)
+        return self._lsp
+
+    def reload_lsp(self) -> None:
+        """Wymuś przebudowę menedżera LSP (po zmianie configu z REST). Tree-kill bieżącego."""
+        cur = getattr(self, "_lsp", None)
+        if cur is not None:
+            try:
+                cur.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+        self._lsp = None
 
     # --- M14-B5: hooki cyklu życia narzędzi (uogólniony PermissionGate) ----------
     @property
@@ -266,11 +418,21 @@ class Backend(MediaMixin, CollectionsMixin):
     # --- M14-B6: biblioteka skilli -----------------------------------------------
     @property
     def skills(self):
-        """Leniwy `SkillManager`: lokalne pakiety skilli (`SKILLS_DIR/<name>/SKILL.md`)."""
+        """Leniwy `SkillManager`: pakiety skilli (`SKILLS_DIR/<name>/SKILL.md`).
+
+        M19-B5 §1.3 (interop): poza builtin + `SKILLS_DIR` odkrywa też ekosystem —
+        globalny `~/.claude/skills` i projektowe `<ws>/.claude/skills`+`<ws>/.grok/skills`.
+        Workspace-aware jak `get_lsp`: przy zmianie korzenia przebuduj (brak podprocesów →
+        tylko nowe ścieżki skanu; `_all` i tak czyta dysk świeżo na każde wywołanie)."""
         from caelo_core.skills import SkillManager
 
-        if getattr(self, "_skills", None) is None:
-            self._skills = SkillManager(config.SKILLS_DIR)
+        ws = getattr(self, "_workspace", None)
+        root = ws.root if ws is not None else None
+        cur = getattr(self, "_skills", None)
+        if cur is None or cur.workspace_root != root:
+            claude_home = getattr(config, "CLAUDE_HOME", None)
+            self._skills = SkillManager(config.SKILLS_DIR, workspace_root=root,
+                                        claude_home=claude_home)
         return self._skills
 
     # --- M16: pakiety społeczności / marketplace ---------------------------------
@@ -295,6 +457,12 @@ class Backend(MediaMixin, CollectionsMixin):
                 mgr.shutdown()
             except Exception:  # noqa: BLE001
                 log.warning("MCP shutdown failed", exc_info=True)
+        lsp = getattr(self, "_lsp", None)  # M19-B3: tree-kill serwerów LSP
+        if lsp is not None:
+            try:
+                lsp.shutdown()
+            except Exception:  # noqa: BLE001
+                log.warning("LSP shutdown failed", exc_info=True)
 
     def record_event(self, *, mode: str, text: str = "", artifact_id=None,
                      project_id=None, meta=None):
@@ -303,13 +471,15 @@ class Backend(MediaMixin, CollectionsMixin):
         wywraca ścieżki użytkownika — błąd magazynu jest logowany i połykany."""
         pid = project_id if project_id is not None else self.current_project_id
         try:
-            return self.history_store.record_event(
+            ev = self.history_store.record_event(
                 mode=mode, text=text or "", artifact_id=artifact_id,
                 project_id=pid, meta=meta,
             )
         except Exception:
             log.warning("Could not record history event (mode=%s)", mode, exc_info=True)
             return None
+        self._maybe_index_memory(ev)  # M19-B8: opt-in, w tle, błąd połknięty
+        return ev
 
     def add_artifact(self, **kwargs):
         """Zarejestruj artefakt (obraz/wideo/audio/...) w magazynie huba. Bez jawnego
