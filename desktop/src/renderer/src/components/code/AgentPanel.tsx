@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -25,6 +25,7 @@ import { AgentConnection, type AgentEvent, type ApprovalDetail } from '../../lib
 import {
   agentUndo,
   applyTeamMerge,
+  fsFiles,
   listCheckpoints,
   listTeamMerges,
   rejectTeamMerge,
@@ -57,6 +58,8 @@ import {
   type PlanPhase
 } from '../../lib/agentTrust'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
+import { detectSuggest, fuzzyFiles, applyFileSuggest } from '../../lib/composerSuggest'
+import { filterSlashCommands, expandTemplate, matchSlash } from '../../lib/slashCommands'
 import { useHub } from '../../lib/hub'
 import { inputBlockToAttachment } from '../../lib/sendTo'
 import { useAttachments } from '../../lib/useAttachments'
@@ -138,6 +141,12 @@ export function AgentPanel({
   const [teamNodes, setTeamNodes] = useState<SubAgentMap>({})
   const [merges, setMerges] = useState<TeamMerge[]>([])
   const [teamReport, setTeamReport] = useState<TeamReport | null>(null)
+  // M14/M19: autouzupełnianie composera agenta — slash-komendy ("/") i @-pliki.
+  const [fileList, setFileList] = useState<string[]>([])
+  const [caret, setCaret] = useState(0)
+  const [suggestIdx, setSuggestIdx] = useState(0)
+  const [suggestDismissed, setSuggestDismissed] = useState(false)
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const agentRef = useRef<AgentConnection | null>(null)
   const curAssistant = useRef<string | null>(null)
@@ -209,7 +218,12 @@ export function AgentPanel({
       refreshMergesRef.current()
       setTeamNodes({}) // nowy workspace → nowe drzewo zespołu
       setTeamReport(null)
+      // M19: płaski spis plików workspace → @-odwołania w composerze.
+      void fsFiles(conn)
+        .then((r) => setFileList(r.files))
+        .catch(() => setFileList([]))
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
 
   useEffect(() => {
@@ -358,13 +372,26 @@ export function AgentPanel({
   }
 
   function send(): void {
-    const text = input.trim()
+    let text = input.trim()
     if ((!text && att.attachments.length === 0) || busy || !connected) return
     if (!workspacePath) {
       setEntries((prev) => [...prev, { kind: 'error', id: nextId(), text: 'Open a folder first.' }])
       return
     }
-    const usePlan = mode === 'plan'
+    // M14-B4: rozwiń slash-komendę w composerze agenta + zastosuj jej tryb (np. /plan).
+    let effMode = mode
+    const ms = matchSlash(text)
+    if (ms) {
+      const cmd = codeCommands.find((c) => c.name === ms.name)
+      if (cmd?.template) {
+        text = expandTemplate(cmd.template, ms.rest)
+        if (cmd.mode) {
+          effMode = cmd.mode as AgentMode
+          setMode(effMode)
+        }
+      }
+    }
+    const usePlan = effMode === 'plan'
     const atts = att.attachments
     setEntries((prev) => [
       ...prev,
@@ -376,7 +403,7 @@ export function AgentPanel({
     setBusy(true)
     setInput('')
     att.clear()
-    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts), mode, effort)
+    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts), effMode, effort)
   }
 
   // M13-F2: zatwierdź plan i wykonaj go w trybie „accept edits" (plan był sprawdzony).
@@ -446,12 +473,83 @@ export function AgentPanel({
     }
   }
 
+  function focusCaret(pos: number): void {
+    requestAnimationFrame(() => {
+      const el = taRef.current
+      if (el) {
+        el.focus()
+        el.setSelectionRange(pos, pos)
+      }
+    })
+  }
+
+  // Wstaw wybraną podpowiedź (slash-komenda → "/name "; plik → "@path ").
+  function pickSuggestion(i: number): void {
+    const tok = suggestTok
+    const s = suggestions[i]
+    if (!tok || !s) return
+    if (tok.kind === 'slash') {
+      const next = '/' + s.value + ' '
+      setInput(next)
+      setCaret(next.length)
+      focusCaret(next.length)
+    } else {
+      const r = applyFileSuggest(input, tok, s.value)
+      setInput(r.text)
+      setCaret(r.caret)
+      focusCaret(r.caret)
+    }
+    setSuggestDismissed(false)
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (showSuggest) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSuggestIdx((i) => (i + 1) % suggestions.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSuggestIdx((i) => (i - 1 + suggestions.length) % suggestions.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        pickSuggestion(suggestIdx)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSuggestDismissed(true)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
     }
   }
+
+  // M14/M19: composer autocomplete — slash-komendy (bez chat-only) + @-pliki.
+  const codeCommands = useMemo(
+    () => hub.slashCommands.filter((c) => (c.target ?? 'both') !== 'chat'),
+    [hub.slashCommands]
+  )
+  const suggestTok = useMemo(() => detectSuggest(input, caret), [input, caret])
+  const suggestions = useMemo<{ value: string; label: string; hint?: string }[]>(() => {
+    if (!suggestTok) return []
+    if (suggestTok.kind === 'slash') {
+      return filterSlashCommands(codeCommands, suggestTok.query)
+        .slice(0, 8)
+        .map((c) => ({ value: c.name, label: '/' + c.name, hint: c.description }))
+    }
+    return fuzzyFiles(fileList, suggestTok.query, 8).map((p) => ({ value: p, label: p }))
+  }, [suggestTok, codeCommands, fileList])
+  const showSuggest = suggestions.length > 0 && !suggestDismissed
+  useEffect(() => {
+    setSuggestIdx(0)
+  }, [input, caret])
 
   const showApproveRun = canApproveRun(planPhase, busy)
   const banner = modeBanner(mode)
@@ -552,10 +650,43 @@ export function AgentPanel({
           if (connected) void att.addFiles(e.dataTransfer.files)
         }}
         className={cn(
-          'shrink-0 border-t p-2.5 transition-colors',
+          'relative shrink-0 border-t p-2.5 transition-colors',
           dragging ? 'border-accent' : 'border-border'
         )}
       >
+        {showSuggest ? (
+          <div className="absolute inset-x-2 bottom-full z-20 mb-1 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
+            <div className="border-b border-border px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+              {suggestTok?.kind === 'slash' ? 'Commands' : 'Files'}
+            </div>
+            <ul className="max-h-56 overflow-y-auto py-1">
+              {suggestions.map((s, i) => (
+                <li key={s.value}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      pickSuggestion(i)
+                    }}
+                    onMouseEnter={() => setSuggestIdx(i)}
+                    className={cn(
+                      'flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px]',
+                      i === suggestIdx ? 'bg-surface-2' : 'hover:bg-surface-2'
+                    )}
+                  >
+                    {suggestTok?.kind === 'file' ? (
+                      <FileText size={13} className="shrink-0 text-muted" />
+                    ) : null}
+                    <span className="truncate font-mono text-fg">{s.label}</span>
+                    {s.hint ? (
+                      <span className="ml-auto truncate pl-2 text-[11px] text-muted">{s.hint}</span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {banner ? (
           <div
             className={cn(
@@ -572,14 +703,20 @@ export function AgentPanel({
           <EffortSelect effort={effort} onSelect={setEffort} align="end" />
           <AttachButton onPick={att.addFiles} disabled={!connected} className="h-8 w-8 rounded-lg" />
           <Textarea
+            ref={taRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              setCaret(e.target.selectionStart ?? e.target.value.length)
+              setSuggestDismissed(false)
+            }}
+            onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
             onKeyDown={onKeyDown}
             placeholder={
               workspacePath
                 ? mode === 'plan'
                   ? 'Describe the change — get a plan first…'
-                  : 'Ask the agent…'
+                  : 'Ask the agent…   ·   / commands   ·   @ files'
                 : 'Open a folder to start…'
             }
             rows={2}

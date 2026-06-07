@@ -47,6 +47,27 @@ BUILTIN_COMMANDS: list[dict] = [
     {"name": "mcp", "target": "chat", "action": "open_mcp",
      "description": "Open the MCP servers manager / list connected MCP tools.",
      "template": "List the connected MCP servers and the tools they expose. {input}"},
+    {"name": "explain", "target": "both",
+     "description": "Explain how the given code, file or area works.",
+     "template": ("Explain how the following code / file / area works. Start with the big "
+                  "picture, then the important parts, with concrete file:line references:\n\n{input}")},
+    {"name": "fix", "target": "agent",
+     "description": "Find and fix the described bug (reproduce → root cause → fix → verify).",
+     "template": ("Fix the bug described below. Reproduce it, find the root cause (not the "
+                  "symptom), apply the smallest correct fix, then verify and add a test that "
+                  "would have caught it:\n\n{input}")},
+    {"name": "refactor", "target": "agent",
+     "description": "Refactor the given code/area without changing behavior.",
+     "template": ("Refactor the following code/area for clarity and structure WITHOUT changing "
+                  "behavior. Work in small steps and verify (tests/type-check) after each:\n\n{input}")},
+    {"name": "document", "target": "agent",
+     "description": "Add or improve docstrings/comments and update docs for the given code.",
+     "template": ("Add or improve docstrings and comments for the following code/area, and update "
+                  "any affected docs. Explain *why*, not just *what*; match the existing style:\n\n{input}")},
+    {"name": "optimize", "target": "agent",
+     "description": "Improve the performance of the given code/area, keeping behavior identical.",
+     "template": ("Improve the performance of the following code/area. Measure or reason about the "
+                  "hot path first, keep behavior identical, and verify nothing regressed:\n\n{input}")},
 ]
 
 

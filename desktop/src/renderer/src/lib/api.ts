@@ -36,6 +36,7 @@ export interface ChatMessage {
   attachments?: ChatAttachment[]
   citations?: Citation[] // live-search sources (assistant messages)
   usage?: ChatUsage // tool calls + tokens for this turn (assistant messages)
+  artifacts?: ChatArtifact[] // M20: media generated in this turn (shown inline)
 }
 
 /** Live-search mode (M10-F3): Auto = model decides, On = forced, Off = no tools. */
@@ -629,6 +630,11 @@ export const fsSetWorkspace = (c: Conn, path: string): Promise<{ path: string }>
 export const fsTree = (c: Conn, path = '.'): Promise<{ path: string; entries: TreeEntry[] }> =>
   api(c, `/fs/tree?path=${encodeURIComponent(path)}`)
 
+// Flat, recursive file list of the workspace (for @-file references in the agent
+// composer). Skips ignored dirs/symlinks; capped server-side (truncated=true if cut).
+export const fsFiles = (c: Conn): Promise<{ files: string[]; truncated: boolean }> =>
+  api(c, '/fs/files')
+
 export const fsRead = (c: Conn, path: string): Promise<{ path: string; content: string }> =>
   api(c, `/fs/read?path=${encodeURIComponent(path)}`)
 
@@ -1124,6 +1130,13 @@ export interface ToolEvent {
   query?: string | null
 }
 
+/** An artifact generated during the chat (M20) — e.g. an image to render inline. */
+export interface ChatArtifact {
+  id: string
+  kind: string // 'image' | 'video'
+  mime?: string
+}
+
 export interface ChatStreamHandlers {
   onDelta: (full: string) => void
   onDone: (full: string) => void
@@ -1131,6 +1144,7 @@ export interface ChatStreamHandlers {
   onTool?: (ev: ToolEvent) => void // M10-F1: search activity indicator
   onCitations?: (citations: Citation[]) => void // M10-F2: clickable sources
   onUsage?: (usage: ChatUsage) => void // M10-F6: cost/usage badge
+  onArtifact?: (a: ChatArtifact) => void // M20: media generated in chat (render inline)
 }
 
 /** Otwiera WS /chat/stream, wysyła jedną turę i strumieniuje odpowiedź. */
@@ -1158,6 +1172,7 @@ export function streamChat(
       citations?: Citation[]
       usage?: ChatUsage
       tool_calls?: number
+      artifact?: ChatArtifact
     }
     try {
       m = JSON.parse(ev.data as string)
@@ -1174,6 +1189,8 @@ export function streamChat(
       handlers.onCitations?.(m.citations ?? [])
     } else if (m.type === 'usage') {
       handlers.onUsage?.({ ...(m.usage ?? {}), tool_calls: m.tool_calls ?? m.usage?.tool_calls })
+    } else if (m.type === 'artifact') {
+      if (m.artifact) handlers.onArtifact?.(m.artifact)
     } else if (m.type === 'done') {
       finished = true
       handlers.onDone(m.full ?? acc)
