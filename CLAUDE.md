@@ -164,8 +164,10 @@ execution, no local gate. **Hooks** (`caelo_core/hooks.py`, generalized `Permiss
 `run_script` hooks (opt-in; auto-format after write). **Commands** (`caelo_core/commands/`): prompt
 templates + optional `mode`/`action`, built-ins `/plan /review /commit /test /mcp` + user; surfaced in
 the chat composer (`/`) and Ctrl-K palette (`lib/slashCommands.ts`, `lib/hub.tsx`). **Skills**
-(`caelo_core/skills/`): `<id>/SKILL.md` packages (bundled `builtin/` Ren'Py+DAZ via spec
-`collect_data_files`, + user `SKILLS_DIR`); enabled skills inject into the agent system prompt (like
+(`caelo_core/skills/`): `<id>/SKILL.md` packages (bundled `builtin/` general coding skills —
+commit/write-tests/refactor/debug/document-code/explain-codebase + the M19 multi-agent orchestrators
+implement/review/design/best-of-n/check-work/pr-babysit — via spec `collect_data_files`, + user
+`SKILLS_DIR`); enabled skills inject into the agent system prompt (like
 CAELO.md). New state files (all via `load_json_or_backup` + atomic writes, gitignored): `caelo_mcp.json`,
 `caelo_commands.json`, `caelo_hooks.json`, `caelo_audit.log`, `skills/`. REST: `routes/mcp.py`,
 `routes/hooks.py`, `routes/commands.py`, `routes/skills.py`; lazy `backend.mcp`/`.hooks`/`.commands`/

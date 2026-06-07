@@ -33,7 +33,7 @@ function sourceLabel(source?: string): string {
   }
 }
 
-/** M14-F5: browse/enable/create skills (reusable workflows; Ren'Py/DAZ bundled). */
+/** M14-F5: browse/enable/create skills (reusable workflows; general coding skills bundled). */
 export function SkillsLibrary({ conn }: { conn: Conn }) {
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -105,8 +105,8 @@ export function SkillsLibrary({ conn }: { conn: Conn }) {
             <Field label="Template">
               <Select value={template} onChange={(e) => setTemplate(e.target.value)}>
                 <option value="blank">Blank</option>
-                <option value="renpy">Ren&apos;Py</option>
-                <option value="daz">DAZ</option>
+                <option value="workflow">Workflow</option>
+                <option value="checklist">Checklist</option>
               </Select>
             </Field>
             <Field label="Name (optional)">

@@ -213,7 +213,8 @@ Make the hub programmable. Tools added here serve **both** Chat and the agent. T
   (`authorization`/`env`) are never shown back. Read-only tools run freely; mutating tools go
   through the permission gate (in chat they must be pre-approved).
 - **Skills** — `SKILL.md` knowledge packages; enabled skills are injected into the agent's system
-  prompt. Bundled examples (Ren'Py, DAZ) plus your own.
+  prompt. Bundled general coding skills (commit, write-tests, refactor, debug, document-code,
+  explain-codebase, plus multi-agent orchestrators like implement/review) plus your own.
 - **Hooks** — deterministic `pre_tool` / `post_tool` / `pre_session` hooks (e.g. block-dangerous-
   commands, audit-all, auto-format after write). Includes an **audit log** viewer.
 - **Subagents** — define agent **roles** (tool scope, worktree, persona, model) and team **limits**

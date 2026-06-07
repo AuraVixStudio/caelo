@@ -382,20 +382,21 @@ def _unit_commands_skills(checks: list) -> None:
     with tempfile.TemporaryDirectory() as d:
         sm = SkillManager(Path(d))
         ids = {s["id"] for s in sm.list_skills()}
-        checks.append(("B6: builtin skills discovered (Ren'Py/DAZ)",
-                       {"renpy-new-scene", "daz-export-webm"} <= ids))
+        checks.append(("B6: general builtin skills discovered",
+                       {"commit", "write-tests", "refactor", "debug",
+                        "document-code", "explain-codebase"} <= ids))
         # M19-B6: wbudowane skille-orkiestratory (pętle wieloagentowe)
         checks.append(("B6: orchestration builtin skills discovered",
                        {"implement", "review", "design", "best-of-n",
                         "check-work", "pr-babysit"} <= ids))
-        sk = sm.get_skill("renpy-new-scene")
+        sk = sm.get_skill("commit")
         checks.append(("B6: get_skill returns body + builtin flag",
-                       sk and "Ren'Py" in sk["body"] and sk["builtin"] is True))
+                       sk and "commit" in sk["body"].lower() and sk["builtin"] is True))
         checks.append(("B6: disabled skill not injected", sm.injected_text() == ""))
-        sm.set_enabled("renpy-new-scene", True)
+        sm.set_enabled("commit", True)
         inj = sm.injected_text()
         checks.append(("B6: enabled skill injected into context",
-                       "Ren'Py" in inj and "Active skills" in inj))
+                       "Commit" in inj and "Active skills" in inj))
         # M19-B6: skill-orkiestrator wstrzykuje instrukcję sterowania `delegate`
         sm.set_enabled("implement", True)
         inj_impl = sm.injected_text(["implement"])
@@ -403,10 +404,10 @@ def _unit_commands_skills(checks: list) -> None:
                        "delegate" in inj_impl.lower()
                        and ("implementer" in inj_impl.lower() or "reviewer" in inj_impl.lower())))
         # tworzenie skilla użytkownika z szablonu + odkrycie
-        sm.create_skill("my-flow", template="renpy", name="My Flow")
+        sm.create_skill("my-flow", template="workflow", name="My Flow")
         checks.append(("B6: created skill discovered",
                        any(s["id"] == "my-flow" and s["builtin"] is False for s in sm.list_skills())))
-        checks.append(("B6: builtin skill not deletable", sm.delete_skill("renpy-new-scene") is False))
+        checks.append(("B6: builtin skill not deletable", sm.delete_skill("commit") is False))
         checks.append(("B6: user skill deletable", sm.delete_skill("my-flow") is True
                        and all(s["id"] != "my-flow" for s in sm.list_skills())))
         bad = False

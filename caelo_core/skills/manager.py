@@ -38,10 +38,10 @@ _NAME_RX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 SKILL_TEMPLATES = {
     "blank": ("New skill", "Describe when this skill applies.",
               "## Steps\n\n1. …\n2. …\n"),
-    "renpy": ("Ren'Py workflow", "A reusable Ren'Py visual-novel workflow.",
-              "## Steps\n\n1. …\n2. …\n"),
-    "daz": ("DAZ workflow", "A reusable DAZ/render workflow.",
-            "## Steps\n\n1. …\n2. …\n"),
+    "workflow": ("New workflow", "A reusable, multi-step workflow.",
+                 "## Steps\n\n1. …\n2. …\n"),
+    "checklist": ("New checklist", "A checklist to run through when this applies.",
+                  "## Checklist\n\n- [ ] …\n- [ ] …\n"),
 }
 
 
