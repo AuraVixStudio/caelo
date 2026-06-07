@@ -7,12 +7,17 @@ i wstrzykujemy do system promptu. Workspace **nadpisuje/uzupełnia** globalny
 (idzie później, z jawną adnotacją dla modelu). UTF-8, twardy cap rozmiaru
 (per plik), brak pliku tolerowany.
 
-**Interop ekosystemu (M19-Tier2 B5 §1.1):** w jednym katalogu czytamy NIE tylko
+**Interop ekosystemu (M19-Tier2 B5 §1.1):** w katalogu WORKSPACE czytamy NIE tylko
 natywny `CAELO.md`, ale też pliki konwencji Claude Code / Grok CLI — `AGENTS.md`
 i `CLAUDE.md` (z wariantami) — by istniejące projekty „po prostu działały".
 Wszystkie istniejące pliki są **sklejane** w kolejności pierwszeństwa
 (natywne → AGENTS.md → CLAUDE.md), każdy capowany osobno, z adnotacją źródła.
 Zapis (REST `/caelo-md`) zawsze idzie do natywnego `CAELO.md`.
+
+⚠️ **Interop dotyczy TYLKO workspace, NIE globalnego `DATA_DIR`.** Globalnie bierzemy
+wyłącznie natywny `CAELO.md` — w trybie dev `DATA_DIR == repo Caelo`, którego
+`CLAUDE.md` (instrukcje dewelopera) inaczej wyciekałby do każdej sesji agenta nad
+dowolnym, obcym projektem.
 """
 
 from __future__ import annotations
@@ -50,15 +55,21 @@ def _read_capped(p: Path) -> str:
     return data.strip()
 
 
-def _read_dir_md(base: Optional[str | Path]) -> str:
+def _read_dir_md(base: Optional[str | Path], *, include_interop: bool = True) -> str:
     """Wczytaj i sklej reguły projektu z katalogu.
 
-    Najpierw plik natywny (`CAELO.md`, a gdy go brak — legacy `GROK.md`), potem
-    wszystkie istniejące pliki interop (`AGENTS.md`/`CLAUDE.md` + warianty) w
-    kolejności pierwszeństwa. Każdy plik jest capowany osobno i opatrzony
+    Najpierw plik natywny (`CAELO.md`, a gdy go brak — legacy `GROK.md`), potem —
+    gdy `include_interop` — wszystkie istniejące pliki interop (`AGENTS.md`/`CLAUDE.md`
+    + warianty) w kolejności pierwszeństwa. Każdy plik jest capowany osobno i opatrzony
     adnotacją źródła. Deduplikacja po `normcase` ścieżki łapie kolizje wielkości
     liter na case-insensitive FS (Windows: `AGENTS.md` == `Agents.md`), a na
     case-sensitive FS (Linux) traktuje warianty jako osobne pliki — zgodnie z FS.
+
+    **`include_interop=False` dla katalogu GLOBALNEGO (`DATA_DIR`).** Interop
+    (`CLAUDE.md`/`AGENTS.md`) to konwencja PER-PROJEKT — czytamy ją tylko z workspace.
+    Globalnie bierzemy WYŁĄCZNIE natywny `CAELO.md`, bo w trybie dev `DATA_DIR == repo
+    Caelo`, którego `CLAUDE.md` (instrukcje dewelopera) wyciekałby do KAŻDEJ sesji
+    agenta — także nad zupełnie obcym projektem (poważny błąd izolacji).
     """
     if not base:
         return ""
@@ -79,9 +90,10 @@ def _read_dir_md(base: Optional[str | Path]) -> str:
     # Natywny plik: CAELO.md ma pierwszeństwo; gdy go brak — legacy GROK.md.
     native = CAELO_MD_NAME if (base_path / CAELO_MD_NAME).is_file() else LEGACY_MD_NAME
     _add(native)
-    # Interop: dołącz wszystkie istniejące pliki AGENTS.md/CLAUDE.md.
-    for name in INTEROP_MD_NAMES:
-        _add(name)
+    # Interop (AGENTS.md/CLAUDE.md) TYLKO dla workspace/projektu, nie dla DATA_DIR.
+    if include_interop:
+        for name in INTEROP_MD_NAMES:
+            _add(name)
     return "\n\n".join(parts)
 
 
@@ -96,7 +108,9 @@ def load_caelo_md(workspace_root: Optional[str | Path],
     wstrzyknięcia). Gdy workspace jest korzeniem repo / nie ma repo → łańcuch to sam
     workspace (zachowanie sprzed B14)."""
     parts: list[str] = []
-    g = _read_dir_md(global_dir)
+    # Globalny DATA_DIR: TYLKO natywny CAELO.md (bez interopu) — patrz _read_dir_md:
+    # w dev DATA_DIR == repo Caelo, wiec jego CLAUDE.md NIE moze trafic do agenta.
+    g = _read_dir_md(global_dir, include_interop=False)
     if g:
         parts.append("## Global project rules\n" + g)
     chain = project_dir_chain(workspace_root) if workspace_root else []

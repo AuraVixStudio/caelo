@@ -772,6 +772,27 @@ def test_caelo_md() -> None:
         check("B5: GROK.md ignored once CAELO.md exists (no double native)",
               "NATIVE_RULE_N" in with_native and "LEGACY_GROK_G" not in with_native)
 
+    # --- IZOLACJA: interop (CLAUDE.md/AGENTS.md) jest WORKSPACE-only, NIE globalny ---
+    # Regresja realnego bledu: w dev DATA_DIR == repo Caelo, wiec jego CLAUDE.md
+    # (instrukcje dewelopera) wstrzykiwal sie do agenta nad KAZDYM, obcym projektem.
+    with tempfile.TemporaryDirectory() as gd2, tempfile.TemporaryDirectory() as wsd2:
+        gdir, wdir = Path(gd2), Path(wsd2)
+        (gdir / "CLAUDE.md").write_text("DEV_REPO_CLAUDE_MD", encoding="utf-8")
+        (gdir / "AGENTS.md").write_text("DEV_REPO_AGENTS_MD", encoding="utf-8")
+        out = load_caelo_md(wdir, gdir)
+        check("B5/iso: global CLAUDE.md/AGENTS.md NOT injected (interop is workspace-only)",
+              "DEV_REPO_CLAUDE_MD" not in out and "DEV_REPO_AGENTS_MD" not in out and out == "")
+        # ...ale globalny natywny CAELO.md dziala normalnie
+        (gdir / "CAELO.md").write_text("GLOBAL_NATIVE_OK", encoding="utf-8")
+        out2 = load_caelo_md(wdir, gdir)
+        check("B5/iso: global native CAELO.md still injected",
+              "GLOBAL_NATIVE_OK" in out2 and "DEV_REPO_CLAUDE_MD" not in out2)
+        # ...a interop w WORKSPACE nadal dziala (workspace > global)
+        (wdir / "CLAUDE.md").write_text("WS_CLAUDE_OK", encoding="utf-8")
+        out3 = load_caelo_md(wdir, gdir)
+        check("B5/iso: workspace CLAUDE.md still injected (interop ok in workspace)",
+              "WS_CLAUDE_OK" in out3 and "DEV_REPO_CLAUDE_MD" not in out3)
+
 
 class _FakeMcp:
     """Stub menedżera MCP (duck-typed kontrakt z caelo_core/mcp/manager.py) — bez sieci.
