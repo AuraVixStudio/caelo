@@ -257,6 +257,82 @@ def _unit_responses_mcp_loop(checks: list) -> None:
                        for t in rt_tools)))
 
 
+def _unit_chat_media(checks: list) -> None:
+    """M20: narzędzia generowania mediów w czacie (function-calling) — definicje + handler.
+    Mockujemy `api.generate_image`/`save_media_urls`/`genjobs.submit` (xAI nieosiągalne)."""
+    from caelo_core import chat_media_tools as cmt
+
+    names = {d["function"]["name"] for d in cmt.MEDIA_TOOL_DEFS}
+    checks.append(("chat-media: image+video tools defined",
+                   names == {"generate_image", "generate_video"}))
+    checks.append(("chat-media: FLAT Responses function format",
+                   all(d.get("type") == "function" and "parameters" in d["function"]
+                       for d in cmt.MEDIA_TOOL_DEFS)))
+
+    class _Api:
+        def __init__(self):
+            self.calls = []
+
+        def generate_image(self, prompt, n, ratio, resolution, model=None):
+            self.calls.append((prompt, n, ratio, resolution, model))
+            return [f"https://img/{i}.png" for i in range(n)]
+
+    class _Jobs:
+        def __init__(self):
+            self.submitted = []
+
+        def submit(self, *, kind, op, params, project_id=None):
+            self.submitted.append((kind, op, params, project_id))
+            return type("J", (), {"id": "deadbeefcafef00d"})()
+
+    class _Backend:
+        def __init__(self):
+            self.current_project_id = "p1"
+            self.api = _Api()
+            self.genjobs = _Jobs()
+            self.saved = []
+
+        def save_media_urls(self, urls, prompt, mode, ext, project_id=None, meta_extra=None):
+            self.saved.append((urls, prompt, mode, ext, project_id, meta_extra))
+            return [{"url": u, "path": None, "artifact_id": f"art-{i}"}
+                    for i, u in enumerate(urls)]
+
+    b = _Backend()
+    emitted: list = []
+    out = cmt.handle_media_tool(
+        b, "generate_image", {"prompt": "a red fox", "n": 2, "aspect_ratio": "16:9"},
+        emitted.append)
+    checks.append(("chat-media: image calls api.generate_image with args",
+                   len(b.api.calls) == 1 and b.api.calls[0][1] == 2 and b.api.calls[0][2] == "16:9"))
+    checks.append(("chat-media: image saved as M9 artifacts in project scope",
+                   bool(b.saved) and b.saved[0][4] == "p1"))
+    checks.append(("chat-media: image emits one artifact frame per image",
+                   len(emitted) == 2 and all(a["kind"] == "image" and a.get("id") for a in emitted)))
+    checks.append(("chat-media: image returns short text (no Error)",
+                   "image" in out.lower() and not out.startswith("Error")))
+
+    emitted.clear()
+    out_v = cmt.handle_media_tool(
+        b, "generate_video", {"prompt": "ocean waves", "duration": 5}, emitted.append)
+    checks.append(("chat-media: video enqueued in GenJobManager",
+                   len(b.genjobs.submitted) == 1 and b.genjobs.submitted[0][0] == "video"
+                   and b.genjobs.submitted[0][2]["duration"] == 5))
+    checks.append(("chat-media: video returns queued note, no artifact frame",
+                   "queued" in out_v.lower() and emitted == []))
+
+    err = cmt.handle_media_tool(b, "generate_image", {"prompt": "   "}, emitted.append)
+    checks.append(("chat-media: empty prompt -> Error string", err.startswith("Error")))
+
+    class _BadApi(_Api):
+        def generate_image(self, *a, **k):
+            raise RuntimeError("xAI 500")
+
+    b.api = _BadApi()
+    err2 = cmt.handle_media_tool(b, "generate_image", {"prompt": "x"}, emitted.append)
+    checks.append(("chat-media: generation failure caught -> Error string",
+                   err2.startswith("Error")))
+
+
 def _unit_chat_bridge(checks: list) -> None:
     """M10/P1-3: most czatu na **Responses API** — delty przyrostowe, done z full,
     tool_call + citations (live search), single-flight, fallback na legacy, gating

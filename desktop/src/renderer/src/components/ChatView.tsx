@@ -15,6 +15,7 @@ import {
   ExternalLink,
   FileText,
   Globe,
+  Maximize2,
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,6 +28,8 @@ import {
   X
 } from 'lucide-react'
 import {
+  getArtifactContentUrl,
+  type ChatArtifact,
   type ChatMessage,
   type Conn,
   type ReasoningEffort,
@@ -52,6 +55,7 @@ import { appendDictation, useDictation } from '../lib/useDictation'
 import { useTts } from '../lib/useTts'
 import { AttachButton, AttachmentChips } from './Attachments'
 import { KnowledgePopover } from './KnowledgePopover'
+import { ProjectSwitcher } from './ProjectSwitcher'
 import { titleFromText } from '../lib/storage'
 import { cn } from '../lib/cn'
 import { Markdown } from './Markdown'
@@ -86,6 +90,148 @@ function patchLastAssistant(messages: ChatMessage[], patch: Partial<ChatMessage>
   return out
 }
 
+/** M20: append a generated artifact to the last assistant message (dedup by id). */
+function appendArtifactToLastAssistant(
+  messages: ChatMessage[],
+  art: ChatArtifact
+): ChatMessage[] {
+  const out = messages.slice()
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (out[i].role === 'assistant') {
+      const cur = out[i].artifacts ?? []
+      if (!cur.some((a) => a.id === art.id)) out[i] = { ...out[i], artifacts: [...cur, art] }
+      break
+    }
+  }
+  return out
+}
+
+/** M20: render an image/video generated in chat. Fetches the artifact bytes (Bearer
+ *  token) as an object URL and revokes it on unmount. Images can be enlarged (lightbox)
+ *  and saved to disk; the artifact also lives in the Gallery. */
+function ChatArtifactView({ conn, artifact }: { conn: Conn; artifact: ChatArtifact }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [zoom, setZoom] = useState(false)
+
+  useEffect(() => {
+    let made: string | null = null
+    let cancelled = false
+    getArtifactContentUrl(conn, artifact.id)
+      .then((u) => {
+        if (cancelled) URL.revokeObjectURL(u)
+        else {
+          made = u
+          setUrl(u)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (made) URL.revokeObjectURL(made)
+    }
+  }, [conn, artifact.id])
+
+  // Esc closes the lightbox.
+  useEffect(() => {
+    if (!zoom) return
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') setZoom(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom])
+
+  const isVideo = artifact.kind === 'video'
+  const ext = artifact.mime?.split('/')[1] || (isVideo ? 'mp4' : 'png')
+  const filename = `caelo-${artifact.id}.${ext}`
+
+  function save(): void {
+    if (!url) return
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
+  if (!url) return <div className="h-44 w-44 animate-pulse rounded-lg bg-surface-2" />
+
+  const overlayBtn =
+    'flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white outline-none backdrop-blur transition-colors hover:bg-black/75 focus-visible:ring-2 focus-visible:ring-white'
+
+  return (
+    <>
+      <div className="group relative inline-block">
+        {isVideo ? (
+          <video
+            src={url}
+            controls
+            className="max-h-80 max-w-full rounded-lg border border-border"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setZoom(true)}
+            title="Click to enlarge"
+            className="block cursor-zoom-in overflow-hidden rounded-lg border border-border outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <img src={url} alt="Generated" className="max-h-80 max-w-full object-contain" />
+          </button>
+        )}
+        <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          {!isVideo ? (
+            <button type="button" onClick={() => setZoom(true)} title="Enlarge" className={overlayBtn}>
+              <Maximize2 size={14} />
+            </button>
+          ) : null}
+          <button type="button" onClick={save} title="Save to disk" className={overlayBtn}>
+            <Download size={14} />
+          </button>
+        </div>
+      </div>
+
+      {zoom && !isVideo ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Enlarged image"
+          onClick={() => setZoom(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+        >
+          <img
+            src={url}
+            alt="Generated (enlarged)"
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+          />
+          <div className="absolute right-4 top-4 flex gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                save()
+              }}
+              title="Save to disk"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-white outline-none backdrop-blur transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white"
+            >
+              <Download size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom(false)}
+              title="Close (Esc)"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-white outline-none backdrop-blur transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 /**
  * Pojedynczy wiersz czatu (P2-4). `memo` + stabilne propsy (`onCopy`/`onSpeak`
  * przez useCallback/useTts, `isSpeaking` jako bool zamiast całego ttsIdx) sprawiają,
@@ -98,6 +244,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
   index,
   isSpeaking,
   basedOnDocument,
+  conn,
   onCopy,
   onSpeak
 }: {
@@ -105,6 +252,7 @@ const ChatMessageRow = memo(function ChatMessageRow({
   index: number
   isSpeaking: boolean
   basedOnDocument: boolean
+  conn: Conn
   onCopy: (content: string) => void
   onSpeak: (idx: number, content: string) => void
 }) {
@@ -156,6 +304,13 @@ const ChatMessageRow = memo(function ChatMessageRow({
       ) : (
         <span className="text-2xl leading-none tracking-widest text-muted">…</span>
       )}
+      {m.artifacts?.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {m.artifacts.map((a) => (
+            <ChatArtifactView key={a.id} conn={conn} artifact={a} />
+          ))}
+        </div>
+      ) : null}
       {m.citations?.length ? (
         <div className="mt-3 border-t border-border/60 pt-2.5">
           <div className="mb-1.5 text-xs font-medium text-muted">Sources</div>
@@ -351,6 +506,12 @@ export function ChatView({ conn }: { conn: Conn }) {
           convo.patchActive((c) => ({
             ...c,
             messages: patchLastAssistant(c.messages, { usage })
+          })),
+        // M20: media generated mid-turn (generate_image) → show inline under the answer.
+        onArtifact: (art) =>
+          convo.patchActive((c) => ({
+            ...c,
+            messages: appendArtifactToLastAssistant(c.messages, art)
           })),
         onDone: (full) => {
           setSearchActivity(null)
@@ -616,6 +777,7 @@ export function ChatView({ conn }: { conn: Conn }) {
               disabled={messages.length === 0}
               onClick={exportChat}
             />
+            <ProjectSwitcher />
             <KnowledgePopover conn={conn} onAttach={att.add} />
             <Popover
               align="end"
@@ -776,6 +938,7 @@ export function ChatView({ conn }: { conn: Conn }) {
                     m.role === 'assistant' &&
                     !!messages[i - 1]?.attachments?.some((a) => a.kind === 'document')
                   }
+                  conn={conn}
                   onCopy={copyMessage}
                   onSpeak={tts.speak}
                 />

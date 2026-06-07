@@ -10,6 +10,7 @@ Protokół (JSON tekstowe ramki):
     {"type":"tool_call","tool":"web_search|x_search","status":"...","query":"..."}
     {"type":"citations","citations":[{"url","title"}, ...]}   # źródła live-searcha
     {"type":"usage","usage":{...},"tool_calls":<n>}           # koszt (BYO-key, B6)
+    {"type":"artifact","artifact":{"id","kind","mime"}}       # M20: medium utworzone w czacie
     {"type":"done","full":"<pełna odpowiedź>"}
     {"type":"error","error":"..."}
 
@@ -35,7 +36,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 import config  # type: ignore
 
-from caelo_core import responses_client
+from caelo_core import chat_media_tools, responses_client
 from caelo_core import validation as V
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
@@ -112,6 +113,13 @@ async def chat_stream(ws: WebSocket) -> None:
             # czytelnym komunikatem. Dane lokalne nie wychodzą poza sidecar.
             mcp_fn_tools = backend.mcp.tool_defs_for_responses()
             remote_tools = backend.mcp.remote_tool_blocks()
+            # M20: narzędzia generowania mediów (obraz/wideo) jako function-calling czatu —
+            # Grok robi to natywnie, ale Responses API nie ma serwerowego image-gen.
+            media_tools = list(chat_media_tools.MEDIA_TOOL_DEFS) if config.CHAT_MEDIA_TOOLS else []
+            fn_tools = (mcp_fn_tools or []) + media_tools
+            # Fallback na legacy dotyczy CZYSTEGO czatu (search/MCP/remote nie istnieją w
+            # legacy chat/completions). Narzędzia mediów są AMBIENTNE (zawsze dołączone) i
+            # NIE blokują fallbacku — plain Q&A może spaść na legacy mimo ich dostępności.
             has_tools = bool(tools or mcp_fn_tools or remote_tools)
 
             def mcp_tool_handler(name: str, args: dict) -> str:
@@ -137,6 +145,17 @@ async def chat_stream(ws: WebSocket) -> None:
                 if not stream.emit({"type": "tool_call", **ev}):
                     stop.set()
 
+            def emit_artifact(art: dict) -> None:
+                # M20: artefakt wygenerowany w czacie (obraz) → renderer pokaże go inline.
+                if not stream.emit({"type": "artifact", "artifact": art}):
+                    stop.set()
+
+            def tool_handler(name: str, args: dict) -> str:
+                # M20: narzędzia mediów obsługujemy lokalnie; pozostałe → MCP.
+                if name in chat_media_tools.MEDIA_TOOL_NAMES:
+                    return chat_media_tools.handle_media_tool(backend, name, args, emit_artifact)
+                return mcp_tool_handler(name, args)
+
             def worker() -> None:
                 try:
                     try:
@@ -150,8 +169,8 @@ async def chat_stream(ws: WebSocket) -> None:
                             tool_choice="required" if search_mode == "on" else None,
                             on_delta=on_delta, on_tool=on_tool, stop_flag=stop.is_set,
                             # M14-B2/B3: narzędzia MCP lokalne (function) + remote (xAI).
-                            function_tools=mcp_fn_tools or None,
-                            tool_handler=mcp_tool_handler if mcp_fn_tools else None,
+                            function_tools=fn_tools or None,
+                            tool_handler=tool_handler if fn_tools else None,
                             remote_tools=remote_tools or None,
                         )
                         full = result["text"]

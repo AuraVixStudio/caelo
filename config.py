@@ -198,6 +198,12 @@ WEB_FETCH_ALLOW_DOMAINS = [d.strip().lower() for d in
 WEB_FETCH_MAX_BYTES = 512 * 1024   # cap pobranej treści (bajty przed dekodowaniem)
 WEB_FETCH_TIMEOUT_S = 20           # timeout pojedynczego pobrania (sekundy)
 
+# M20: narzędzia generowania mediów w czacie (image/video) jako function-calling.
+# Grok robi to natywnie, ale Responses API NIE ma serwerowego image-gen → własne
+# narzędzia (reuse backend_media/genjobs). Domyślnie **ON** (model woła je tylko na
+# żądanie usera; koszt = BYO-key). Wyłącz przez `CAELO_CHAT_MEDIA=0`.
+CHAT_MEDIA_TOOLS = os.environ.get("CAELO_CHAT_MEDIA", "1").strip().lower() in ("1", "true", "yes", "on")
+
 
 def atomic_write_text(path, text: str) -> None:
     """Zapis atomowy tekstu/JSON-a (P1-7): temp w tym samym katalogu + os.replace.

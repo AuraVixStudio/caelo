@@ -42,6 +42,7 @@ from caelo_core.tools.smoke_chat import (  # noqa: F401,E402
     _unit_responses_client,
     _unit_responses_mcp_loop,
     _unit_chat_bridge,
+    _unit_chat_media,
     _unit_sse_utf8,
     _unit_api_timeouts,
 )
@@ -242,6 +243,9 @@ def main() -> int:
         # P1-3/M10: chat streaming bridge on Responses — deltas, tool_call, citations,
         # legacy fallback, vision gating, file_search attach, single-flight.
         _unit_chat_bridge(checks)
+
+        # M20: chat media-generation tools (function-calling: image inline + video queued).
+        _unit_chat_media(checks)
 
         # M12-B3/B5: voice conversation pipeline — transcript -> Responses -> TTS -> audio,
         # barge-in skips TTS, cost counters.

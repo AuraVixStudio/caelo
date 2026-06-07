@@ -36,6 +36,7 @@ export function useChatStream(conn: Conn): {
       onTool: handlers.onTool,
       onCitations: handlers.onCitations,
       onUsage: handlers.onUsage,
+      onArtifact: handlers.onArtifact, // M20: media generated mid-turn (render inline)
       onDone: (full) => {
         handlers.onDone(full)
         setStreaming(false)
