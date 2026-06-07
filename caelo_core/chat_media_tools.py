@@ -17,10 +17,47 @@ model woła je tylko na żądanie. Włączane przez `config.CHAT_MEDIA_TOOLS` (d
 
 from __future__ import annotations
 
+import base64
 import logging
-from typing import Callable
+import os
+import time
+from typing import Callable, Optional
+
+import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
 
 log = logging.getLogger(__name__)
+
+# Maks. rozmiar obrazu uzywanego jako klatka poczatkowa image-to-video (jak vision).
+_MAX_FRAME_BYTES = 12 * 1024 * 1024
+# Okno "swiezosci": tylko obraz wygenerowany/dodany w ostatnich N sekund liczy sie
+# jako "ten obraz" do animacji (unika animowania starego artefaktu z innej rozmowy).
+_RECENT_IMAGE_WINDOW_S = 600
+
+
+def _latest_project_image_data_uri(backend, project_id) -> Optional[str]:
+    """Najswiezszy (ostatnie 10 min) obraz danego projektu jako data-URI, albo None.
+    grok-imagine-video-1.5 to model IMAGE-TO-VIDEO, wiec "animuj to" wymaga klatki
+    poczatkowej — bierzemy ostatnio wygenerowany obraz w tej rozmowie. Bledy -> None
+    (fallback na text2video)."""
+    try:
+        store = getattr(backend, "history_store", None)
+        if store is None:
+            return None
+        arts = store.list_artifacts(mode="image", project_id=project_id,
+                                    since=time.time() - _RECENT_IMAGE_WINDOW_S, limit=1)
+        if not arts:
+            return None
+        a = arts[0]
+        path = getattr(a, "path", "") or ""
+        if not path or not os.path.exists(path) or os.path.getsize(path) > _MAX_FRAME_BYTES:
+            return None
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        mime = getattr(a, "mime", "") or "image/png"
+        return f"data:{mime};base64,{b64}"
+    except Exception:  # noqa: BLE001
+        log.warning("could not load latest project image for image-to-video", exc_info=True)
+        return None
 
 MEDIA_TOOL_DEFS: list[dict] = [
     {
@@ -51,9 +88,11 @@ MEDIA_TOOL_DEFS: list[dict] = [
         "function": {
             "name": "generate_video",
             "description": (
-                "Generate a short video from a text prompt. Rendering takes a while, so the job "
-                "is queued — tell the user to watch the Video or Gallery tab for the result. Use "
-                "when the user asks to create or animate a video."
+                "Generate a short video. Rendering takes a while, so the job is queued — tell the "
+                "user to watch the Video or Gallery tab for the result. Use when the user asks to "
+                "create or animate a video. If the user just generated or attached an image and "
+                "wants to animate it, the most recent image is used as the first frame "
+                "(image-to-video)."
             ),
             "parameters": {
                 "type": "object",
@@ -103,13 +142,22 @@ def handle_media_tool(backend, name: str, args: dict,
         if name == "generate_video":
             duration = max(1, min(12, int(args.get("duration", 6) or 6)))
             ratio = str(args.get("aspect_ratio") or "Original")
-            job = backend.genjobs.submit(
-                kind="video", op="text2video",
-                params={"prompt": prompt, "duration": duration,
-                        "resolution": "480p", "aspect_ratio": ratio},
-                project_id=project_id)
-            return (f"Queued a video render (job {job.id[:8]}). Rendering takes a while; tell the "
-                    "user to watch the Video or Gallery tab for the finished clip.")
+            params = {"prompt": prompt, "duration": duration,
+                      "resolution": "480p", "aspect_ratio": ratio,
+                      # Czat uzywa BAZOWEGO modelu (wiecej mozliwosci niz 1.5-preview).
+                      "model": getattr(config, "CHAT_VIDEO_MODEL", "grok-imagine-video")}
+            # grok-imagine-video-1.5 to model IMAGE-TO-VIDEO: jesli user wlasnie
+            # wygenerowal/dodal obraz, uzyj go jako klatki poczatkowej (flow "animuj to");
+            # inaczej text2video (moze byc nieobslugiwane -> czytelny blad z API).
+            frame = _latest_project_image_data_uri(backend, project_id)
+            op = "img2video" if frame else "text2video"
+            if frame:
+                params["image"] = frame
+            job = backend.genjobs.submit(kind="video", op=op, params=params,
+                                         project_id=project_id)
+            extra = " using your most recent image as the first frame" if frame else ""
+            return (f"Queued a video render (job {job.id[:8]}){extra}. Rendering takes a while; "
+                    "tell the user to watch the Video or Gallery tab for the finished clip.")
     except Exception as exc:  # noqa: BLE001
         log.warning("chat media tool %s failed", name, exc_info=True)
         return f"Error: media generation failed: {exc}"

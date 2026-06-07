@@ -317,8 +317,51 @@ def _unit_chat_media(checks: list) -> None:
     checks.append(("chat-media: video enqueued in GenJobManager",
                    len(b.genjobs.submitted) == 1 and b.genjobs.submitted[0][0] == "video"
                    and b.genjobs.submitted[0][2]["duration"] == 5))
+    # Czat uzywa BAZOWEGO modelu wideo (nie 1.5-preview, ktory ma mniej mozliwosci).
+    checks.append(("chat-media: video uses base (non-preview) model",
+                   bool(b.genjobs.submitted[0][2].get("model"))
+                   and "preview" not in str(b.genjobs.submitted[0][2].get("model"))))
     checks.append(("chat-media: video returns queued note, no artifact frame",
                    "queued" in out_v.lower() and emitted == []))
+
+    # M-fix: image-to-video w czacie — swiezy obraz projektu -> klatka poczatkowa (img2video).
+    import os as _os
+    import tempfile as _tf
+    import time as _t
+
+    class _Art:
+        def __init__(self, path, mime, created_at):
+            self.path, self.mime, self.created_at = path, mime, created_at
+
+    class _Store:
+        def __init__(self, art):
+            self._art = art
+
+        def list_artifacts(self, *, mode=None, project_id=None, since=None,
+                           until=None, limit=50, offset=0):
+            if mode == "image" and (since is None or self._art.created_at >= since):
+                return [self._art]
+            return []
+
+    with _tf.TemporaryDirectory() as _d:
+        _imgp = _os.path.join(_d, "frame.png")
+        with open(_imgp, "wb") as _f:
+            _f.write(b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+        b.history_store = _Store(_Art(_imgp, "image/png", _t.time()))
+        b.genjobs.submitted.clear()
+        cmt.handle_media_tool(b, "generate_video",
+                              {"prompt": "make it move", "duration": 4}, emitted.append)
+        _sub = b.genjobs.submitted[0] if b.genjobs.submitted else (None, None, {}, None)
+        checks.append(("chat-media: recent image -> img2video with first frame",
+                       _sub[1] == "img2video"
+                       and str(_sub[2].get("image", "")).startswith("data:image/")))
+        # Brak swiezego obrazu (okno czasowe) -> text2video (fallback).
+        b.history_store = _Store(_Art(_imgp, "image/png", 0.0))  # stary -> odfiltrowany przez `since`
+        b.genjobs.submitted.clear()
+        cmt.handle_media_tool(b, "generate_video", {"prompt": "ocean"}, emitted.append)
+        _sub2 = b.genjobs.submitted[0] if b.genjobs.submitted else (None, None, {}, None)
+        checks.append(("chat-media: stale image -> text2video fallback",
+                       _sub2[1] == "text2video" and "image" not in _sub2[2]))
 
     err = cmt.handle_media_tool(b, "generate_image", {"prompt": "   "}, emitted.append)
     checks.append(("chat-media: empty prompt -> Error string", err.startswith("Error")))

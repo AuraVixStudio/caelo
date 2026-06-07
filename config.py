@@ -1,7 +1,9 @@
+import itertools
 import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 _log = logging.getLogger("caelo.config")
@@ -205,22 +207,38 @@ WEB_FETCH_TIMEOUT_S = 20           # timeout pojedynczego pobrania (sekundy)
 CHAT_MEDIA_TOOLS = os.environ.get("CAELO_CHAT_MEDIA", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
+_atomic_tmp_seq = itertools.count()
+
+
 def atomic_write_text(path, text: str) -> None:
     """Zapis atomowy tekstu/JSON-a (P1-7): temp w tym samym katalogu + os.replace.
     Czytelnik zawsze widzi albo stary, albo nowy KOMPLETNY plik — brak korupcji
-    przy przerwanym zapisie (pliki współdzielone: nowa apka + legacy)."""
+    przy przerwanym zapisie (pliki współdzielone: nowa apka + legacy).
+
+    Nazwa temp jest UNIKALNA (pid + licznik) — stały `<name>.tmp` kolidował przy
+    równoległych zapisach tego samego pliku (Windows: `PermissionError` na .tmp
+    zablokowanym przez drugi wątek/proces; obserwowane na caelo_settings.json.tmp)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-    except Exception:
+    # Retry z backoffem: na Windows `os.replace` do wspolnego celu (albo zapis .tmp)
+    # potrafi dac przejsciowy `PermissionError`/sharing violation, gdy inny watek/
+    # proces chwilowo trzyma plik (obserwowane na caelo_settings.json). Przejsciowe
+    # -> ponow; trwale (np. brak uprawnien do katalogu) -> rzuc po wyczerpaniu prob.
+    last_exc: Exception | None = None
+    for attempt in range(6):
+        tmp = path.parent / f"{path.name}.tmp.{os.getpid()}.{next(_atomic_tmp_seq)}"
         try:
-            tmp.unlink()
-        except Exception:
-            pass
-        raise
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last_exc = exc
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            time.sleep(0.04 * (attempt + 1))
+    raise last_exc if last_exc else OSError(f"atomic_write_text failed: {path}")
 
 
 def load_json_or_backup(path, default=None):
@@ -294,6 +312,12 @@ VIDEO_MODELS = [
     "grok-imagine-video",
 ]
 DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5-preview"
+# Model wideo dla CZATU (narzedzie generate_video). Celowo BAZOWY, nie preview:
+# 1.5-preview ma mniej mozliwosci (np. brak edit/extend) niz bazowy grok-imagine-video.
+# Panel Video nadal pozwala wybrac dowolny model (domyslnie 1.5-preview).
+# Override: env CAELO_CHAT_VIDEO_MODEL.
+CHAT_VIDEO_MODEL = (os.environ.get("CAELO_CHAT_VIDEO_MODEL", "").strip()
+                    or "grok-imagine-video")
 
 # --- Voice (TTS / STT / realtime) ---
 # Pięć wbudowanych głosów Grok TTS/Voice; zakładka Voice + przyciski w czacie.

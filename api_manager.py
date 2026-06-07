@@ -100,6 +100,10 @@ class APIManager:
             payload["image"] = {"url": f"data:image/jpeg;base64,{b64}"}
 
         r = requests.post(f"{API_BASE}/videos/generations", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_VIDEO_JOB)
+        # Pokaz tresc bledu 4xx (jak edit_image) — generyczne "400 Bad Request" nie
+        # mowilo, CO odrzucil xAI (np. brak wymaganego obrazu dla image-to-video).
+        if r.status_code in (400, 422):
+            raise Exception(f"API Error: {r.text[:500]}")
         r.raise_for_status()
         return r.json()["request_id"]
 
@@ -114,6 +118,8 @@ class APIManager:
             "video": {"url": video},
         }
         r = requests.post(f"{API_BASE}/videos/edits", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_VIDEO_JOB)
+        if r.status_code in (400, 422):
+            raise Exception(f"API Error: {r.text[:500]}")
         r.raise_for_status()
         return r.json()["request_id"]
 
@@ -129,6 +135,8 @@ class APIManager:
         if duration:
             payload["duration"] = duration
         r = requests.post(f"{API_BASE}/videos/extensions", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_VIDEO_JOB)
+        if r.status_code in (400, 422):
+            raise Exception(f"API Error: {r.text[:500]}")
         r.raise_for_status()
         return r.json()["request_id"]
 
