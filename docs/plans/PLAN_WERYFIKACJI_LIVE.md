@@ -23,7 +23,7 @@
 | Sekcja | Zakres | Prio | Status | Data | Notatka |
 |---|---|---|---|---|---|
 | A | Auth + kształt drutu | P0 | 🟡 | 2026-06-07 | OAuth login ✅, tryb API key ✅; twardy przełącznik + usuwanie/maska klucza; **B2/B3 (web/x search) działają → tool-use OK na aktywnym źródle**; A3 do formalnego domknięcia (wymuś OAuth i powtórz web_search) |
-| B | Czat (Responses API) | P1 | 🟡 | 2026-06-07 | B1–B6 ✅ (UTF-8, web/x search, wizja, PDF Q&A, wiedza projektu); zostaje B7–B10 (tryby search/koszt, effort, media-gen, eksport MD) |
+| B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ⬜ | | |
 | D | Głos | P2 | ⬜ | | |
 | E | Agent kodowania | P1 | ⬜ | | |
@@ -112,10 +112,12 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > Rdzeń `/v1/responses` (streaming). Stare `search_parameters` zwraca **410 Gone** (sty 2026) —
 > upewnij się, że idzie ścieżka Responses, nie legacy. Vector stores `/v1/vector_stores` → **404**.
 
-> **Postęp 2026-06-07 (testy na żywo u usera): B1–B6 ✅ POTWIERDZONE.** UTF-8, live web_search
-> (cytowania + Sources x.ai/imagine.art/the-decoder/klingaio, „4 searches · 20k tokens"), live
+> **Postęp 2026-06-07 (testy na żywo u usera): B1–B10 ✅ POTWIERDZONE — CAŁA CZĘŚĆ B.** UTF-8, live
+> web_search (cytowania + Sources x.ai/imagine.art/the-decoder/klingaio, „4 searches · 20k tokens"), live
 > x_search (źródła x.com, trendy PL), wizja (opis obrazu cyberpunk), Q&A nad PDF (instrukcja-logowania),
-> wiedza projektu (CAELO.md, „Based on document"). **WAŻNE dla A3:** web_search + x_search to
+> wiedza projektu (CAELO.md, „Based on document"); B7 koszt rośnie z web-search, B8 wyższy effort =
+> dokładniejsza odpowiedź, B9 media (obraz inline + img2video „animuj psa"), B10 eksport `.md`.
+> **WAŻNE dla A3:** web_search + x_search to
 > SERWEROWE narzędzia xAI — skoro działają, **tool-use działa na aktywnym źródle auth**. Jeśli podczas
 > tych testów aktywny był OAuth (footer „Connected", nie „Not signed in") → **A3 w praktyce zaliczone**;
 > by domknąć formalnie: ustaw „Model source" = `xAI account` i powtórz web_search (sekcja A3).
@@ -141,18 +143,18 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [x] **B6 — Wiedza projektu (lokalna).**  ✅ 2026-06-07. CAELO.md dołączony, „Based on document".
   - *Oczekiwane:* dokument dołączony jako `input_file`, odpowiedź z jego treści. (xAI nie ma vector stores → to lokalne.)
 
-- [ ] **B7 — Tryby wyszukiwania auto/on/off + koszt.** Przełącz Auto/On/Off; obserwuj licznik kosztu.
-  - *Oczekiwane:* „off" = brak narzędzi; „on" = wymusza search; badge sumuje koszt. *Do potwierdzenia:* czy `tool_choice="required"` dla „on" jest akceptowane przez API.
+- [x] **B7 — Tryby wyszukiwania auto/on/off + koszt.**  ✅ 2026-06-07. Koszt wyraźnie wyższy z web-search (tokeny + opłata za narzędzie).
+  - *Oczekiwane:* „off" = brak narzędzi; „on" = wymusza search; badge sumuje koszt. *Potwierdzone:* `tool_choice="required"` dla „on" akceptowane przez API.
 
-- [ ] **B8 — Reasoning effort (M19-B9).** W czacie ustaw `EffortSelect` low/medium/high (model rozumujący).
+- [x] **B8 — Reasoning effort (M19-B9).**  ✅ 2026-06-07. Wyższy effort → dokładniejsza odpowiedź; brak błędu 400.
   - *Oczekiwane:* `reasoning.effort` trafia do API (dłuższe/krótsze rozumowanie), brak błędu 400 za nieznane pole.
 
-- [ ] **B9 — Generowanie mediów w czacie (M20).** „Narysuj kota" w czacie.
+- [x] **B9 — Generowanie mediów w czacie (M20).**  ✅ 2026-06-07. Obraz inline + img2video („animuj psa", DONE); czat używa modelu bazowego `grok-imagine-video`.
   - *Oczekiwane:* `generate_image` woła się, obraz renderuje **inline** (ramka `artifact`), trafia do Galerii.
     „Zrób wideo z…" → `generate_video` zakolejkowane, info „śledź w zakładce Video". (Edycja obrazu — już potwierdzona LIVE.)
   - *Pułapki:* narzędzia mediów są AMBIENTNE (nie liczą się do `has_tools`); wyłącznik `CAELO_CHAT_MEDIA=0`.
 
-- [ ] **B10 — Eksport do Markdown (M19-B10).** Przycisk Export w czacie/History.
+- [x] **B10 — Eksport do Markdown (M19-B10).**  ✅ 2026-06-07. Pliki eksportują się poprawnie do `.md`.
   - *Oczekiwane:* poprawny `.md` z przebiegiem rozmowy (treść + cytowania).
 
 ---
