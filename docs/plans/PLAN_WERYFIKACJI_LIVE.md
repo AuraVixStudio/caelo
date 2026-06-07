@@ -24,7 +24,7 @@
 |---|---|---|---|---|---|
 | A | Auth + kształt drutu | P0 | ✅ | 2026-06-07 | **A1–A3 wszystkie ✅.** OAuth login + tryb API key + twardy przełącznik/usuwanie/maska klucza; **A3: web_search działa na OAuth → tool-use (MCP/agent) bez klucza API** |
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
-| C | Twórczość (Image/Video) | P1/P2 | ⬜ | | |
+| C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
 | E | Agent kodowania | P1 | ⬜ | | |
 | F | Subagenci / zespoły | P2 | ⬜ | | |
@@ -160,23 +160,27 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 > Jedna async kolejka `GenJob` (queued→running→done/failed/cancelled). Wideo poll **server-side**.
 
-- [ ] **C1 — Obraz text2img.** Image → prompt → Generate (`grok-imagine-image`).
+> **Postęp 2026-06-07 (testy na żywo u usera): C1–C7 ✅ POTWIERDZONE — CAŁA CZĘŚĆ C.** Generacja
+> i edycja obrazu, warianty, wideo text2video/img2video, edit/extend, galeria + zarządzanie kolejką
+> (cancel/retry/delete) i koszt — wszystko działa poprawnie.
+
+- [x] **C1 — Obraz text2img.**  ✅ 2026-06-07. Wynik w galerii + koszt.
   - *Oczekiwane:* zadanie w kolejce → wynik w galerii, koszt na badge.
 
-- [ ] **C2 — Edycja obrazu (referencje ≤3).** Dodaj 1–3 obrazy referencyjne → edytuj.
+- [x] **C2 — Edycja obrazu (referencje ≤3).**  ✅ 2026-06-07.
   - *Oczekiwane:* poprawny wynik; walidacja odrzuca >3 referencje.
 
-- [ ] **C3 — Warianty.** „Make variations" z istniejącego artefaktu.
+- [x] **C3 — Warianty.**  ✅ 2026-06-07.
   - *Oczekiwane:* nowe warianty (data-URI z B4-pipeline).
 
-- [ ] **C4 — Wideo text2video.** Video → prompt → Generate (`grok-imagine-video-1.5-preview`).
+- [x] **C4 — Wideo text2video.**  ✅ 2026-06-07. Kolejka + poll server-side → galeria.
   - *Oczekiwane:* zadanie zakolejkowane, **poll server-side** (FastAPI nie blokuje), wynik w galerii.
   - *Pułapki:* render trwa minuty — to oczekiwane; sprawdź że UI nie zawiesza się i poll działa po przeładowaniu.
 
-- [ ] **C5 — Wideo img2video.** Obraz jako pierwsza klatka → animuj.
-- [ ] **C6 — Wideo edit / extend.** Z artefaktu-wideo „Send to → Edit/Extend".
+- [x] **C5 — Wideo img2video.**  ✅ 2026-06-07. Obraz jako pierwsza klatka → animacja (m.in. pies z czatu).
+- [x] **C6 — Wideo edit / extend.**  ✅ 2026-06-07. Op `edit`/`extend` przez kolejkę.
   - *Oczekiwane:* op `edit`/`extend` przez kolejkę (`edit_video_job`/`extend_video_job`).
-- [ ] **C7 — Zarządzanie kolejką/galerią.** Cancel zadania w trakcie · Retry po failu · Delete artefaktu (rekord+plik) · fullscreen wideo · miniatury (1. klatka, `object-contain`).
+- [x] **C7 — Zarządzanie kolejką/galerią.**  ✅ 2026-06-07. Cancel/Retry/Delete + fullscreen + miniatury + koszt.
   - *Oczekiwane:* wszystkie działają; `total_cost` się sumuje.
 
 ---
