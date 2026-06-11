@@ -53,6 +53,28 @@ class Backend(MediaMixin, CollectionsMixin):
     # Trzymany ODDZIELNIE — otwarcie folderu w Code NIE zmienia aktywnego projektu czatu.
     _code_project_id: Optional[str] = None
 
+    # S31-c: jeden lock leniwej inicjalizacji managerów (jak double-checked lock w
+    # history_store.get_store). KLASOWY — istnieje też dla instancji budowanych przez
+    # __new__ w testach, a stan i tak jest per-instancja (`self._genjobs` itd.). Bez tego
+    # dwa równoległe requesty FastAPI (pula wątków) budowały DWA managery, a `_reap_stale`
+    # drugiego oznaczał aktywne zadania pierwszego jako failed("interrupted").
+    _lazy_lock = threading.RLock()
+    # ROAD-4.1-a/S31-m: RMW-lock na zapis caelo_settings.json (read-modify-write).
+    _settings_lock = threading.RLock()
+
+    def _lazy(self, attr: str, factory):
+        """Double-checked lazy-init dla prostych (nie-workspace) managerów: zwróć istniejący
+        albo zbuduj POD lockiem (re-check), tak by współbieżne requesty dostały JEDEN obiekt."""
+        cur = getattr(self, attr, None)
+        if cur is not None:
+            return cur
+        with self._lazy_lock:
+            cur = getattr(self, attr, None)
+            if cur is None:
+                cur = factory()
+                setattr(self, attr, cur)
+            return cur
+
     def __init__(self) -> None:
         from caelo_core.agent.permissions import PermissionGate
 
@@ -182,9 +204,7 @@ class Backend(MediaMixin, CollectionsMixin):
         """Leniwy `RoleRegistry`: role subagentów + limity zespołu (`caelo_subagents.json`)."""
         from caelo_core.agent.roles import RoleRegistry
 
-        if getattr(self, "_subagents", None) is None:
-            self._subagents = RoleRegistry(config.SUBAGENTS_FILE)
-        return self._subagents
+        return self._lazy("_subagents", lambda: RoleRegistry(config.SUBAGENTS_FILE))
 
     def get_team_merges(self):
         """Magazyn oczekujących scaleń worktree dla AKTYWNEGO workspace (leniwy,
@@ -240,12 +260,16 @@ class Backend(MediaMixin, CollectionsMixin):
             raise
 
     def update_settings(self, patch: dict) -> dict:
-        s = self.read_settings()
-        for key, value in patch.items():
-            if value is not None:
-                s[key] = value
-        self.write_settings(s)
-        return s
+        # RMW POD lockiem: bez tego dwa równoległe zapisy (np. model + voice z różnych
+        # paneli) mogły się nadpisać (last-writer-wins gubił pole). atomic_write_text
+        # czyni sam zapis atomowym, ale NIE serializuje sekwencji read→modify→write.
+        with self._settings_lock:
+            s = self.read_settings()
+            for key, value in patch.items():
+                if value is not None:
+                    s[key] = value
+            self.write_settings(s)
+            return s
 
     # --- klucze / uwierzytelnianie (jak app.get_api_key/is_authenticated) ---
     # Preferencja zrodla ("przelacznik trybow"): 'auto' = dotychczasowa precedencja
@@ -319,7 +343,11 @@ class Backend(MediaMixin, CollectionsMixin):
             self.write_settings(s)
 
     def is_authenticated(self) -> bool:
-        return bool(self.oauth.is_authenticated() or self.has_api_key())
+        # S31-h: pochodna TWARDEGO przełącznika auth_source — `active_auth_source()`
+        # już koduje regułę (np. forced 'api_key' bez klucza → 'none', mimo żywego OAuth).
+        # Bez tego /auth/status.authenticated kłamał (true), a każde wywołanie API i tak
+        # padało; footer renderera kluczuje właśnie na tym polu.
+        return self.active_auth_source() != "none"
 
     # --- modele czatu (jak app._refresh_models) ---
     def list_chat_models(self) -> List[str]:
@@ -348,15 +376,13 @@ class Backend(MediaMixin, CollectionsMixin):
         from caelo_core import embeddings
         from caelo_core.memory import MemoryIndex
 
-        if getattr(self, "_memory", None) is None:
-            self._memory = MemoryIndex(
-                self.history_store,
-                lambda texts: embeddings.embed_texts(texts, api_key_provider=self.get_api_key),
-                enabled=bool(getattr(config, "MEMORY_ENABLED", False)),
-                max_results=int(getattr(config, "MEMORY_MAX_RESULTS", 5)),
-                min_score=float(getattr(config, "MEMORY_MIN_SCORE", 0.55)),
-            )
-        return self._memory
+        return self._lazy("_memory", lambda: MemoryIndex(
+            self.history_store,
+            lambda texts: embeddings.embed_texts(texts, api_key_provider=self.get_api_key),
+            enabled=bool(getattr(config, "MEMORY_ENABLED", False)),
+            max_results=int(getattr(config, "MEMORY_MAX_RESULTS", 5)),
+            min_score=float(getattr(config, "MEMORY_MIN_SCORE", 0.55)),
+        ))
 
     def _maybe_index_memory(self, ev) -> None:
         """M19-B8: zaindeksuj zdarzenie w pamięci semantycznej (opt-in). Embedding = sieć,
@@ -381,9 +407,8 @@ class Backend(MediaMixin, CollectionsMixin):
         Egzekutor reużywa `api`/`save_media_urls` (zero drugiego magazynu media)."""
         from caelo_core.genjobs import GenJobManager
 
-        if getattr(self, "_genjobs", None) is None:
-            self._genjobs = GenJobManager(self._gen_executor, store=self.history_store)
-        return self._genjobs
+        return self._lazy("_genjobs",
+                          lambda: GenJobManager(self._gen_executor, store=self.history_store))
 
     # --- M14-B1: menedżer serwerów MCP (rozszerzalność) ----------------------
     @property
@@ -400,7 +425,14 @@ class Backend(MediaMixin, CollectionsMixin):
         ws = getattr(self, "_workspace", None)
         root = ws.root if ws is not None else None
         cur = getattr(self, "_mcp", None)
-        if cur is None or cur.workspace_root != root:
+        if cur is not None and cur.workspace_root == root:
+            return cur
+        # S31-c: rebuild+assign POD lockiem (re-check) — bez tego dwa równoległe requesty
+        # tworzyły dwa McpManagery i osieracały podproces pierwszego.
+        with self._lazy_lock:
+            cur = getattr(self, "_mcp", None)
+            if cur is not None and cur.workspace_root == root:
+                return cur
             if cur is not None:
                 try:
                     cur.shutdown()
@@ -409,7 +441,7 @@ class Backend(MediaMixin, CollectionsMixin):
                 self._packages = None  # zależy od mcp_manager — odbuduj ze świeżym
             claude_json = getattr(config, "CLAUDE_JSON", None)
             self._mcp = McpManager(config.MCP_FILE, workspace_root=root, claude_json=claude_json)
-        return self._mcp
+            return self._mcp
 
     def reload_mcp(self) -> None:
         """Wymuś przebudowę `McpManager` (po zmianie configu/workspace). Tree-kill bieżących
@@ -452,14 +484,19 @@ class Backend(MediaMixin, CollectionsMixin):
         if root is None:
             return None
         cur = getattr(self, "_lsp", None)
-        if cur is None or cur.root != root:
+        if cur is not None and cur.root == root:
+            return cur
+        with self._lazy_lock:  # S31-c: rebuild+assign atomowo (analogicznie do mcp)
+            cur = getattr(self, "_lsp", None)
+            if cur is not None and cur.root == root:
+                return cur
             if cur is not None:
                 try:
                     cur.shutdown()
                 except Exception:  # noqa: BLE001
                     pass
             self._lsp = LspManager(self._discover_lsp_configs(root), workspace_root=root)
-        return self._lsp
+            return self._lsp
 
     def reload_lsp(self) -> None:
         """Wymuś przebudowę menedżera LSP (po zmianie configu z REST). Tree-kill bieżącego."""
@@ -478,9 +515,7 @@ class Backend(MediaMixin, CollectionsMixin):
         Współdzielony przez agenta (session) i REST (/hooks)."""
         from caelo_core.hooks import HookManager
 
-        if getattr(self, "_hooks", None) is None:
-            self._hooks = HookManager(config.HOOKS_FILE, config.AUDIT_LOG_FILE)
-        return self._hooks
+        return self._lazy("_hooks", lambda: HookManager(config.HOOKS_FILE, config.AUDIT_LOG_FILE))
 
     # --- M14-B4: rejestr komend slash --------------------------------------------
     @property
@@ -488,9 +523,7 @@ class Backend(MediaMixin, CollectionsMixin):
         """Leniwy `CommandRegistry`: wbudowane + użytkownika (`caelo_commands.json`)."""
         from caelo_core.commands import CommandRegistry
 
-        if getattr(self, "_commands", None) is None:
-            self._commands = CommandRegistry(config.COMMANDS_FILE)
-        return self._commands
+        return self._lazy("_commands", lambda: CommandRegistry(config.COMMANDS_FILE))
 
     # --- M14-B6: biblioteka skilli -----------------------------------------------
     @property
@@ -506,11 +539,16 @@ class Backend(MediaMixin, CollectionsMixin):
         ws = getattr(self, "_workspace", None)
         root = ws.root if ws is not None else None
         cur = getattr(self, "_skills", None)
-        if cur is None or cur.workspace_root != root:
+        if cur is not None and cur.workspace_root == root:
+            return cur
+        with self._lazy_lock:  # S31-c: rebuild+assign atomowo
+            cur = getattr(self, "_skills", None)
+            if cur is not None and cur.workspace_root == root:
+                return cur
             claude_home = getattr(config, "CLAUDE_HOME", None)
             self._skills = SkillManager(config.SKILLS_DIR, workspace_root=root,
                                         claude_home=claude_home)
-        return self._skills
+            return self._skills
 
     # --- M16: pakiety społeczności / marketplace ---------------------------------
     @property
@@ -520,11 +558,9 @@ class Backend(MediaMixin, CollectionsMixin):
         by instalacja trafiała do tych samych rejestrów co M14 (jeden reżim zgody)."""
         from caelo_core.packages import PackageManager
 
-        if getattr(self, "_packages", None) is None:
-            self._packages = PackageManager(
-                config.PACKAGES_FILE, config.SKILLS_DIR, config.TEMPLATES_DIR,
-                command_registry=self.commands, mcp_manager=self.mcp)
-        return self._packages
+        return self._lazy("_packages", lambda: PackageManager(
+            config.PACKAGES_FILE, config.SKILLS_DIR, config.TEMPLATES_DIR,
+            command_registry=self.commands, mcp_manager=self.mcp))
 
     def shutdown(self) -> None:
         """Sprzątanie na zamknięciu sidecara: ubij podprocesy serwerów MCP (tree-kill)."""
@@ -615,9 +651,34 @@ class Backend(MediaMixin, CollectionsMixin):
         """M22: usuń projekt + jego historię/artefakty/kolekcje (store) oraz lokalny
         katalog dokumentów wiedzy. Czyści aktywny projekt czatu / workspace, jeśli go
         dotyczył. Zwraca skasowany Project (None gdy nie istniał)."""
+        # S31-k: snapshot ścieżek plików artefaktów PRZED kasowaniem rekordów — store
+        # usuwa tylko WIERSZE, więc bez tego wygenerowane media zostają na dysku jako sieroty
+        # (niespójnie z DELETE /artifacts/{id}).
+        try:
+            arts = self.history_store.list_artifacts(project_id=project_id, limit=100000)
+            art_paths = [a.path for a in arts if getattr(a, "path", None)]
+        except Exception:
+            art_paths = []
+            log.warning("Could not list project artifacts before delete", exc_info=True)
         proj = self.history_store.delete_project(project_id)
         if proj is None:
             return None
+        # Skasuj pliki mediów tym samym, sandboxowanym mechanizmem co delete_artifact
+        # (anty-traversal: tylko w dozwolonych bazach mediów).
+        if art_paths:
+            from caelo_core.media_paths import media_bases, within
+            try:
+                save = self.history.get_save_path()
+            except Exception:
+                save = None
+            bases = media_bases(save)
+            for p in art_paths:
+                try:
+                    target = Path(p).resolve()
+                    if target.is_file() and any(within(target, b) for b in bases):
+                        target.unlink()
+                except OSError:
+                    log.warning("Could not unlink project media file", exc_info=True)
         try:
             import shutil
             docs = Path(config.PROJECT_DOCS_DIR) / project_id

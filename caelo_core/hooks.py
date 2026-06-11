@@ -55,9 +55,10 @@ _MATCH_TIMEOUT_S = 0.5              # budżet per-search (ReDoS) gdy `regex` dos
 # przepuszcza). Case-insensitive search po treści komendy.
 DEFAULT_DANGEROUS = (
     r"\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r"   # rm -rf / -fr
-    r"|\bdel\s+/[sq]|\brmdir\s+/s"                       # del /s /q, rmdir /s
+    r"|\bdel\s+/[sqf]|\b(?:rmdir|rd)\s+/s"              # del /s /q /f, rmdir|rd /s (S31-l)
     r"|\bformat\s|\bmkfs|\bdd\s+if=|\b:\(\)\s*\{"        # format, mkfs, dd, fork bomb
-    r"|\bgit\s+push\s+.*--force|\bgit\s+reset\s+--hard"  # destrukcyjny git
+    r"|\bgit\s+push\b[^\n]*\s--force|\bgit\s+push\b[^\n]*\s-f\b"  # git push --force / -f (S31-l)
+    r"|\bgit\s+reset\s+--hard"
     r"|\bshutdown\b|\breboot\b"
 )
 
@@ -168,12 +169,17 @@ class HookManager:
         """Zwraca komunikat blokady (str) gdy któryś hook zablokował, inaczej None."""
         for hook in self._enabled("pre_tool"):
             msg = None
+            # S31-l: bloki bezpieczeństwa są FAIL-CLOSED — timeout/błąd regexa = ZABLOKUJ.
             if hook["type"] == "block_command" and name == "run_command":
-                if self._matches(hook.get("pattern") or "", args.get("command") or ""):
-                    msg = (hook.get("description") or "Command blocked by a pre-tool hook.")
+                hit, err = self._matches_blocking(hook.get("pattern") or "", args.get("command") or "")
+                if hit:
+                    msg = ("Command blocked: safety pattern could not be evaluated in time."
+                           if err else (hook.get("description") or "Command blocked by a pre-tool hook."))
             elif hook["type"] == "block_path" and name in ("write_file", "edit_file"):
-                if self._matches(hook.get("pattern") or "", args.get("path") or ""):
-                    msg = (hook.get("description") or "Path blocked by a pre-tool hook.")
+                hit, err = self._matches_blocking(hook.get("pattern") or "", args.get("path") or "")
+                if hit:
+                    msg = ("Path blocked: safety pattern could not be evaluated in time."
+                           if err else (hook.get("description") or "Path blocked by a pre-tool hook."))
             if msg:
                 # Blokada jest zdarzeniem bezpieczeństwa → ZAWSZE do audytu (niezależnie
                 # od hooka audit) + sygnał do UI.
@@ -211,6 +217,20 @@ class HookManager:
             return bool(rx.search(text or "", **kw))
         except Exception:  # noqa: BLE001 (zły wzorzec/timeout → nie blokuj fałszywie)
             return False
+
+    @staticmethod
+    def _matches_blocking(pattern: str, text: str) -> tuple[bool, bool]:
+        """S31-l: wariant FAIL-CLOSED dla bloków bezpieczeństwa. Zwraca (zablokować, błąd):
+        na timeout/zły wzorzec → (True, True) = ZABLOKUJ (blok musi domyślać się ku
+        blokowaniu, nie przepuszczaniu — inaczej groźna komenda przechodzi przy ReDoS-ie)."""
+        if not pattern:
+            return (False, False)
+        try:
+            rx = _rx.compile(pattern, _rx.IGNORECASE)
+            kw = {"timeout": _MATCH_TIMEOUT_S} if _RX_TIMEOUT else {}
+            return (bool(rx.search(text or "", **kw)), False)
+        except Exception:  # noqa: BLE001 — timeout/zły wzorzec → fail-closed
+            return (True, True)
 
     def _run_script_hook(self, hook: dict, args: dict, workspace, emit) -> None:
         """Uruchom skrypt hooka (np. formatter). Output → audyt + emit, NIE do modelu.

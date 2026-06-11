@@ -96,9 +96,17 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 class OAuthManager:
     """Zarządza logowaniem OAuth, przechowywaniem i odświeżaniem tokenów."""
 
+    # S31-g: cooldown po nieudanym refreshu (sekundy) — bez tego każde wywołanie API
+    # ponawiałoby sieciowy refresh pod lockiem (30 s), serializując/dławiąc wszystkie żądania.
+    _REFRESH_BACKOFF_S = 30.0
+
     def __init__(self):
         self.tokens = {}
-        self._lock = threading.Lock()
+        # S31-g: RLock (nie Lock) — get_access_token trzyma lock i woła _refresh→
+        # _store_token_response; login też bierze lock wokół exchange+userinfo. Reentrancja
+        # zapobiega samo-zakleszczeniu, a jeden lock chroni WSZYSTKIE mutacje self.tokens.
+        self._lock = threading.RLock()
+        self._refresh_fail_until = 0.0
         self._load()
 
     # --- trwałość ---
@@ -122,12 +130,15 @@ class OAuthManager:
         return self.tokens.get("account") or {}
 
     def logout(self):
-        self.tokens = {}
-        try:
-            if AUTH_FILE.exists():
-                AUTH_FILE.unlink()
-        except Exception:
-            pass
+        # S31-g: pod lockiem + reset cooldownu — nie może się przeplatać z in-flight refresh.
+        with self._lock:
+            self.tokens = {}
+            self._refresh_fail_until = 0.0
+            try:
+                if AUTH_FILE.exists():
+                    AUTH_FILE.unlink()
+            except Exception:
+                pass
 
     # --- przepływ logowania (blokujący — uruchamiać w wątku tła) ---
     def login(self, status_cb=None, timeout=300):
@@ -161,7 +172,9 @@ class OAuthManager:
         url = OAUTH_AUTHORIZE_URL + "?" + urllib.parse.urlencode(params)
 
         report("Opening browser...")
-        print(f"[OAuth] Open in your browser if it doesn't open automatically:\n{url}")
+        # S31-f: log na STDERR (root logging), nie print na STDOUT — stdout jest
+        # zarezerwowany WYŁĄCZNIE dla linii handshake (Electron parsuje ten strumień).
+        log.info("Open this URL in your browser if it did not open automatically: %s", url)
         try:
             webbrowser.open(url)
         except Exception:
@@ -189,9 +202,12 @@ class OAuthManager:
             raise RuntimeError("No authorization code received.")
 
         report("Exchanging code for token...")
-        self._exchange_code(code, redirect_uri, verifier)
-        report("Fetching account info...")
-        self._fetch_userinfo()
+        # S31-g: mutacje tokenów (exchange + userinfo) pod lockiem — wyścig z równoległym
+        # refreshem mógł zgubić zrotowany refresh_token (trwałe wylogowanie).
+        with self._lock:
+            self._exchange_code(code, redirect_uri, verifier)
+            report("Fetching account info...")
+            self._fetch_userinfo()
         return self.get_account()
 
     def _start_server(self):
@@ -270,6 +286,7 @@ class OAuthManager:
             self.tokens["expires_at"] = int(time.time()) + int(expires_in) - 60
         else:
             self.tokens.pop("expires_at", None)
+        self._refresh_fail_until = 0.0  # S31-g: udany zapis tokenu kasuje cooldown
         self._save()
 
     def _fetch_userinfo(self):
@@ -295,8 +312,13 @@ class OAuthManager:
         with self._lock:
             exp = self.tokens.get("expires_at")
             if exp and time.time() >= exp:
+                # S31-g: backoff — po nieudanym refreshu nie ponawiaj sieci do końca
+                # cooldownu (inaczej każde wywołanie API muli na 30 s pod lockiem).
+                if time.time() < self._refresh_fail_until:
+                    return None
                 try:
-                    self._refresh()
+                    self._refresh()  # sukces kasuje cooldown w _store_token_response
                 except Exception:
+                    self._refresh_fail_until = time.time() + self._REFRESH_BACKOFF_S
                     return None
             return self.tokens.get("access_token")

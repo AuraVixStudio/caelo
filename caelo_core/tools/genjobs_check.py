@@ -245,10 +245,14 @@ def _unit_clear(checks: list) -> None:
 
 
 def _fake_download(monkeypatch_target):
-    """Atrapa state.requests.get — strumieniuje stałe bajty na dysk (bez sieci)."""
+    """Atrapa state.requests.get — strumieniuje stałe bajty na dysk (bez sieci).
+    Niesie `url`/`is_redirect`/`status_code`, bo _download_media (S31-j) je sprawdza."""
     class _Resp:
-        def __init__(self):
+        def __init__(self, url="https://x/file"):
             self.headers = {}
+            self.url = url
+            self.is_redirect = False
+            self.status_code = 200
 
         def __enter__(self):
             return self
@@ -262,7 +266,7 @@ def _fake_download(monkeypatch_target):
         def iter_content(self, n):
             yield b"FAKE-MEDIA-BYTES"
 
-    return types.SimpleNamespace(get=lambda url, **kw: _Resp())
+    return types.SimpleNamespace(get=lambda url, **kw: _Resp(url))
 
 
 def _make_backend(store, save_dir: str):
@@ -339,6 +343,19 @@ def _unit_backend_image_executor(checks: list) -> None:
             eids = b._run_image_job(ejob, threading.Event())
             checks.append(("genjobs/exec: edit returns artifact + honors up to 3 refs",
                            len(eids) == 1 and len(captured["edit"][1]) == 3))
+
+            # S31-a: obraz honoruje pre-set cancel (cancelled, nie done)
+            from caelo_core.genjobs import GenJobCancelled
+            ev = threading.Event()
+            ev.set()
+            raised_cancel = False
+            try:
+                b._run_image_job(GenJob(id="tc", kind="image", op="text2img",
+                                        params={"prompt": "x", "n": 1},
+                                        created_at=time.time(), updated_at=time.time()), ev)
+            except GenJobCancelled:
+                raised_cancel = True
+            checks.append(("genjobs/exec: image executor honors pre-set cancel (S31-a)", raised_cancel))
         except Exception as exc:  # noqa: BLE001
             checks.append((f"genjobs/exec: image scenario ran ({exc})", False))
         finally:
@@ -441,6 +458,84 @@ def _unit_backend_video_executor(checks: list) -> None:
             HS._default_store = prev_store
             state_mod.requests = prev_requests
             state_mod.VIDEO_POLL_INTERVAL_S = prev_interval
+            store.close()
+
+
+def _unit_clear_keeps_active(checks: list) -> None:
+    """S31-b: clear_finished nie wypruwa eventów aktywnego/świeżo zasubmitowanego zadania."""
+    from caelo_core.genjobs import GenJobManager
+
+    with tempfile.TemporaryDirectory() as d:
+        store = _store(d)
+        release = threading.Event()
+        started = threading.Event()
+
+        def exec_block(job, cancel):
+            started.set()
+            release.wait(5)
+            return []
+
+        mgr = GenJobManager(exec_block, store=store, workers=1, max_active=8)
+        try:
+            jrun = mgr.submit(kind="image", op="text2img", params={"prompt": "a"})
+            started.wait(5)  # worker trzyma jrun (running)
+            jnew = mgr.submit(kind="image", op="text2img", params={"prompt": "b"})  # queued = active
+            mgr.clear_finished()
+            checks.append(("genjobs: clear_finished keeps active job's events (S31-b)",
+                           jnew.id in mgr._finished and jnew.id in mgr._cancel))
+            release.set()
+            mgr.wait(jrun.id, timeout=10)
+            mgr.wait(jnew.id, timeout=10)
+        finally:
+            mgr.close()
+            store.close()
+
+
+def _unit_media_redirect_guard(checks: list) -> None:
+    """S31-j: _download_media odrzuca redirect (https->http omijał guard) i wyłącza auto-redirect."""
+    import caelo_core.backend_media as state_mod
+
+    with tempfile.TemporaryDirectory() as d:
+        store = _store(d)
+        b = _make_backend(store, d)
+        prev = state_mod.requests
+        captured: dict = {}
+
+        class _Redir:
+            def __init__(self):
+                self.headers = {}
+                self.url = "http://evil/x.png"
+                self.is_redirect = True
+                self.status_code = 302
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def raise_for_status(self):
+                pass
+
+            def iter_content(self, n):
+                yield b"x"
+
+        def _get(url, **kw):
+            captured.update(kw)
+            return _Redir()
+
+        state_mod.requests = types.SimpleNamespace(get=_get)
+        try:
+            raised = False
+            try:
+                b._download_media("https://x/redir.png", Path(d), "generate", ".png")
+            except ValueError:
+                raised = True
+            checks.append(("media: download rejects https->http redirect (S31-j)", raised))
+            checks.append(("media: download disables auto-redirects (S31-j)",
+                           captured.get("allow_redirects") is False))
+        finally:
+            state_mod.requests = prev
             store.close()
 
 
@@ -577,8 +672,10 @@ def main() -> int:
     _unit_queue_limit(checks)
     _unit_clear(checks)
     _unit_blob_stripping(checks)
+    _unit_clear_keeps_active(checks)
     _unit_backend_image_executor(checks)
     _unit_backend_video_executor(checks)
+    _unit_media_redirect_guard(checks)
     _unit_route_validation(checks)
 
     ok = True

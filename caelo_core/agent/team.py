@@ -19,8 +19,10 @@ Strumień (PLAN_M17 §5): jeden `WsStream`, zdarzenia subagentów tagowane `agen
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -190,7 +192,14 @@ class SubAgent:
                 self.status = "cancelled"
             else:
                 self.status = "done"
-            self._finalize_worktree()
+            # 3.3-c: scalenie rejestruj TYLKO przy czystym 'done'. Subagent, który skończył
+            # PO timeout/stopie (np. zablokowany w requests.post, którego stop nie przerwał
+            # natychmiast), NIE może dorzucić merge do MergeStore po `team_done` — porzuć jego
+            # worktree (inaczej user dostałby scalenie, którego nie było w podsumowaniu).
+            if self.status == "done":
+                self._finalize_worktree()
+            else:
+                self._cleanup_worktree()
         except Exception as exc:  # noqa: BLE001
             log.warning("subagent %s failed", self.agent_id, exc_info=True)
             self.status = "failed"
@@ -221,6 +230,9 @@ class SubAgent:
         """Po pracy mutującego subagenta: policz zmiany; są → zarejestruj scalenie do
         przeglądu (B4), brak → wyrzuć kopię."""
         if self._worktree is None:
+            return
+        if self.timed_out:  # 3.3-c: defensywnie — nawet normalne zakończenie-po-timeout porzuca
+            self._cleanup_worktree()
             return
         try:
             changes = compute_changes(self.team.workspace.root, self._worktree,
@@ -407,6 +419,10 @@ class TeamManager:
         self._stopped = False
         self._seq = 0
         self._run_seq = 0
+        # 3.3-b: namespace unikalny per PROCES i INSTANCJA — `run{N}` per-instancja kolidował
+        # między równoległymi TeamManagerami (dwa okna / WS+headless) na wspólnym
+        # config.WORKTREES_DIR (run1/sa1 nadpisywał cudzy run1/sa1).
+        self._run_uid = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
     # --- budżet / stop (B5) ---
     def count_turn(self) -> None:
@@ -426,7 +442,8 @@ class TeamManager:
 
     # --- worktree / merge ---
     def new_worktree_path(self, agent_id: str) -> Path:
-        return Path(self.worktrees_base) / f"run{self._run_seq}" / agent_id
+        # 3.3-b: run-<pid>-<uuid>-<seq> — nigdy nie koliduje między równoległymi przebiegami.
+        return Path(self.worktrees_base) / f"run-{self._run_uid}-{self._run_seq}" / agent_id
 
     def register_merge(self, **kw) -> Optional[PendingMerge]:
         try:
@@ -534,6 +551,13 @@ class TeamManager:
         for sub in subs:
             if sub.thread is not None:
                 sub.thread.join(timeout=2)
+                # 3.3-c: wątek wciąż żywy po join → osierocony (zablokowany upstream). Oznacz
+                # w raporcie, by podsumowanie odzwierciedlało rzeczywistość (nie udawało 'done').
+                if sub.thread.is_alive() and sub.status not in ("timeout", "cancelled", "failed"):
+                    sub.status = "timeout"
+                    sub.timed_out = True
+                    if not (sub.summary or "").strip():
+                        sub.summary = "(abandoned after timeout)"
 
     # --- raport / streszczenie ---
     def _build_report(self, subs: list[SubAgent], errors: list[str]) -> dict:

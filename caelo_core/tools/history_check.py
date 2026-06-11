@@ -485,6 +485,65 @@ def _raises_status(fn, status: int) -> bool:
         return False
 
 
+def test_open_error_classification() -> None:
+    """S31-d: błąd otwarcia bazy — lock/I-O = przejściowy (re-raise, NIE .corrupt);
+    malformed/not-a-database/integrity = korupcja (backup). Bez tego zdrowa baza
+    pod lockiem (druga instancja dev) wędrowała do .corrupt = „zniknęła historia"."""
+    import sqlite3 as _s
+    isc = HistoryStore._is_corruption
+    check("history: 'database is locked' NOT corruption (S31-d)",
+          isc(_s.OperationalError("database is locked")) is False)
+    check("history: 'disk I/O error' NOT corruption (S31-d)",
+          isc(_s.OperationalError("disk I/O error")) is False)
+    check("history: 'malformed' IS corruption (S31-d)",
+          isc(_s.OperationalError("database disk image is malformed")) is True)
+    check("history: 'not a database' IS corruption (S31-d)",
+          isc(_s.DatabaseError("file is not a database")) is True)
+    check("history: integrity_check DatabaseError IS corruption (S31-d)",
+          isc(_s.DatabaseError("integrity_check: bad")) is True)
+
+
+def test_delete_project_files() -> None:
+    """S31-k: delete_project kasuje PLIKI mediów artefaktów (sandbox media-base),
+    a plik spoza dozwolonych baz zostaje (anty-traversal)."""
+    from caelo_core.state import Backend
+
+    with _tmp() as d:
+        store = HistoryStore(Path(d) / "h.db")
+        prev = HS._default_store
+        HS._default_store = store
+        try:
+            save_dir = Path(d) / "media"
+            save_dir.mkdir()
+            in_base = save_dir / "art.png"
+            in_base.write_bytes(b"x")
+            outside = Path(d) / "outside.png"
+            outside.write_bytes(b"y")
+
+            proj = store.add_project(name="P")
+            store.add_artifact(type="image", mode="image", mime="image/png",
+                               path=str(in_base), project_id=proj.id, meta={})
+            store.add_artifact(type="image", mode="image", mime="image/png",
+                               path=str(outside), project_id=proj.id, meta={})
+
+            b = Backend.__new__(Backend)
+
+            class _H:
+                def get_save_path(self_inner):
+                    return str(save_dir)
+
+            b.history = _H()
+            b.current_project_id = None
+            b._code_project_id = None
+
+            b.delete_project(proj.id)
+            check("delete_project: removes in-base media file (S31-k)", not in_base.exists())
+            check("delete_project: leaves out-of-base file (anti-traversal, S31-k)", outside.exists())
+        finally:
+            HS._default_store = prev
+            store.close()
+
+
 def main() -> int:
     test_artifact_roundtrip()
     test_event_fts()
@@ -499,6 +558,8 @@ def main() -> int:
     test_input_blocks()
     test_project_scoping()
     test_memory_knn_hybrid()  # M19-B8: embeddingi + KNN + hybryda + MemoryIndex (stub)
+    test_open_error_classification()  # S31-d
+    test_delete_project_files()  # S31-k
     ok = True
     for name, passed in checks:
         print(f"  [{'PASS' if passed else 'FAIL'}] {name}")

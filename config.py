@@ -263,9 +263,20 @@ def load_json_or_backup(path, default=None):
     path = Path(path)
     if not path.exists():
         return default
+    # S31-e: oddziel BŁĄD ODCZYTU (OSError: brak uprawnień, sharing violation na Windows,
+    # plik trzymany przez antywirusa, przejściowe I/O) od KORUPCJI (niepoprawny JSON).
+    # Wcześniej blankietowy `except Exception` przenosił ZDROWY plik do `.corrupt` przy
+    # przejściowym OSError — a tu żyją tokeny OAuth / klucz API, więc user był po cichu
+    # wylogowywany / tracił config. OSError → default BEZ ruszania pliku.
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _log.warning("Could not read %s (%s); using default (file left intact)",
+                     path.name, exc)
+        return default
+    try:
+        return json.loads(text)
+    except ValueError as exc:  # JSONDecodeError/UnicodeDecodeError = faktyczna korupcja
         _log.error("Corrupt %s (%s); backing up to .corrupt and using default",
                    path.name, exc)
         try:

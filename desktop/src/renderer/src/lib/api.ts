@@ -982,6 +982,9 @@ export interface PackageReport {
   payload_names: string[]
   already_installed: boolean
   source_url?: string
+  // S34-c: bajty pobrane podczas inspekcji (base64) — instaluj DOKŁADNIE to, co pokazała
+  // karta zgody (bez ponownego fetcha URL, który serwer mógłby podmienić).
+  fetched_b64?: string
 }
 
 export interface InstalledPackage {

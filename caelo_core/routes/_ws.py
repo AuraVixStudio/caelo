@@ -30,6 +30,11 @@ from fastapi import WebSocket
 DEFAULT_MAXSIZE = 512   # P1-3/P0-9: twardy limit ramek w pamięci
 EMIT_TIMEOUT_S = 30.0   # max blokady workera, gdy konsument nie nadąża/zniknął
 JOIN_TIMEOUT_S = 5.0    # max oczekiwania na worker przy zamykaniu
+# P3-3.2-f (analiza 2026-06-10): EMIT_TIMEOUT_S > JOIN_TIMEOUT_S NIE jest błędem —
+# inwariant „wołający ustawia stop Event w finally PRZED aclose()" (docstring niżej; chat/
+# voice/agent go trzymają) sprawia, że emit() na consumer-gone wraca szybko, więc join
+# nie czeka 30 s. NIE podnoś JOIN ponad EMIT — to zregresowałoby KAŻDE czyste rozłączenie
+# do 30 s na wszystkich 4 trasach współdzielących skeleton.
 
 
 class WsStream:

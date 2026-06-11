@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +29,10 @@ class LspManager:
         self._configs: dict = configs or {}
         self._clients: dict[str, LspClient] = {}
         self._restarts: dict[str, int] = {}
+        # S34-b: jeden RLock — get_lsp() zwraca JEDEN współdzielony manager dla wszystkich
+        # sesji (też równoległych subagentów); bez locka `_ensure` (check-then-spawn) startował
+        # ten sam serwer dwukrotnie i osieracał pierwszy podproces.
+        self._lock = threading.RLock()
         self._ext_to_name: dict[str, str] = {}
         self._ext_to_lang: dict[str, str] = {}
         for name, c in self._configs.items():
@@ -47,28 +52,30 @@ class LspManager:
     def _ensure(self, name: Optional[str]) -> Optional[LspClient]:
         if not name:
             return None
-        c = self._clients.get(name)
-        if c is not None and c.alive:
-            return c
-        cfg = self._configs.get(name)
-        if not cfg or not cfg.get("command"):
-            return None
-        if c is not None:  # padł — restart wg polityki
-            maxr = int(cfg.get("maxRestarts", 3))
-            if not cfg.get("restartOnCrash", True) or self._restarts.get(name, 0) >= maxr:
+        # S34-b: check-and-create atomowo pod lockiem (jak double-checked lazy-init).
+        with self._lock:
+            c = self._clients.get(name)
+            if c is not None and c.alive:
+                return c
+            cfg = self._configs.get(name)
+            if not cfg or not cfg.get("command"):
                 return None
-            self._restarts[name] = self._restarts.get(name, 0) + 1
-        command = [cfg["command"], *(cfg.get("args") or [])]
-        cwd = str(self.root) if self.root else os.getcwd()
-        client = LspClient(name, command, cwd=cwd, env=cfg.get("env"),
-                           startup_timeout_s=float(cfg.get("startupTimeout", 30000)) / 1000.0)
-        try:
-            client.start()
-        except Exception:  # noqa: BLE001
-            log.warning("LSP server %r failed to start", name, exc_info=True)
-            return None
-        self._clients[name] = client
-        return client
+            if c is not None:  # padł — restart wg polityki
+                maxr = int(cfg.get("maxRestarts", 3))
+                if not cfg.get("restartOnCrash", True) or self._restarts.get(name, 0) >= maxr:
+                    return None
+                self._restarts[name] = self._restarts.get(name, 0) + 1
+            command = [cfg["command"], *(cfg.get("args") or [])]
+            cwd = str(self.root) if self.root else os.getcwd()
+            client = LspClient(name, command, cwd=cwd, env=cfg.get("env"),
+                               startup_timeout_s=float(cfg.get("startupTimeout", 30000)) / 1000.0)
+            try:
+                client.start()
+            except Exception:  # noqa: BLE001
+                log.warning("LSP server %r failed to start", name, exc_info=True)
+                return None
+            self._clients[name] = client
+            return client
 
     def _client_for(self, abs_path: str) -> Optional[LspClient]:
         return self._ensure(self._ext_to_name.get(Path(abs_path).suffix.lower()))
@@ -102,17 +109,21 @@ class LspManager:
         } for n, c in self._configs.items()]
 
     def restart(self, name: str) -> bool:
-        c = self._clients.pop(name, None)
-        if c is not None:
-            try:
-                c.stop()
-            except Exception:  # noqa: BLE001
-                pass
-        self._restarts[name] = 0
+        with self._lock:  # S34-b: spójne mutacje _clients/_restarts
+            c = self._clients.pop(name, None)
+            if c is not None:
+                try:
+                    c.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._restarts[name] = 0
         return self._ensure(name) is not None
 
     def shutdown(self) -> None:
-        for c in list(self._clients.values()):
+        with self._lock:
+            clients = list(self._clients.values())
+            self._clients.clear()
+        for c in clients:
             try:
                 c.stop()
             except Exception:  # noqa: BLE001

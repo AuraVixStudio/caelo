@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shlex
+import socket
 import subprocess
 import tempfile
 import threading
@@ -58,6 +59,10 @@ GREP_BINARY_SNIFF = 4096               # ile bajtów wąchać pod kątem bajtu N
 # Limity run_command (P0-4).
 RUN_OUTPUT_CAP = 8000                   # maks. bajtów wyjścia trzymanych w pamięci/zwracanych
 RUN_STOP_POLL_S = 0.1                   # co ile sekund wątek-nadzorca sprawdza Stop
+
+# 3.3-a: cap rozmiaru read_file — read_text() wczytywał CAŁY plik mimo offset/limit,
+# więc wielogigabajtowy plik wysadzał pamięć. Powyżej capa: każ użyć grep/offset+limit.
+READ_FILE_MAX_BYTES = 16 * 1024 * 1024
 
 # P0-6: zmienne usuwane ze środowiska run_command, by nie wyciekły do modelu
 # (komenda jest sterowana przez model, a jej wyjście wraca do modelu — `set`/`env`
@@ -167,6 +172,12 @@ def read_file(ws: Workspace, path: str, offset: int = 0, limit: int = 2000, **_)
         return f"Error: file not found: {path}"
     if p.is_dir():
         return f"Error: is a directory: {path}"
+    try:  # 3.3-a: cap rozmiaru — nie wczytuj wielogigabajtowego pliku do pamięci
+        if p.stat().st_size > READ_FILE_MAX_BYTES:
+            return (f"Error: file too large to read whole ({p.stat().st_size} bytes > "
+                    f"{READ_FILE_MAX_BYTES} cap). Use grep, or read_file with offset/limit.")
+    except OSError as exc:
+        return f"Error: {exc}"
     lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
     start = max(0, int(offset or 0))
     end = start + int(limit or 2000)
@@ -512,7 +523,13 @@ def run_command(ws: Workspace, command: str, cwd: Optional[str] = None, timeout:
     out = "".join(captured)
     if truncated or len(out) > RUN_OUTPUT_CAP:
         out = out[:RUN_OUTPUT_CAP] + "\n… (output truncated)"
-    suffix = f"\n[{killed['why']}]" if killed["why"] else ""
+    why = killed["why"]
+    # 3.3-f: timer mógł odpalić _kill('timeout') w tej samej chwili, co czyste zakończenie
+    # (timer.cancel() to no-op, gdy timer już wszedł w _kill). Nie etykietuj [timeout] przy
+    # exit 0 — to fałszywy alarm. [stopped] zostaje nawet na exit 0 (stop usera jest istotny).
+    if why == "timeout" and proc.returncode == 0:
+        why = ""
+    suffix = f"\n[{why}]" if why else ""
     return f"(exit {proc.returncode}){suffix}\n{out}".rstrip()
 
 
@@ -520,10 +537,15 @@ def run_command(ws: Workspace, command: str, cwd: Optional[str] = None, timeout:
 _WEB_FETCH_UA = "Caelo-Agent/1.0"
 
 
+def _ip_blocked(ip: ipaddress._BaseAddress) -> bool:
+    return (ip.is_loopback or ip.is_private or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
 def _web_host_blocked(host: str) -> bool:
-    """SSRF-guard: blokuj localhost/loopback oraz sieci prywatne/link-local/zarezerwowane
-    podane jako LITERAŁ IP. Nazwy hostów (nie-IP) przepuszczamy — decyduje allowlista +
-    bramka (pełna ochrona DNS-rebinding poza zakresem [P3])."""
+    """SSRF-guard (szybki pre-filtr): blokuj localhost/loopback oraz literalne IP z sieci
+    prywatnych/link-local/zarezerwowanych. Nazwy hostów (nie-IP) przepuszcza — rozwiązanie
+    DNS sprawdza `_resolve_blocked` (3.3-g)."""
     h = (host or "").strip().strip("[]").lower()
     if not h or h == "localhost" or h.endswith(".localhost"):
         return True
@@ -531,8 +553,30 @@ def _web_host_blocked(host: str) -> bool:
         ip = ipaddress.ip_address(h)
     except ValueError:
         return False
-    return (ip.is_loopback or ip.is_private or ip.is_link_local
-            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+    return _ip_blocked(ip)
+
+
+def _resolve_blocked(host: str) -> bool:
+    """3.3-g: rozwiąż HOST i sprawdź WYNIKOWE IP — bez tego nazwa wskazująca na 10.x/
+    127.x/169.254.169.254 (metadata chmury) przechodziła guard (DNS rebinding). FAIL-CLOSED:
+    host nierozwiązywalny → zablokowany. Residualne TOCTOU (DNS może się zmienić między
+    sprawdzeniem a połączeniem requests) — pełna odporność wymaga pinningu IP; tu
+    rozwiązanie+fail-closed + allowlista to pragmatyczny P2."""
+    h = (host or "").strip().strip("[]")
+    if not h:
+        return True
+    try:
+        infos = socket.getaddrinfo(h, None)
+    except Exception:  # noqa: BLE001 — nierozwiązywalny → blokuj
+        return True
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            if _ip_blocked(ipaddress.ip_address(sockaddr[0])):
+                return True
+        except ValueError:
+            return True
+    return False
 
 
 def _web_host_allowed(host: str, allow: list) -> bool:
@@ -570,7 +614,7 @@ def web_fetch(ws: Workspace, url: str = "", max_bytes: Optional[int] = None, **_
         host = urlparse(u).hostname or ""
     except Exception:  # noqa: BLE001
         host = ""
-    if _web_host_blocked(host):
+    if _web_host_blocked(host) or _resolve_blocked(host):
         return f"Error: web_fetch refused host '{host or u}' (loopback/private not allowed)"
     allow = getattr(config, "WEB_FETCH_ALLOW_DOMAINS", []) or []
     if allow and not _web_host_allowed(host, allow):
@@ -591,7 +635,9 @@ def web_fetch(ws: Workspace, url: str = "", max_bytes: Optional[int] = None, **_
             r.raise_for_status()
             # Re-walidacja PO przekierowaniach (anti-SSRF: allowed host → blocked redirect).
             final = urlparse(r.url)
-            if (r.url or "").lower()[:8] != "https://" or _web_host_blocked(final.hostname or ""):
+            if ((r.url or "").lower()[:8] != "https://"
+                    or _web_host_blocked(final.hostname or "")
+                    or _resolve_blocked(final.hostname or "")):  # 3.3-g: też po redirect
                 return f"Error: web_fetch refused redirect to '{r.url}'"
             if allow and not _web_host_allowed(final.hostname or "", allow):
                 return f"Error: redirect host '{final.hostname}' is not in the allowlist"

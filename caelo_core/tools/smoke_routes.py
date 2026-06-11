@@ -59,6 +59,52 @@ def _unit_fs_routes(checks: list) -> None:
         checks.append(("/fs/tree rejects '..' escape (400)",
                        rejects400(lambda: fs_route.tree("../..", ws=ws))))
 
+        # P2-3.2-c: GET /fs/read odrzuca plik > MAX_FS_READ_BYTES (413)
+        prev_cap = fs_route.MAX_FS_READ_BYTES
+        fs_route.MAX_FS_READ_BYTES = 10
+        try:
+            (Path(d) / "big.txt").write_text("0123456789ABCDEF", encoding="utf-8")  # 16 > 10
+            raised413 = False
+            try:
+                fs_route.read("big.txt", ws=ws)
+            except HTTPException as e:
+                raised413 = e.status_code == 413
+            checks.append(("/fs/read rejects oversize file (413, P2-3.2-c)", raised413))
+        finally:
+            fs_route.MAX_FS_READ_BYTES = prev_cap
+
+        # P2-3.2-a: PUT /agent/caelo-md odrzuca content > MAX_CAELO_MD_BYTES
+        from pydantic import ValidationError
+        from caelo_core.routes import agent_api as am
+        big_md = "x" * (am.MAX_CAELO_MD_BYTES + 1)
+        rejected = False
+        try:
+            am.CaeloMdReq(content=big_md)
+        except ValidationError:
+            rejected = True
+        checks.append(("PUT /agent/caelo-md rejects > MAX_CAELO_MD_BYTES (P2-3.2-a)", rejected))
+        checks.append(("PUT /agent/caelo-md normal size ok",
+                       am.put_caelo_md(am.CaeloMdReq(content="# hi"), ws=ws).get("ok") is True))
+
+        # P2-3.2-b: PUT /config/output-dir odrzuca korzeń FS; konsument media_bases też
+        import os as _os
+        import types as _t
+        from caelo_core.media_paths import media_bases
+        from caelo_core.routes import system as sys_route
+        root = "C:\\" if _os.name == "nt" else "/"
+        b_stub = _t.SimpleNamespace(history=_t.SimpleNamespace(
+            set_save_path=lambda p: None, get_save_path=lambda: d))
+        raised400 = False
+        try:
+            sys_route.set_output_dir(sys_route.OutputDir(path=root), b=b_stub)
+        except HTTPException as e:
+            raised400 = e.status_code == 400
+        checks.append(("PUT /config/output-dir rejects drive root (P2-3.2-b)", raised400))
+        checks.append(("PUT /config/output-dir accepts existing dir (P2-3.2-b)",
+                       sys_route.set_output_dir(sys_route.OutputDir(path=d), b=b_stub).get("ok") is True))
+        checks.append(("media_bases drops fs-root save dir (P2-3.2-b consumer)",
+                       Path(root).resolve() not in media_bases(root)))
+
 
 def _unit_git_routes(checks: list) -> None:
     """P3-8: zachowanie tras /git (status/commit + walidacja) — in-process."""

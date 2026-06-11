@@ -51,6 +51,44 @@ def _unit_ws_auth(checks: list) -> None:
     checks.append(("origin: null/none ok", _ws_origin_ok("null") is True and _ws_origin_ok(None) is True))
 
 
+def _unit_lazy_init_race(checks: list) -> None:
+    """S31-c: `_lazy` (double-checked) zwraca JEDEN obiekt i woła fabrykę RAZ pod
+    współbieżnym pierwszym dostępem — bez tego dwa równoległe requesty FastAPI budowały
+    dwa managery (drugi `GenJobManager._reap_stale` failowałby zadania pierwszego)."""
+    import threading as _t
+
+    sys.path.insert(0, REPO_DIR)
+    from caelo_core.state import Backend
+
+    b = Backend.__new__(Backend)  # bez __init__ (bez I/O); _lazy_lock jest KLASOWY
+    b._x = None
+    built = {"n": 0}
+    built_lock = _t.Lock()
+    barrier = _t.Barrier(16)
+    seen: set = set()
+    seen_lock = _t.Lock()
+
+    def factory():
+        with built_lock:
+            built["n"] += 1
+        time.sleep(0.005)  # poszerz okno wyścigu
+        return object()
+
+    def worker():
+        barrier.wait()
+        obj = b._lazy("_x", factory)
+        with seen_lock:
+            seen.add(id(obj))
+
+    threads = [_t.Thread(target=worker) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    checks.append(("backend: _lazy returns one instance under concurrency (S31-c)",
+                   len(seen) == 1 and built["n"] == 1))
+
+
 def _unit_data_dir_override(checks: list) -> None:
     """P1-E: CAELO_CORE_DATA_DIR przekierowuje DATA_DIR i WSZYSTKIE stałe pochodne
     (SETTINGS_FILE/HISTORY_DB_FILE/…). To gwarancja, że spawnowany sidecar self-checków
@@ -222,11 +260,15 @@ def _unit_settings_ownership(checks: list) -> None:
             # Backend testowy: brak logowania OAuth -> oauth niedostepny.
             checks.append(("auth source: stored key active under auto (no oauth)",
                            b.has_stored_key() is True and b.active_auth_source() == "api_key"))
+            checks.append(("auth: is_authenticated true when a source is active (S31-h)",
+                           b.is_authenticated() is True))
             b.update_settings({"auth_source": "oauth"})
             checks.append(("auth source: preference persisted",
                            b.auth_source_pref() == "oauth"))
             checks.append(("auth source: forced oauth + no login -> none (hard switch)",
                            b.active_auth_source() == "none"))
+            checks.append(("auth: is_authenticated false when forced source unavailable (S31-h)",
+                           b.is_authenticated() is False))
             b.update_settings({"auth_source": "api_key"})
             checks.append(("auth source: forced api_key uses stored key (ignores oauth)",
                            b.active_auth_source() == "api_key"))
@@ -268,6 +310,113 @@ def _unit_json_corrupt_backup(checks: list) -> None:
         checks.append(("json loader: corrupt -> default", res == {"fallback": True}))
         checks.append(("json loader: corrupt moved to .corrupt (original gone)",
                        backup.exists() and not bad.exists()))
+
+        # S31-e: BŁĄD ODCZYTU (OSError) ≠ korupcja — plik zostaje nietknięty, zwracamy default
+        # (tu żyją tokeny/klucz, więc przejściowy I/O nie może po cichu kasować configu).
+        valid = Path(d) / "valid.json"
+        valid.write_text('{"keep": true}', encoding="utf-8")
+        orig_read = Path.read_text
+
+        def _boom(self, *a, **k):
+            if self == valid:
+                raise OSError("simulated sharing violation")
+            return orig_read(self, *a, **k)
+
+        Path.read_text = _boom
+        try:
+            res2 = config.load_json_or_backup(valid, {"default": 1})
+        finally:
+            Path.read_text = orig_read
+        corrupt2 = Path(str(valid) + ".corrupt")
+        checks.append(("json loader: OSError -> default, file left intact (S31-e)",
+                       res2 == {"default": 1} and valid.exists() and not corrupt2.exists()))
+
+
+def _unit_history_manager_concurrency(checks: list) -> None:
+    """S31-m: współbieżne save_to_history (workery genjobs + czat) nie gubią wpisów —
+    lock serializuje read-modify-write+persist. Bez locka stary snapshot nadpisywał plik."""
+    import tempfile
+    import threading as _t
+    from pathlib import Path
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+    import history_manager  # type: ignore  # noqa: E402
+
+    saved = (config.CONFIG_FILE, config.HISTORY_DIR,
+             history_manager.CONFIG_FILE, history_manager.HISTORY_DIR)
+    with tempfile.TemporaryDirectory() as d:
+        dp = Path(d)
+        config.CONFIG_FILE = dp / "caelo_config.json"
+        config.HISTORY_DIR = dp / "gen"
+        config.HISTORY_DIR.mkdir()
+        history_manager.CONFIG_FILE = config.CONFIG_FILE
+        history_manager.HISTORY_DIR = config.HISTORY_DIR
+        try:
+            hm = history_manager.HistoryManager()
+            T, M = 8, 30
+            barrier = _t.Barrier(T)
+
+            def worker(tid: int) -> None:
+                barrier.wait()
+                for i in range(M):
+                    hm.save_to_history("generate", f"u{tid}-{i}", "p")
+
+            threads = [_t.Thread(target=worker, args=(t,)) for t in range(T)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(20)
+            reloaded = history_manager.HistoryManager()  # czyta plik z dysku
+            checks.append(("history_manager: concurrent saves lose no entries (S31-m)",
+                           len(reloaded.history) == min(T * M, 500)))
+        finally:
+            (config.CONFIG_FILE, config.HISTORY_DIR,
+             history_manager.CONFIG_FILE, history_manager.HISTORY_DIR) = saved
+
+
+def _unit_oauth_recovery(checks: list) -> None:
+    """S31-f: login() nie pisze na stdout (print→log, kontrakt handshake). S31-g: lock to
+    RLock + backoff po nieudanym refreshu (drugie wywołanie nie sieciuje w cooldownie)."""
+    import inspect
+    import threading as _t
+    import types
+
+    sys.path.insert(0, REPO_DIR)
+    import oauth_manager as OM  # type: ignore  # noqa: E402
+
+    checks.append(("oauth: login() has no print() to stdout (S31-f)",
+                   "print(" not in inspect.getsource(OM.OAuthManager.login)))
+
+    mgr = OM.OAuthManager()
+    checks.append(("oauth: lock is reentrant RLock (S31-g)",
+                   isinstance(mgr._lock, type(_t.RLock()))))
+
+    # backoff: wygasły token + nieudany refresh → 2× get_access_token = 1 strzał sieciowy
+    mgr.tokens = {"access_token": "old", "refresh_token": "rt", "expires_at": 1}
+    mgr._refresh_fail_until = 0.0
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 500
+        text = "err"
+
+        def json(self):
+            return {}
+
+    def _post(*a, **k):
+        calls["n"] += 1
+        return _Resp()
+
+    prev = OM.requests
+    OM.requests = types.SimpleNamespace(post=_post, get=getattr(prev, "get", None))
+    try:
+        r1 = mgr.get_access_token()
+        r2 = mgr.get_access_token()
+    finally:
+        OM.requests = prev
+    checks.append(("oauth: failed refresh backs off (1 network call across 2 calls) (S31-g)",
+                   r1 is None and r2 is None and calls["n"] == 1))
 
 
 def _unit_error_sanitization(checks: list) -> None:

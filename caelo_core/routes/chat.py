@@ -39,6 +39,7 @@ import config  # type: ignore
 
 from caelo_core import chat_media_tools, responses_client
 from caelo_core import validation as V
+from caelo_core.errors import masked_error
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
 
@@ -211,7 +212,7 @@ async def chat_stream(ws: WebSocket) -> None:
                                   "citations": [c.get("url") for c in result.get("citations", [])]},
                         )
                 except Exception as exc:  # noqa: BLE001
-                    stream.emit({"type": "error", "error": str(exc)})
+                    stream.emit({"type": "error", "error": masked_error(exc, "Chat request failed")})
 
             t = threading.Thread(target=worker, daemon=True)
             current["thread"] = t
@@ -240,6 +241,14 @@ async def chat_stream(ws: WebSocket) -> None:
                                            "error": "A response is already streaming; send 'stop' first."})
                         continue
                     messages = list(msg.get("messages") or [])
+                    # P2-3.2-d: ogranicz messages[] z WS (liczba/rozmiar/data-URI) jak REST.
+                    # Błąd = zamaskowana ramka + continue (jak temperature niżej, nie break).
+                    try:
+                        V.validate_ws_messages(messages)
+                    except ValueError:
+                        await stream.send({"type": "error",
+                                           "error": "Message payload too large or malformed."})
+                        continue
                     system_prompt = (msg.get("system_prompt") or "").strip()
                     # M22: doklej instrukcje aktywnego projektu czatu (system prompt per
                     # projekt) PRZED globalnym promptem z ramki. Jedno źródło prawdy w backendzie.

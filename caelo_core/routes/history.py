@@ -137,27 +137,20 @@ def get_artifact(artifact_id: str, b: Backend = Depends(get_backend)) -> dict:
 
 
 def _media_bases(b: Backend) -> list[Path]:
-    """Katalogi, z których WOLNO serwować treść artefaktu: DATA_DIR (baza/historia)
-    + skonfigurowany folder zapisu mediów. Plik spoza nich → odmowa."""
-    bases = [Path(config.DATA_DIR)]
+    """Katalogi, z których WOLNO serwować/kasować treść artefaktu: DATA_DIR + folder
+    zapisu mediów (S31-k: wspólny helper z `state.delete_project`; P2-3.2-b: korzeń FS
+    odrzucany w `media_paths.media_bases`)."""
+    from caelo_core.media_paths import media_bases
     try:
-        bases.append(Path(b.history.get_save_path()))
+        save = b.history.get_save_path()
     except Exception:
-        pass
-    out: list[Path] = []
-    for base in bases:
-        try:
-            out.append(base.resolve())
-        except Exception:
-            continue
-    return out
+        save = None
+    return media_bases(save)
 
 
 def _within(path: Path, base: Path) -> bool:
-    try:
-        return path.is_relative_to(base)
-    except Exception:
-        return False
+    from caelo_core.media_paths import within
+    return within(path, base)
 
 
 @router.delete("/artifacts/{artifact_id}")

@@ -386,7 +386,11 @@ def stream_response(
                     resp = obj.get("response") or obj
                     u = resp.get("usage")
                     if isinstance(u, dict):
-                        usage = u
+                        # S31-i: SUMUJ pola liczbowe przez tury pętli narzędzi — wcześniej
+                        # `usage = u` nadpisywało, więc licznik tokenów przy tool-callach był
+                        # zaniżony do ostatniej tury. Niezliczbowe (np. model id) = ostatnie.
+                        for k, v in u.items():
+                            usage[k] = (usage.get(k, 0) + v) if isinstance(v, (int, float)) else v
                     out = resp.get("output")
                     if isinstance(out, list):
                         output_items = out
@@ -407,12 +411,18 @@ def stream_response(
 
     # Pętla narzędzi MCP (klient-side function calling). Bez `function_tools`/`tool_handler`
     # wykonuje się DOKŁADNIE raz — zachowanie identyczne jak przed M14 (czysty czat/search).
-    for _iter in range(max(1, max_tool_iters)):
+    n_iters = max(1, max_tool_iters)
+    for _iter in range(n_iters):
         output_items = _run_turn(input_items, with_tool_choice=(_iter == 0))
         calls = _function_calls_from_output(output_items) if (function_tools and tool_handler) else []
         if not calls:
             break
         if stop_flag and stop_flag():
+            break
+        # S31-i: na OSTATNIEJ iteracji NIE wykonuj narzędzi — ich wyniki nie wróciłyby już
+        # do modelu (brak kolejnego _run_turn), a tool_handler ma SKUTKI UBOCZNE (np.
+        # wygenerowany obraz / mutujące MCP). Przerwij przed egzekucją „w próżnię".
+        if _iter == n_iters - 1:
             break
         # Dołącz output modelu (item-y function_call) + nasze wyniki — kontrakt Responses
         # (stateless): kolejne żądanie niesie pełen kontekst tury narzędziowej.

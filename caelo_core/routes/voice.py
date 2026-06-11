@@ -37,7 +37,7 @@ import config  # type: ignore
 
 from caelo_core import responses_client
 from caelo_core import validation as V
-from caelo_core.errors import upstream_error
+from caelo_core.errors import masked_error, upstream_error
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import Backend, get_backend, ws_authorized
 
@@ -182,7 +182,7 @@ async def _bridge_upstream(ws: WebSocket, build_url: Callable[[], str]) -> None:
             await asyncio.gather(client_to_upstream(), upstream_to_client())
     except Exception as exc:  # noqa: BLE001
         try:
-            await ws.send_json({"type": "error", "error": str(exc)})
+            await ws.send_json({"type": "error", "error": masked_error(exc, "Voice request failed")})
         except Exception:
             pass
     finally:
@@ -319,7 +319,7 @@ async def voice_converse(ws: WebSocket) -> None:
                                   "citations": [c.get("url") for c in result.get("citations", [])]},
                         )
                 except Exception as exc:  # noqa: BLE001
-                    stream.emit({"type": "error", "error": str(exc)})
+                    stream.emit({"type": "error", "error": masked_error(exc, "Voice request failed")})
 
             t = threading.Thread(target=worker, daemon=True)
             current["thread"] = t
@@ -343,6 +343,15 @@ async def voice_converse(ws: WebSocket) -> None:
                         current["stop"].set()  # barge-in / anuluj bieżącą turę
                 elif mtype == "converse":
                     if not (msg.get("transcript") or "").strip():
+                        continue
+                    # P2-3.2-d: limity messages[] + transkrypt jak REST (single-flight pętla trwa).
+                    try:
+                        V.validate_ws_messages(msg.get("messages") or [])
+                        if len((msg.get("transcript") or "")) > V.MAX_TTS_TEXT:
+                            raise ValueError("transcript too long")
+                    except ValueError:
+                        await stream.send({"type": "error",
+                                           "error": "Message payload too large or malformed."})
                         continue
                     if _busy():
                         await stream.send({"type": "error",

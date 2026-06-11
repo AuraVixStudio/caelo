@@ -69,10 +69,13 @@ from caelo_core.tools.smoke_routes import (  # noqa: F401,E402
 from caelo_core.tools.smoke_core import (  # noqa: F401,E402
     _unit_ws_auth,
     _unit_data_dir_override,
+    _unit_lazy_init_race,
     _unit_rest_token_auth,
     _unit_input_validation,
     _unit_settings_ownership,
     _unit_json_corrupt_backup,
+    _unit_oauth_recovery,
+    _unit_history_manager_concurrency,
     _unit_error_sanitization,
     _unit_packages,
     _unit_commands_skills,
@@ -253,6 +256,9 @@ def main() -> int:
         # P1-E: CAELO_CORE_DATA_DIR override przekierowuje DATA_DIR (izolacja smoke).
         _unit_data_dir_override(checks)
 
+        # S31-c: leniwa inicjalizacja managerów Backendu jest thread-safe (jeden obiekt).
+        _unit_lazy_init_race(checks)
+
         # P1-4: every APIManager HTTP call must pass an explicit timeout.
         _unit_api_timeouts(checks)
 
@@ -287,7 +293,9 @@ def main() -> int:
 
         # M6 — stabilność/dane:
         _unit_rest_token_auth(checks)        # P1-10: REST fail-closed bez tokenu
-        _unit_json_corrupt_backup(checks)    # P1-11: loader z backupem .corrupt
+        _unit_json_corrupt_backup(checks)    # P1-11/S31-e: loader z backupem .corrupt
+        _unit_oauth_recovery(checks)         # S31-f/g: oauth print→log + lock/backoff
+        _unit_history_manager_concurrency(checks)  # S31-m: HistoryManager thread-safe
         _unit_error_sanitization(checks)     # P1-13: git nie wycieka stderr/ścieżek
         _unit_media_download_guard(checks)   # P1-14: https-only + limit rozmiaru
 

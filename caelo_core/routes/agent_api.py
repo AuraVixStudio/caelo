@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config  # type: ignore
 
@@ -69,12 +69,18 @@ def get_caelo_md(b: Backend = Depends(get_backend)) -> dict:
 
 
 class CaeloMdReq(BaseModel):
-    content: str
+    # P2-3.2-a: cap długości znakowej (GET deklaruje max_bytes, a strona odczytu i tak
+    # truncuje na MAX_CAELO_MD_BYTES — bez tego zapis przyjmował dowolny rozmiar).
+    content: str = Field("", max_length=MAX_CAELO_MD_BYTES)
 
 
 @router.put("/caelo-md")
 def put_caelo_md(req: CaeloMdReq, ws=Depends(require_workspace)) -> dict:
     """Zapisz workspace'owy CAELO.md (atomowo, sandbox). Wejdzie od następnej tury."""
+    # Dodatkowo egzekwuj BAJTOWY budżet (UTF-8 wielobajtowy może przekroczyć cap znakowy).
+    if len(req.content.encode("utf-8")) > MAX_CAELO_MD_BYTES:
+        raise HTTPException(status_code=400,
+                            detail=f"CAELO.md too large (> {MAX_CAELO_MD_BYTES // 1024} KiB)")
     try:
         p = ws.resolve(CAELO_MD_NAME)
         atomic_write_text(p, req.content)

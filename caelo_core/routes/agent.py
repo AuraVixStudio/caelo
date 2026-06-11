@@ -48,6 +48,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from caelo_core import validation as V
 from caelo_core.agent.runner import AgentRunner
+from caelo_core.errors import masked_error
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
 
@@ -135,7 +136,8 @@ async def agent_stream(ws: WebSocket) -> None:
                         await stream.send({"type": "workspace",
                                            "path": backend.get_workspace().root.as_posix()})
                     except Exception as exc:  # noqa: BLE001
-                        await stream.send({"type": "error", "error": str(exc)})
+                        await stream.send({"type": "error",
+                                           "error": masked_error(exc, "Could not set workspace")})
                 elif mtype == "message":
                     if state["busy"]:
                         await stream.send({"type": "error", "error": "Agent is busy"})

@@ -284,6 +284,41 @@ def test_templates(d: Path) -> None:
           meta == {} and any(r.levelno >= logging.WARNING for r in seen))
 
 
+def test_inspect_install_same_bytes(d: Path) -> None:
+    """S34-c: po inspekcji GUI instaluje POBRANE bajty (consent), nie ponowny fetch URL —
+    inaczej serwer/MITM mógł podmienić pakiet między kartą zgody a instalacją (integrity
+    samoodnosząca przepuszcza oba spójne warianty)."""
+    import base64
+    pm = _mgr(d)
+    dataA = pm.build_package(
+        {"id": "pkgA", "name": "A", "version": "1.0.0", "type": "skill", "description": "a"},
+        {"SKILL.md": "---\nname: A\ndescription: a\n---\nA"})
+    dataB = pm.build_package(
+        {"id": "pkgB", "name": "B", "version": "1.0.0", "type": "skill", "description": "b"},
+        {"SKILL.md": "---\nname: B\ndescription: b\n---\nB"})
+    calls = {"n": 0}
+
+    def swap_fetch(url):  # serwer podmienia pakiet po inspekcji
+        calls["n"] += 1
+        return dataA if calls["n"] == 1 else dataB
+
+    pm.fetch_package = swap_fetch
+    rep = pm.inspect_from_url("https://x/pkg.caelopkg")
+    check("S34-c: inspect_from_url returns fetched bytes",
+          rep.get("fetched_b64") == base64.b64encode(dataA).decode("ascii"))
+    pm.install(base64.b64decode(rep["fetched_b64"]), consent=True)
+    ids = {p["id"] for p in pm.list_installed()}
+    check("S34-c: install uses consented bytes (pkgA, not swapped pkgB)",
+          "pkgA" in ids and "pkgB" not in ids)
+    # kontrola: legacy install_from_url pobiera DRUGI raz → pkgB (gap, który GUI omija)
+    pm.uninstall("pkgA", "skill")
+    calls["n"] = 1  # następny fetch zwróci dataB
+    pm.install_from_url("https://x/pkg.caelopkg", consent=True)
+    ids2 = {p["id"] for p in pm.list_installed()}
+    check("S34-c: legacy install_from_url re-fetches (documents the bypassed gap)",
+          "pkgB" in ids2)
+
+
 def main() -> int:
     test_versions()
     test_manifest()
@@ -299,6 +334,8 @@ def main() -> int:
         test_registry_and_updates(Path(d5))
     with tempfile.TemporaryDirectory() as d6:
         test_templates(Path(d6))
+    with tempfile.TemporaryDirectory() as d7:
+        test_inspect_install_same_bytes(Path(d7))
 
     print("\n=== Packages / marketplace self-check (M16) ===")
     ok = True

@@ -282,9 +282,12 @@ def _unit_media_download_guard(checks: list) -> None:
     import caelo_core.backend_media as media_mod  # noqa: E402  # P2-13: requests/limit tutaj
 
     class _Resp:
-        def __init__(self, chunks, headers=None):
+        def __init__(self, chunks, headers=None, url="https://x/file"):
             self._chunks = chunks
             self.headers = headers or {}
+            self.url = url            # S31-j: _download_media re-waliduje finalny URL
+            self.is_redirect = False
+            self.status_code = 200
 
         def __enter__(self):
             return self
@@ -304,8 +307,8 @@ def _unit_media_download_guard(checks: list) -> None:
     def fake_get(url, **kw):
         calls["n"] += 1
         if "BIG" in url:
-            return _Resp([b"x"], headers={"Content-Length": str(media_mod.MAX_MEDIA_BYTES + 1)})
-        return _Resp([b"abc", b"def"])
+            return _Resp([b"x"], headers={"Content-Length": str(media_mod.MAX_MEDIA_BYTES + 1)}, url=url)
+        return _Resp([b"abc", b"def"], url=url)
 
     orig = media_mod.requests
     media_mod.requests = types.SimpleNamespace(get=fake_get)

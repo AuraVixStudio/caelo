@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Optional
 
 import config  # type: ignore
@@ -393,6 +394,10 @@ class RoleRegistry:
         self._path = path or config.SUBAGENTS_FILE
         self._user_roles: dict[str, dict] = {}
         self._limits: dict = dict(DEFAULT_LIMITS)
+        # 3.3-d: RLock — registry jest czytany z wątków subagentów (team.run: limits()/get())
+        # i zapisywany z REST (/agent/team/roles,limits). Bez locka _save()'s iteracja po
+        # _user_roles mogła trafić „dictionary changed size during iteration".
+        self._lock = threading.RLock()
         self._load()
 
     # --- trwałość ---
@@ -426,13 +431,15 @@ class RoleRegistry:
 
     # --- odczyt ---
     def limits(self) -> dict:
-        return dict(self._limits)
+        with self._lock:
+            return dict(self._limits)
 
     def get(self, role_id: str) -> Optional[dict]:
         """Rola po id: nadpisanie usera ma pierwszeństwo nad wbudowaną. Zwracana w
         pełnym, znormalizowanym kształcie (B9/B11 — `_normalize_role`)."""
-        if role_id in self._user_roles:
-            return _normalize_role(self._user_roles[role_id])
+        with self._lock:
+            if role_id in self._user_roles:
+                return _normalize_role(self._user_roles[role_id])
         for r in BUILTIN_ROLES:
             if r["id"] == role_id:
                 return _normalize_role(r)
@@ -442,7 +449,8 @@ class RoleRegistry:
         """Wszystkie role (wbudowane nadpisane wpisami usera + role usera), każda w
         znormalizowanym kształcie (B9/B11)."""
         merged: dict[str, dict] = {r["id"]: dict(r) for r in BUILTIN_ROLES}
-        merged.update({rid: dict(r) for rid, r in self._user_roles.items()})
+        with self._lock:
+            merged.update({rid: dict(r) for rid, r in self._user_roles.items()})
         return [_normalize_role(merged[k]) for k in sorted(merged)]
 
     # --- zapis (F4) ---
@@ -451,19 +459,22 @@ class RoleRegistry:
         if clean is None:
             raise ValueError("role requires a non-empty 'id'")
         clean["builtin"] = False
-        self._user_roles[clean["id"]] = clean
-        self._save()
+        with self._lock:
+            self._user_roles[clean["id"]] = clean
+            self._save()
         return clean
 
     def remove_role(self, role_id: str) -> bool:
         """Usuń nadpisanie/rolę usera. Wbudowane wracają do domyślnych. False, gdy brak."""
-        if role_id in self._user_roles:
-            del self._user_roles[role_id]
-            self._save()
-            return True
+        with self._lock:
+            if role_id in self._user_roles:
+                del self._user_roles[role_id]
+                self._save()
+                return True
         return False
 
     def set_limits(self, patch: dict) -> dict:
-        self._limits = self._merge_limits({**self._limits, **(patch or {})})
-        self._save()
-        return dict(self._limits)
+        with self._lock:
+            self._limits = self._merge_limits({**self._limits, **(patch or {})})
+            self._save()
+            return dict(self._limits)

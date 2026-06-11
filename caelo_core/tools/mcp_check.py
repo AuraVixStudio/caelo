@@ -97,6 +97,43 @@ def test_manager() -> None:
         mgr2.shutdown()
 
 
+def test_concurrent_start() -> None:
+    """S34-a: dwa równoległe start_server(sid) wołają srv.start() RAZ — bez tego oba
+    wychodziły z locka i startowały ten sam serwer dwukrotnie (osierocony podproces)."""
+    import threading
+    import time
+    with tempfile.TemporaryDirectory() as d:
+        cfg_path = Path(d) / "caelo_mcp.json"
+        mgr = McpManager(cfg_path)
+        mgr.add_server({"id": "mock", "name": "Mock", "transport": "stdio", "command": MOCK_CMD})
+        srv = mgr._servers["mock"]
+        real_start = srv.start
+        count = {"n": 0}
+        clock = threading.Lock()
+
+        def counting_start():
+            with clock:
+                count["n"] += 1
+            time.sleep(0.05)  # poszerz okno wyścigu
+            return real_start()
+
+        srv.start = counting_start
+        barrier = threading.Barrier(2)
+
+        def worker():
+            barrier.wait()
+            mgr.start_server("mock")
+
+        ts = [threading.Thread(target=worker) for _ in range(2)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(10)
+        check("S34-a: concurrent start_server starts subprocess once", count["n"] == 1)
+        check("S34-a: server ready after concurrent start", srv.is_ready())
+        mgr.shutdown()
+
+
 def test_remote() -> None:
     with tempfile.TemporaryDirectory() as d:
         mgr = McpManager(Path(d) / "caelo_mcp.json")
@@ -212,6 +249,7 @@ def test_interop() -> None:
 def main() -> int:
     test_client()
     test_manager()
+    test_concurrent_start()  # S34-a
     test_remote()
     test_corrupt_config()
     test_interop()

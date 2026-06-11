@@ -47,6 +47,53 @@ MAX_ID_LEN = 64            # długość identyfikatorów (artifact_id / project_
 # Obrazy dodatkowo przez validate_image_uri (MAX_IMAGE_URI, ~9 MB) — stricter.
 MAX_INPUT_FILE_BYTES = 32 * 1024 * 1024
 
+# P2-3.2-d: limity messages[] dla KANAŁÓW WS (czat/voice). REST waliduje przez Pydantic,
+# ale `/chat/stream` i `/voice/*` json.loads surowy frame i forwardują do workera bez
+# bounds — duża historia / wielkie data-URI w content[] mogły rosnąć w pamięci/payloadzie.
+MAX_WS_MESSAGES = 400              # max wiadomości w jednej ramce WS
+MAX_WS_MESSAGE_CHARS = 200_000     # max długość pojedynczego tekstowego content/text
+
+
+def _walk_data_uris(obj):
+    """Wyłuskaj wszystkie stringi `data:…` z (zagnieżdżonego) content[] — odporne na
+    różne kształty części (image_url.url / file_data / input_file…)."""
+    if isinstance(obj, str):
+        if obj.startswith("data:"):
+            yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _walk_data_uris(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_data_uris(v)
+
+
+def validate_ws_messages(messages) -> None:
+    """P2-3.2-d: ogranicz messages[] z ramki WS (liczba / długość tekstu / rozmiar data-URI).
+    Rzuca ValueError przy przekroczeniu — wołający odsyła zamaskowaną ramkę błędu i NIE
+    przerywa pętli odbioru. Limity hojne (długie historie są legalne)."""
+    if not isinstance(messages, list):
+        raise ValueError("messages must be a list")
+    if len(messages) > MAX_WS_MESSAGES:
+        raise ValueError(f"too many messages (> {MAX_WS_MESSAGES})")
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            if len(content) > MAX_WS_MESSAGE_CHARS:
+                raise ValueError(f"message content too long (> {MAX_WS_MESSAGE_CHARS} chars)")
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    t = part.get("text")
+                    if isinstance(t, str) and len(t) > MAX_WS_MESSAGE_CHARS:
+                        raise ValueError(f"message text part too long (> {MAX_WS_MESSAGE_CHARS} chars)")
+            for uri in _walk_data_uris(content):
+                if len(uri) > MAX_DOCUMENT_URI:
+                    raise ValueError(
+                        f"embedded data-URI too large (> {MAX_DOCUMENT_URI // (1024 * 1024)} MB)")
+
 _IMAGE_DATA_URI = re.compile(r"^data:image/[a-zA-Z0-9.+-]+;base64,", re.IGNORECASE)
 
 

@@ -176,12 +176,14 @@ class AgentRunner:
         `stop` jest tylko czytany — czyszczenie należy do transportu. M19-B9:
         `reasoning_effort` (None = domyślny runnera) trafia do sesji i delegacji."""
         self._last_assistant = ""
+        ran = False  # 3.3-e: czy tura faktycznie ruszyła (był workspace) — gate na record_event
         try:
             ws_obj = self.backend.get_workspace()
             if ws_obj is None:
                 self.emit({"type": "error", "error": "No workspace selected"})
                 return ""
             session = self._ensure_session(ws_obj)
+            ran = True
             # M17: zapamiętaj model/tryb tury — delegate_fn użyje ich dla subagentów.
             self._model = model
             self._mode = mode
@@ -197,7 +199,10 @@ class AgentRunner:
         finally:
             # M9-B2: podsumowanie tury do wspólnej historii huba (mode=code). Tekst =
             # finalna odpowiedź agenta; instrukcja usera + workspace w meta.
-            if text or self._last_assistant:
+            # 3.3-e: tylko gdy tura RUSZYŁA (był workspace) — inaczej `text` (prompt) jest
+            # truthy i record_event zapisywał pusty event 'code' (workspace=None) za turę,
+            # która się nie wykonała (śmieci w historii + indeksie pamięci).
+            if ran and (text or self._last_assistant):
                 wsp = self.backend.get_workspace()
                 self.backend.record_event(
                     mode="code", text=self._last_assistant or "",

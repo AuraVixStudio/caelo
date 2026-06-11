@@ -269,6 +269,17 @@ def test_project_root_flag() -> None:
               ws2 is not None and Path(ws2.root).resolve() == sub.resolve())
 
 
+def test_no_workspace_no_event() -> None:
+    """3.3-e: tura bez workspace NIE zapisuje pustego eventu 'code' (śmieci w historii)."""
+    from caelo_core.agent.runner import AgentRunner
+
+    b = StubBackend()  # get_workspace() == None (brak set_workspace)
+    runner = AgentRunner(b, emit=lambda e: None,
+                         request_approval=lambda *a: "reject", stop=lambda: False)
+    runner.run_turn("hello", model="mock")
+    check("3.3-e: no-workspace turn records no history event", b.recorded == [])
+
+
 def test_session_id_traversal() -> None:
     """P1-A: spreparowany id sesji nie wychodzi z DATA_DIR/sessions (read/delete/OVERWRITE)."""
     with tempfile.TemporaryDirectory() as data:
@@ -308,6 +319,7 @@ def main() -> int:
     test_resolve_tools()
     test_sessions()
     test_session_id_traversal()
+    test_no_workspace_no_event()  # 3.3-e
     test_effort()
     test_export()
     test_worktree_flag()

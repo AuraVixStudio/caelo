@@ -227,6 +227,11 @@ class GenJobManager:
         if job is None or job.status in TERMINAL:
             return job
         with self._lock:
+            # S31-a: re-czytaj status POD lockiem — bez tego okno między get() a set()
+            # pozwalało „wskrzesić" zadanie (cancel widzi QUEUED, worker już zrobił RUNNING).
+            job = self.get(job_id)
+            if job is None or job.status in TERMINAL:
+                return job
             ev = self._cancel.get(job_id)
             if ev is not None:
                 ev.set()
@@ -261,11 +266,14 @@ class GenJobManager:
         """Wyczyść z listy wszystkie zakończone zadania (opcjonalnie po `kind`/projekcie).
         Aktywne zostają; artefakty NIE są usuwane. Zwraca liczbę usuniętych."""
         n = self._store.delete_terminal_gen_jobs(kind=kind, project_id=project_id)
-        # Przytnij słowniki eventów do wciąż aktywnych zadań (reszta to martwy balast).
-        active_ids = {j.id for j in self.list_jobs(active=True, limit=1000)}
-        for d in (self._cancel, self._finished):
-            for k in [k for k in list(d) if k not in active_ids]:
-                d.pop(k, None)
+        # S31-b: snapshot active_ids + prune POD lockiem (serializacja vs submit(), które
+        # pisze _cancel/_finished pod tym samym lockiem) — inaczej można wypruć eventy
+        # świeżo zasubmitowanego zadania (jego cancel()/wait() przestałyby działać).
+        with self._lock:
+            active_ids = {j.id for j in self.list_jobs(active=True, limit=1000)}
+            for d in (self._cancel, self._finished):
+                for k in [k for k in list(d) if k not in active_ids]:
+                    d.pop(k, None)
         return n
 
     def wait(self, job_id: str, timeout: float = 30.0) -> Optional[GenJob]:
@@ -303,13 +311,18 @@ class GenJobManager:
         if job is None:
             return
         cancel = self._cancel.get(job_id) or threading.Event()
-        # Anulowane, zanim worker je podniósł (race z cancel()).
-        if cancel.is_set() or job.status != QUEUED:
-            if job.status == QUEUED:
-                self._set(job, CANCELLED)
-            self._signal_finished(job_id)
-            return
-        job = self._set(job, RUNNING)
+        # S31-a: przejście QUEUED->RUNNING (i sprawdzenie cancel) ATOMOWO pod lockiem,
+        # by nie ścigać się z cancel() (które też re-czyta status pod tym samym lockiem).
+        with self._lock:
+            job = self.get(job_id)
+            if job is None:
+                return
+            if cancel.is_set() or job.status != QUEUED:
+                if job.status == QUEUED:
+                    self._set(job, CANCELLED)
+                self._signal_finished(job_id)
+                return
+            job = self._set(job, RUNNING)
         try:
             artifact_ids = list(self._executor(job, cancel) or [])
             job.artifact_ids = artifact_ids

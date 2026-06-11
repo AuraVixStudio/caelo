@@ -19,6 +19,7 @@ są WSTRZYKIWANE — manager jest testowalny na stubach i nie tworzy cykli impor
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
@@ -665,6 +666,11 @@ class PackageManager:
         data = self.fetch_package(url)
         out = self.inspect(data)
         out["source_url"] = url
+        # S34-c: zwróć POBRANE bajty, by GUI zainstalowało DOKŁADNIE to, co pokazała karta
+        # zgody. install_from_url pobierał URL DRUGI raz — a `integrity` jest samoodnosząca
+        # (manifest niesie hash WŁASNEGO payloadu), więc złośliwy/MITM host mógł podać
+        # przy fetch #1 inny (spójny) pakiet niż przy fetch #2. Renderer instaluje `data_b64`.
+        out["fetched_b64"] = base64.b64encode(data).decode("ascii")
         return out
 
     # === aktualizacje / kompatybilność (M16-7) ===============================

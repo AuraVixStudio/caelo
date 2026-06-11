@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from caelo_core.state import Backend, get_backend
@@ -31,5 +33,16 @@ def get_output_dir(b: Backend = Depends(get_backend)) -> dict:
 
 @router.put("/config/output-dir")
 def set_output_dir(body: OutputDir, b: Backend = Depends(get_backend)) -> dict:
-    b.history.set_save_path(body.path)
+    # P2-3.2-b: waliduj PRZED zapisem. save-path trafia do `_media_bases()` (allow-lista
+    # serwowania/kasowania `/artifacts`); ustawienie go na korzeń FS (C:\ / /) poszerzyłoby
+    # sandbox na cały dysk. (Konsument `media_paths.media_bases` też odrzuca korzeń — DiD.)
+    try:
+        rp = Path(body.path).expanduser().resolve()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid output directory")
+    if rp.parent == rp or str(rp) == rp.anchor:
+        raise HTTPException(status_code=400, detail="Output directory cannot be a filesystem root")
+    if not rp.is_dir():
+        raise HTTPException(status_code=400, detail="Output directory must be an existing folder")
+    b.history.set_save_path(str(rp))
     return {"ok": True, "path": b.history.get_save_path()}

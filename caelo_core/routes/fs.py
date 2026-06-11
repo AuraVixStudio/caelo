@@ -19,6 +19,8 @@ router = APIRouter(prefix="/fs", tags=["fs"])
 
 # Cap na płaski spis plików (@-odwołania w composerze agenta) — duże repo nie zaleją UI.
 MAX_FS_FILES = 5000
+# P2-3.2-c: cap rozmiaru pliku otwieranego w edytorze (read_text całości → OOM).
+MAX_FS_READ_BYTES = 5 * 1024 * 1024
 
 
 class WorkspaceReq(BaseModel):
@@ -103,6 +105,13 @@ def read(path: str, ws=Depends(require_workspace)) -> dict:
     except WorkspaceError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if not p.is_file():
+        raise HTTPException(status_code=404, detail="Not a file")
+    try:  # P2-3.2-c: nie wczytuj wielogigabajtowego pliku do JSON-a (OOM)
+        if p.stat().st_size > MAX_FS_READ_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large to open in editor (> {MAX_FS_READ_BYTES // (1024 * 1024)} MB)")
+    except OSError:
         raise HTTPException(status_code=404, detail="Not a file")
     return {"path": ws.rel(p), "content": p.read_text(encoding="utf-8", errors="replace")}
 

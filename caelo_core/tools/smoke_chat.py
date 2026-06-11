@@ -256,6 +256,37 @@ def _unit_responses_mcp_loop(checks: list) -> None:
                    any(t.get("type") == "mcp" and t.get("server_url") == "https://ex.com/mcp"
                        for t in rt_tools)))
 
+    # S31-i: usage SUMOWANE przez tury pętli narzędzi (turn1 in5/out5 + turn2 out3 = in5/out8)
+    checks.append(("S31-i: usage summed across tool-loop turns",
+                   res.get("usage", {}).get("output_tokens") == 8
+                   and res.get("usage", {}).get("input_tokens") == 5))
+
+    # S31-i: ostatnia (wyczerpana) iteracja NIE wykonuje narzędzi „w próżnię" (skutki
+    # uboczne, których model już nie zobaczy). max_tool_iters=1 + stub zawsze proszący o
+    # narzędzie → handler NIE wołany (stary kod wołałby go raz).
+    captured["payloads"].clear()
+    handled2: list = []
+
+    def handler2(name, args):
+        handled2.append(name)
+        return "X"
+
+    def _post_loop(url, **kw):
+        captured["payloads"].append(kw.get("json"))
+        return _Resp(turn1)  # zawsze function_call, nigdy final
+
+    rc.requests = types.SimpleNamespace(post=_post_loop, get=getattr(original, "get", None))
+    try:
+        rc.stream_response(
+            [{"role": "user", "content": "x"}], model="grok-4.3", api_key_provider=lambda: "K",
+            function_tools=[{"type": "function", "function": {
+                "name": "mcp__t__lookup", "description": "d", "parameters": {"type": "object"}}}],
+            tool_handler=handler2, on_delta=lambda d, f: None, max_tool_iters=1)
+    finally:
+        rc.requests = original
+    checks.append(("S31-i: no tool execution on exhausted final iteration",
+                   handled2 == [] and len(captured["payloads"]) == 1))
+
 
 def _unit_chat_media(checks: list) -> None:
     """M20: narzędzia generowania mediów w czacie (function-calling) — definicje + handler.
@@ -598,6 +629,43 @@ def _unit_chat_bridge(checks: list) -> None:
                        seen_eff.get("effort") == "high"))
     except Exception as exc:  # noqa: BLE001
         checks.append((f"chat bridge: effort scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 7: P2-3.2-d — oversize messages[] odrzucone (error, brak done) ---
+    from caelo_core import validation as _V
+    try:
+        rc.stream_response = stub_ok
+        big_msgs = [{"role": "user", "content": "x"} for _ in range(_V.MAX_WS_MESSAGES + 1)]
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": big_msgs, "model": "grok-4.3"})],
+            _backend()))
+        errs = [m for m in sent if m.get("type") == "error"]
+        done = [m for m in sent if m.get("type") == "done"]
+        checks.append(("chat bridge: oversize messages[] rejected, no stream (P2-3.2-d)",
+                       bool(errs) and not done))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: oversize scenario ran ({exc})", False))
+    finally:
+        rc.stream_response = orig_stream
+
+    # --- scenariusz 8: P2-3.2-e — ramka error MASKUJE surowy str(exc) (URL api.x.ai) ---
+    def stub_secret(messages, **kw):
+        raise RuntimeError("connect https://api.x.ai/v1/secretpath failed")
+
+    try:
+        rc.stream_response = stub_secret
+        sent = asyncio.run(_run(
+            [json.dumps({"type": "chat", "messages": [{"role": "user", "content": "hi"}],
+                         "model": "grok-4.3", "search_mode": "on"})],
+            _backend()))
+        errs = [m for m in sent if m.get("type") == "error"]
+        checks.append(("chat bridge: WS error frame masks raw exc (P2-3.2-e)",
+                       bool(errs)
+                       and not any("api.x.ai" in (e.get("error") or "") for e in errs)
+                       and any(e.get("error") == "Chat request failed" for e in errs)))
+    except Exception as exc:  # noqa: BLE001
+        checks.append((f"chat bridge: masking scenario ran ({exc})", False))
     finally:
         rc.stream_response = orig_stream
 

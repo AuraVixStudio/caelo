@@ -179,6 +179,17 @@ class HistoryStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @staticmethod
+    def _is_corruption(exc: BaseException) -> bool:
+        """S31-d: czy błąd otwarcia bazy to FAKTYCZNA korupcja (→ backup .corrupt), czy
+        przejściowy problem (lock / I-O → re-raise, nie kasuj pliku). `OperationalError`
+        bez markerów korupcji = przejściowy; jawny `integrity_check` raise = korupcja."""
+        msg = str(exc).lower()
+        markers = ("malformed", "not a database", "encrypted", "integrity_check")
+        if isinstance(exc, sqlite3.OperationalError):
+            return any(s in msg for s in markers)
+        return True  # inny DatabaseError (w tym nasz integrity_check raise) = korupcja
+
     def _connect_or_backup(self, path: Path) -> sqlite3.Connection:
         path.parent.mkdir(parents=True, exist_ok=True)
         conn: Optional[sqlite3.Connection] = None
@@ -190,13 +201,21 @@ class HistoryStore:
                 raise sqlite3.DatabaseError(f"integrity_check: {row[0] if row else 'empty'}")
             return self._configure(conn)
         except sqlite3.DatabaseError as exc:
-            _log.error("History db %s unusable (%s); backing up and recreating",
-                       path.name, exc)
             if conn is not None:
                 try:
                     conn.close()
-                except Exception:  # noqa: BLE001 — zamknięcie uszkodzonego połączenia; powód zalogowano wyżej, bazę i tak odtwarzamy
+                except Exception:  # noqa: BLE001 — zamknięcie uszkodzonego połączenia
                     pass
+            # S31-d: OperationalError obejmuje też contention/I-O ("database is locked" —
+            # np. druga instancja sidecara w dev, "disk I/O error"). To NIE korupcja —
+            # backup zdrowej bazy do .corrupt = „zniknęła historia". Backup TYLKO przy
+            # faktycznej korupcji; przejściowy błąd PROPAGUJEMY, by się ujawnił, a nie kasował pliku.
+            if not self._is_corruption(exc):
+                _log.warning("History db %s transient open error (%s); not treating as corrupt",
+                             path.name, exc)
+                raise
+            _log.error("History db %s unusable (%s); backing up and recreating",
+                       path.name, exc)
             self._backup_corrupt(path)
             return self._configure(sqlite3.connect(str(path), check_same_thread=False))
 

@@ -278,6 +278,65 @@ def test_run_command_stop() -> None:
         check("run_command stops promptly (tree-kill)", elapsed < 5)
 
 
+def test_device_and_read_cap() -> None:
+    """3.3-a: Workspace.resolve odrzuca urządzenia Windows (CON…); read_file ma cap rozmiaru."""
+    from caelo_core.agent.workspace import WorkspaceError
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        if os.name == "nt":
+            raised = False
+            try:
+                ws.resolve("CON")
+            except WorkspaceError:
+                raised = True
+            check("3.3-a: resolve rejects CON device (Windows)", raised)
+            # read_file deleguje rzucanie do execute_tool (jak escape) → Error string
+            check("3.3-a: read_file (via execute_tool) rejects CON device",
+                  T.execute_tool(ws, "read_file", {"path": "CON"}).startswith("Error"))
+        else:
+            check("3.3-a: device-name guard is Windows-only (skipped on POSIX)", True)
+        # cap rozmiaru — portable; tymczasowo obniżamy stałą, by nie pisać 16 MB
+        prev = T.READ_FILE_MAX_BYTES
+        T.READ_FILE_MAX_BYTES = 10
+        try:
+            (ws.root / "big.bin").write_text("0123456789ABCDEF", encoding="utf-8")  # 16 > 10
+            check("3.3-a: read_file rejects oversize file (cap)",
+                  T.read_file(ws, "big.bin").startswith("Error"))
+            (ws.root / "small.txt").write_text("hi", encoding="utf-8")
+            check("3.3-a: read_file reads small file under cap",
+                  not T.read_file(ws, "small.txt").startswith("Error"))
+        finally:
+            T.READ_FILE_MAX_BYTES = prev
+
+
+def test_run_command_no_false_timeout() -> None:
+    """3.3-f: szybka komenda kończąca exit 0 nie dostaje fałszywego [timeout]."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        cmd = "cmd /c exit 0" if os.name == "nt" else "true"
+        ok = True
+        for _ in range(20):
+            out = T.run_command(ws, cmd, timeout=1)
+            if "[timeout]" in out or not out.startswith("(exit 0)"):
+                ok = False
+                break
+        check("3.3-f: run_command never falsely reports timeout on fast exit", ok)
+
+
+def test_web_fetch_dns_rebinding() -> None:
+    """3.3-g: host rozwiązujący się na prywatne IP jest blokowany (DNS rebinding)."""
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        prev = T.socket.getaddrinfo
+        T.socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, "", ("10.0.0.5", 443))]
+        try:
+            res = T.web_fetch(ws, url="https://rebind.example.com/x")
+            check("3.3-g: web_fetch blocks host resolving to private IP",
+                  isinstance(res, str) and "refused" in res)
+        finally:
+            T.socket.getaddrinfo = prev
+
+
 def test_atomic_write() -> None:
     """P0-7: write_file/edit_file zapisują atomowo, bez plików tymczasowych."""
     with tempfile.TemporaryDirectory() as d:
@@ -935,6 +994,16 @@ def test_hooks() -> None:
               hm.run_pre_tool("run_command", {"command": "git status"}) is None)
         check("B5: pre_tool blocks force push",
               hm.run_pre_tool("run_command", {"command": "git push origin main --force"}) is not None)
+        # S31-l: domknięte luki wzorców (git push -f, rd /s, del /f)
+        check("S31-l: pre_tool blocks git push -f",
+              hm.run_pre_tool("run_command", {"command": "git push origin main -f"}) is not None)
+        check("S31-l: pre_tool blocks rd /s",
+              hm.run_pre_tool("run_command", {"command": "rd /s /q C:\\x"}) is not None)
+        check("S31-l: pre_tool blocks del /f",
+              hm.run_pre_tool("run_command", {"command": "del /f /q x"}) is not None)
+        # S31-l: matcher bloku jest FAIL-CLOSED (zły wzorzec/timeout → zablokuj)
+        hit, err = HookManager._matches_blocking("(", "anything")
+        check("S31-l: block matcher fails closed on bad pattern", hit is True and err is True)
         # disable → przepuszcza
         hm.set_enabled("block-dangerous-commands", False)
         check("B5: disabled block hook no longer blocks",
@@ -978,6 +1047,36 @@ def test_hooks() -> None:
         check("B5: block leaves allowlist untouched (no P0 regression)", gate.rules() == [])
         check("B5: blocked command logged to audit",
               any(e.get("action") == "blocked" for e in hm.audit_tail()))
+
+    # 2b) S34-e: tryb bypass NIE omija pre_tool hooka (block-dangerous-commands) — hooki
+    # są niezależne od trybu i poprzedzają pominięcie bramki (`already-fixed` w analizie).
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        hm = HookManager(Path(d) / "hb.json", Path(d) / "ab.log")
+        events = []
+        asked = []
+        calls = {"n": 0}
+
+        def mock_llm_b(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
+            i = calls["n"]
+            calls["n"] += 1
+            if i == 0:
+                return {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "cb", "type": "function",
+                     "function": {"name": "run_command", "arguments": '{"command": "rm -rf important"}'}}]}
+            return {"role": "assistant", "content": "done"}
+
+        session = AgentSession(ws, gate, mock_llm_b, lambda: "k", "http://unused",
+                               emit=events.append,
+                               request_approval=lambda cid, n, det: (asked.append(n), "accept")[1],
+                               hooks=hm)
+        session.run_turn("danger", model="mock", mode="bypass")
+        results = [e for e in events if e.get("type") == "tool_result"]
+        check("S34-e: bypass does NOT skip block-dangerous-commands hook",
+              any(e["id"] == "cb" and not e["ok"] for e in results)
+              and "run_command" not in asked
+              and any(e.get("type") == "hook" and e.get("action") == "blocked" for e in events))
 
     # 3) run_script post hook odpala po write_file
     with tempfile.TemporaryDirectory() as d:
@@ -1865,10 +1964,15 @@ def test_web_fetch() -> None:
     with tempfile.TemporaryDirectory() as d:
         ws = Workspace(d)
         orig_req = T.requests
+        orig_gai = T.socket.getaddrinfo
         try:
             T.requests = _types.SimpleNamespace(
                 get=_getter(lambda u: _Resp(b"<html><body>Hello <b>World</b></body></html>",
                                             "text/html; charset=utf-8", u)))
+            # 3.3-g: rozwiązywanie hosta jest teraz częścią guardu — stubuj na PUBLICZNY IP,
+            # by test był deterministyczny (host literalny prywatny/loopback i tak odpada
+            # wcześniej w _web_host_blocked, przed getaddrinfo).
+            T.socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
             out = T.web_fetch(ws, url="https://example.com/page")
             check("B13: web_fetch reduces HTML to text",
                   "Hello World" in out and "<b>" not in out)
@@ -1916,6 +2020,7 @@ def test_web_fetch() -> None:
                   err.startswith("Error: web_fetch failed") and "SECRET-DETAIL" not in err)
         finally:
             T.requests = orig_req
+            T.socket.getaddrinfo = orig_gai
 
     # --- gating + reguły ---
     check("B13: web_fetch is gated (MUTATING, not READONLY)", "web_fetch" in MUTATING)
@@ -2030,6 +2135,101 @@ def test_project_config() -> None:
               and cfg.get("py", {}).get("command") == "ws-pyright")
 
 
+def test_worktree_path_isolation() -> None:
+    """3.3-b: dwa równoległe TeamManagery na WSPÓLNEJ bazie worktree dostają rozłączne
+    ścieżki (run-<pid>-<uuid>-<seq>), więc nie nadpisują sobie kopii."""
+    from caelo_core.agent.permissions import PermissionGate
+    with tempfile.TemporaryDirectory() as d:
+        reg = _make_registry(d)
+        ws = Workspace(d)
+        gate = PermissionGate()
+        llm = lambda *a, **k: {"role": "assistant", "content": "ok"}  # noqa: E731
+        ta, _ = _make_team(reg, ws, gate, llm)
+        tb, _ = _make_team(reg, ws, gate, llm)
+        shared = Path(tempfile.mkdtemp())
+        ta.worktrees_base = shared
+        tb.worktrees_base = shared
+        pa = ta.new_worktree_path("sa1")
+        pb = tb.new_worktree_path("sa1")
+        check("3.3-b: parallel teams get disjoint worktree roots", pa != pb)
+        check("3.3-b: worktree path is process-unique (pid-tagged)",
+              "run-" in str(pa) and str(os.getpid()) in str(pa))
+
+
+def test_role_registry_thread_safety() -> None:
+    """3.3-d: równoległy odczyt/zapis RoleRegistry nie rzuca (lock wokół _save iteracji)."""
+    import threading
+    import time
+    from caelo_core.agent.roles import RoleRegistry
+    with tempfile.TemporaryDirectory() as d:
+        reg = RoleRegistry(Path(d) / "subagents.json")
+        errs: list = []
+        stop = threading.Event()
+
+        def writer(tag: int) -> None:
+            n = 0
+            while not stop.is_set():
+                try:
+                    reg.set_limits({"max_parallel": (n % 4) + 1})
+                    reg.upsert_role({"id": f"r{tag}-{n % 5}", "tools": ["read_file"]})
+                except Exception as e:  # noqa: BLE001
+                    errs.append(repr(e))
+                n += 1
+
+        def reader() -> None:
+            while not stop.is_set():
+                try:
+                    reg.list(); reg.limits(); reg.get("researcher")
+                except Exception as e:  # noqa: BLE001
+                    errs.append(repr(e))
+
+        threads = [threading.Thread(target=writer, args=(0,)),
+                   threading.Thread(target=writer, args=(1,)),
+                   threading.Thread(target=reader)]
+        for t in threads:
+            t.start()
+        time.sleep(0.25)
+        stop.set()
+        for t in threads:
+            t.join(5)
+        check("3.3-d: RoleRegistry concurrent read/write does not raise", errs == [])
+
+
+def test_team_timeout_no_late_merge() -> None:
+    """3.3-c: subagent zablokowany w wywołaniu (LLM ignoruje stop) i ZTIMEOUTOWANY NIE
+    rejestruje scalenia — nawet kończąc PÓŹNO z realną zmianą w worktree."""
+    import threading
+    from caelo_core.agent.permissions import PermissionGate
+    from caelo_core.agent.team import MergeStore
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        (ws.root / "base.txt").write_text("base\n", encoding="utf-8")
+        gate = PermissionGate()
+        reg = _make_registry(d)
+        # timeout_s ma dolny bound 10 w set_limits — ustaw bezpośrednio (szybki test).
+        reg._limits["timeout_s"] = 1
+        reg._limits["max_parallel"] = 1
+        store = MergeStore(ws.root)
+        release = threading.Event()
+        threading.Timer(1.5, release.set).start()  # zwolnij PO timeoutcie (1 s)
+
+        def llm_block(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
+            if "IMPLEMENTER subagent" in messages[0]["content"]:
+                if _n_assist(messages) == 0:
+                    release.wait(10)  # blokuj IGNORUJĄC stop (jak requests.post)
+                    return {"role": "assistant", "content": None, "tool_calls": [
+                        {"id": "w", "type": "function", "function": {
+                            "name": "write_file",
+                            "arguments": json.dumps({"path": "out.txt", "content": "late"})}}]}
+                return {"role": "assistant", "content": "wrote"}
+            return {"role": "assistant", "content": "done"}
+
+        team, _ = _make_team(reg, ws, gate, llm_block, store=store)
+        team.run([{"role": "implementer", "task": "WRITEFILE:out.txt"}],
+                 model="mock", workspace=ws, mode="ask")
+        check("3.3-c: timed-out subagent (late finish) registers no merge", store.list() == [])
+
+
 def main() -> int:
     test_tools()
     test_sandbox()
@@ -2041,9 +2241,12 @@ def main() -> int:
     test_glob_sandbox()
     test_grep_limits()
     test_run_command_stop()
+    test_run_command_no_false_timeout()  # 3.3-f
     test_run_command_env_scrub()
     test_atomic_write()
     test_symlink_sandbox()
+    test_device_and_read_cap()           # 3.3-a
+    test_web_fetch_dns_rebinding()       # 3.3-g
     test_command_security()
     test_ws_stream()
     # M13 — agent: zaufanie (diff / plan / checkpoint / CAELO.md / tryby)
@@ -2060,6 +2263,9 @@ def main() -> int:
     test_team_parallel_stop_budget()
     test_team_merge()
     test_team_cost()
+    test_worktree_path_isolation()      # 3.3-b
+    test_role_registry_thread_safety()  # 3.3-d
+    test_team_timeout_no_late_merge()   # 3.3-c
     # M19 — B4: reguły uprawnień jako globy (ToolPrefix), deny>allow, integracja w pętli
     test_permission_rules()
     # M19 — B6: role skilli-orkiestratorów (rejestracja + brak eskalacji)

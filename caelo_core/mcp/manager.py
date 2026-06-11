@@ -155,6 +155,7 @@ class McpManager:
         self._servers: dict[str, McpServer] = {}
         # qualified_name -> (server_id, raw_tool_name) — adresowanie odporne na sanityzację.
         self._routes: dict[str, tuple[str, str]] = {}
+        self._starting: set[str] = set()  # S34-a: sid w trakcie blokującego start()
         self._load()
 
     @property
@@ -277,13 +278,23 @@ class McpManager:
             if srv.is_ready():
                 self._rebuild_routes_locked()
                 return self.status(sid)
+            # S34-a: druga równoległa próba startu TEGO sid → idempotentnie zwróć status.
+            # Bez tego dwa POST-y widziały is_ready()==False, oba wychodziły z locka i oba
+            # wołały srv.start() na tym samym obiekcie — drugi nadpisywał self.client,
+            # osieracając podproces pierwszego do shutdown(). Różne sid startują równolegle.
+            if sid in self._starting:
+                return self.status(sid)
+            self._starting.add(sid)
             srv.cfg["enabled"] = True
         # connect() blokuje (subprocess + handshake) — poza lockiem, by nie zamrozić
         # innych tras. Re-lock dopiero przy aktualizacji routingu.
-        srv.start()
-        with self._lock:
-            self._rebuild_routes_locked()
-            self._save()
+        try:
+            srv.start()
+        finally:
+            with self._lock:
+                self._starting.discard(sid)
+                self._rebuild_routes_locked()
+                self._save()
         return self.status(sid)
 
     def stop_server(self, sid: str) -> dict:

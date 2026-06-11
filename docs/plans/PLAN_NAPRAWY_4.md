@@ -258,52 +258,64 @@ I/O jak korupcję**. Bazą jest jeden wzorzec lazy-init-z-lockiem (jak `history_
 
 | ID | Plik:linia | Naprawa (1 zdanie) | Test | Eff |
 |---|---|---|---|---|
-| ⬜ **S31-c** | `state.py:378` (+`:180,343,389,475,486,496,516`) | `self._lazy_lock=RLock` + helper double-checked (jak `get_store()`) dla genjobs/mcp/hooks/commands/skills/packages/memory/lsp — **kluczowe**: drugi `GenJobManager._reap_stale` psuje zadania pierwszego | `smoke_core` `_unit_lazy_init_race` (16 wątków → 1 instancja) | M |
-| ⬜ **S31-a** | `genjobs.py:191/269/294` + `backend_media.py:49` | `cancel()` re-czyta status **pod lockiem**; `_run_image_job` honoruje `cancel.is_set()` (przed i po blokującym POST) → `cancelled` zamiast `done` | `genjobs_check` `_unit_cancel` (executor blokujący) | M |
-| ⬜ **S31-b** | `genjobs.py:227` | `clear_finished()` — sekcja prune dictów `_cancel`/`_finished` pod `self._lock` (serializacja vs `submit`) | `genjobs_check` `_unit_clear_race` | S |
-| ⬜ **S34-a** | `mcp/manager.py:272` | `start_server`: zbiór `_starting` pod lockiem (idempotencja tego samego sid), `srv.start()` poza lockiem w `try/finally` | `mcp_check` `test_concurrent_start` (Barrier, licznik=1) | M |
-| ⬜ **S34-b** | `lsp/manager.py:47` | `_ensure` cały pod `RLock` (check-and-create atomowe) — bez podwójnego spawnu przy równoległych subagentach | `lsp_check` `test_concurrent_ensure` | M |
-| ⬜ **3.3-b** | `team.py:428` | ścieżka worktree `run-{pid}-{uuid}-{seq}/{agent_id}` — koniec kolizji między równoległymi `TeamManager` (dwa okna / WS+headless) | `agent_selfcheck` `test_worktree_path_isolation` (wspólny base) | S |
-| ⬜ **3.3-c** | `team.py:534` (+`:153,220`) | subagent po timeout/stop **nie rejestruje merge** (`_cleanup_worktree`); osierocone wątki oznaczone `timeout` w raporcie; potwierdzić skończony `timeout` w `llm.stream_*` | `agent_selfcheck` `test_team_timeout_no_late_merge` | M |
-| ⬜ **3.3-d** | `roles.py:386` | `RoleRegistry._lock=RLock` wokół read/write (`_save` pod lockiem — koniec „dictionary changed size") | `agent_selfcheck` `test_role_registry_thread_safety` | S(P3) |
-| ⬜ **S31-m** | `history_manager.py:23` | `self._lock` wokół mutacja+`_persist` (wołane z workerów genjobs+czatu) — bez lost-update | `smoke_core` `_unit_history_manager_concurrency` | S |
-| ⬜ **RMW settings** | `state.py:242` | lock read-modify-write na `caelo_settings.json` (`update_settings`) — w tej samej rundzie (nota cross-item §3.1) | dorzucić do `_unit_settings_ownership` | S |
+| ✅ **S31-c** | `state.py` lazy props | klasowy `_lazy_lock=RLock` + helper `_lazy()` double-checked dla genjobs/hooks/commands/subagents/memory/packages; mcp/skills/lsp rebuild pod lockiem | smoke_core `_unit_lazy_init_race` (16 wątków → 1) | M |
+| ✅ **S31-a** | `genjobs.py:191/269/294` + `backend_media.py:49` | `cancel()` + `_run_one` re-czytają status **pod lockiem** (atomowe QUEUED→RUNNING); `_run_image_job` honoruje `cancel.is_set()` przed/po POST | genjobs_check (image cancel PASS) | M |
+| ✅ **S31-b** | `genjobs.py:227` | `clear_finished()` — snapshot+prune dictów `_cancel`/`_finished` pod `self._lock` | genjobs_check `_unit_clear_keeps_active` | S |
+| ✅ **S34-a** | `mcp/manager.py` `start_server` | zbiór `_starting` pod lockiem (idempotencja sid), `srv.start()` poza lockiem w `try/finally` | mcp_check `test_concurrent_start` (Barrier, licznik=1) | M |
+| ✅ **S34-b** | `lsp/manager.py` `_ensure` | całe `_ensure`/restart/shutdown pod `RLock` (check-and-create atomowe) | lsp_check `test_concurrent_ensure` | M |
+| ✅ **3.3-b** | `team.py` `new_worktree_path` | ścieżka `run-{pid}-{uuid}-{seq}/{agent_id}` — koniec kolizji między równoległymi `TeamManager` | agent_selfcheck `test_worktree_path_isolation` | S |
+| ✅ **3.3-c** | `team.py` (`run`/`_finalize_worktree`/`_run_concurrent`) | subagent po timeout/stop **nie rejestruje merge** (`_cleanup_worktree`); osierocone wątki oznaczone `timeout` w raporcie | agent_selfcheck `test_team_timeout_no_late_merge` | M |
+| ✅ **3.3-d** | `roles.py` `RoleRegistry` | `_lock=RLock` wokół read/write (`_save` pod lockiem — koniec „dictionary changed size") | agent_selfcheck `test_role_registry_thread_safety` | S(P3) |
+| ✅ **S31-m** | `history_manager.py` | `RLock` wokół mutacja+`_persist` (wołane z workerów genjobs+czatu) — bez lost-update | smoke_core `_unit_history_manager_concurrency` (8 wątków) | S |
+| ✅ **RMW settings** | `state.py` `update_settings` | klasowy `_settings_lock=RLock` wokół read-modify-write `caelo_settings.json` | smoke_core `_unit_settings_ownership` | S |
 
 ### D.2 Odzysk / zbyt szerokie `except` (chronią przed utratą danych, same ją powodują)
 
 | ID | Plik:linia | Naprawa | Test | Eff |
 |---|---|---|---|---|
-| ⬜ **S31-d** | `history_store.py:182` | wąsko: tylko `malformed`/`not a database`/`encrypted` → `.corrupt`; `OperationalError("database is locked")` re-raise (zdrowa baza nie ginie) | `history_check` `_unit_open_locked` | S |
-| ⬜ **S31-e** | `config.py:244` | `except OSError` → default **bez** ruszania pliku; korupcja = tylko `ValueError/JSONDecodeError` | `smoke_core` `_unit_json_corrupt_backup` (OSError nie psuje) | S |
-| ⬜ **S31-f** | `oauth_manager.py:164` | `print()`→`log.info` (stderr) — kontrakt „stdout=handshake" | `smoke_core` assert: brak stdout / `inspect.getsource` bez `print(` | S |
-| ⬜ **S31-g** | `oauth_manager.py:124,219,291` | `Lock`→`RLock`; mutacje tokenów pod lockiem; **backoff** po nieudanym refreshu (`_refresh_fail_until`) | `smoke_core` `_unit_oauth_concurrency` (backoff: 2. wywołanie nie sieciuje) | M |
+| ✅ **S31-d** | `history_store.py` `_connect_or_backup` | helper `_is_corruption()`: tylko `malformed`/`not a database`/`encrypted`/integrity → `.corrupt`; `OperationalError("locked"/"I-O")` re-raise | history_check `test_open_error_classification` | S |
+| ✅ **S31-e** | `config.py` `load_json_or_backup` | `except OSError` → default **bez** ruszania pliku; korupcja = tylko `ValueError` | smoke_core `_unit_json_corrupt_backup` (OSError) | S |
+| ✅ **S31-f** | `oauth_manager.py` `login` | `print()`→`log.info` (stderr) — kontrakt „stdout=handshake" | smoke_core `_unit_oauth_recovery` (brak `print(`) | S |
+| ✅ **S31-g** | `oauth_manager.py` | `Lock`→`RLock`; mutacje tokenów (login/logout) pod lockiem; **backoff** po nieudanym refreshu (`_refresh_fail_until`) | smoke_core `_unit_oauth_recovery` (backoff) | M |
 
 ### D.3 Bezpieczeństwo / limity routów i agenta
 
 | ID | Plik:linia | Naprawa | Test | Eff |
 |---|---|---|---|---|
-| ⬜ **P2-3.2-b** | `system.py:32` + `history.py:139` | walidacja `output-dir` (istniejący katalog, nie-root) **przed** `set_save_path`; `_media_bases()` odrzuca bazę=root (DiD) — zamyka poszerzanie sandboxa `/artifacts` na `C:\` | `smoke_routes` `_unit_history_routes` (root→400; konsument→403) | M |
-| ⬜ **P2-3.2-e** | `chat.py:213`, `voice.py:185,321`, `agent.py:137` | nowy `errors.masked_error(exc,public)`; ramki WS `{"type":"error"}` maskują surowy `str(exc)` (URL-e `api.x.ai`/ścieżki) jak REST | `smoke_chat` (sentinel `api.x.ai` nie wycieka) | M |
-| ⬜ **P2-3.2-d** | `validation.py` + `chat.py:242`, `voice.py:266` | `validate_ws_messages` (MAX 200 / 200 KB / re-use limitów URI); WS waliduje jak REST, błąd = ramka, pętla trwa | `smoke_chat` (oversize → error, brak `done`) | M |
-| ⬜ **3.3-a** | `tools.py:164` + `workspace.py:24` | `read_file` cap `READ_FILE_MAX_BYTES` (~16 MB); `Workspace.resolve` odrzuca urządzenia `CON/PRN/AUX/NUL/COM*/LPT*` (na **komponentach przed** `resolve()`) — koniec wieszania wątku na `read_file("CON")` | `agent_selfcheck` device-name (gate `os.name=='nt'`) + cap rozmiaru | M |
-| ⬜ **3.3-g** | `tools.py:511,550` | `web_fetch` rozwiązuje host (`getaddrinfo`) i sprawdza **wynikowe IP** (loopback/private/link-local) pre-flight i po redirect — koniec DNS-rebindingu (literalny filtr zostaje) | `agent_selfcheck` `test_web_fetch` (host→10.0.0.5 = `refused`) | M |
-| ⬜ **S31-j** | `backend_media.py:173` | `_download_media`: `allow_redirects=False` **i** re-walidacja `urlparse(r.url).scheme=='https'` — koniec ominięcia https→http | `genjobs_check` (redirect→`ValueError`) | S |
-| ⬜ **S31-l** | `hooks.py:204,56` | `block-dangerous-commands` **fail-closed** na timeout/błąd regexa; domknąć wzorce `git push -f`, `rd /s`, `del /f` | `agent_selfcheck` (fail-closed + 3 wzorce blokowane) | M |
-| ⬜ **P2-3.2-a** | `agent_api.py:71` | `PUT /agent/caelo-md` egzekwuje `MAX_CAELO_MD_BYTES` (`Field(max_length=…)` + check bajtów) | `smoke_routes` `_unit_agent_api_routes` | S |
-| ⬜ **P2-3.2-c** | `fs.py:99` | `GET /fs/read` cap rozmiaru (413) — koniec OOM na wielkim pliku | `smoke_routes` (oversize→413) | S |
-| ⬜ **S34-c** | `packages/manager.py:660` + `Marketplace.tsx:199` | TOCTOU karty zgody: `inspect_from_url` zwraca `fetched_b64`; GUI instaluje **te bajty** (`data_b64`), nie re-fetch URL | `packages_check` `test_inspect_install_same_bytes` | M |
+| ✅ **P2-3.2-b** | `system.py` + nowy `media_paths.py` | walidacja `output-dir` (istniejący katalog, nie-root) przed `set_save_path`; `media_bases()` odrzuca bazę=root (DiD) | smoke_routes `_unit_fs_routes` (root→400 + konsument) | M |
+| ✅ **P2-3.2-e** | `errors.py` + `chat.py`/`voice.py`(×2)/`agent.py` | `errors.masked_error(exc,public)`; ramki WS `{"type":"error"}` maskują surowy `str(exc)` jak REST | smoke_chat (sentinel `api.x.ai` nie wycieka) | M |
+| ✅ **P2-3.2-d** | `validation.py` + `chat.py`, `voice.py` | `validate_ws_messages` (MAX 400 / 200 KB / data-URI); WS waliduje jak REST, błąd = ramka, pętla trwa | smoke_chat (oversize → error, brak `done`) | M |
+| ✅ **3.3-a** | `tools.py` `read_file` + `workspace.py` | `READ_FILE_MAX_BYTES`(16 MB) cap; `Workspace.resolve` odrzuca `CON/PRN/AUX/NUL/COM*/LPT*` (komponenty przed `resolve()`) | agent_selfcheck `test_device_and_read_cap` | M |
+| ✅ **3.3-g** | `tools.py` `web_fetch` | `_resolve_blocked` (getaddrinfo → IP) pre-flight i po redirect, fail-closed — koniec DNS-rebindingu | agent_selfcheck `test_web_fetch_dns_rebinding` | M |
+| ✅ **S31-j** | `backend_media.py:173` | `_download_media`: `allow_redirects=False` + odrzucenie 30x + re-walidacja `urlparse(r.url).scheme=='https'` | genjobs_check `_unit_media_redirect_guard` | S |
+| ✅ **S31-l** | `hooks.py` | `_matches_blocking` **fail-closed** na timeout/błąd regexa; domknięte wzorce `git push -f`/`rd /s`/`del /f` | agent_selfcheck `test_hooks` (S31-l) | M |
+| ✅ **P2-3.2-a** | `agent_api.py` | `PUT /agent/caelo-md` egzekwuje `MAX_CAELO_MD_BYTES` (`Field(max_length)` + check bajtów UTF-8) | smoke_routes `_unit_fs_routes` (P2-3.2-a) | S |
+| ✅ **P2-3.2-c** | `fs.py` | `GET /fs/read` cap `MAX_FS_READ_BYTES` (413) — koniec OOM na wielkim pliku | smoke_routes `_unit_fs_routes` (413) | S |
+| ✅ **S34-c** | `packages/manager.py` + `Marketplace.tsx` + `api.ts` | TOCTOU karty zgody: `inspect_from_url` zwraca `fetched_b64`; GUI instaluje **te bajty** (`data_b64`), nie re-fetch URL | packages_check `test_inspect_install_same_bytes` | M |
 
 ### D.4 Poprawność / dane (P3 backendu)
 
 | ID | Plik:linia | Naprawa | Test | Eff |
 |---|---|---|---|---|
-| ⬜ **S31-i** | `responses_client.py:386,410` | `usage` **sumowane** przez tury pętli narzędzi; ostatnia iteracja `max_tool_iters` **nie** wykonuje narzędzi „w próżnię" (break przed egzekucją) | `smoke_chat` `_unit_responses_mcp_loop` | M |
-| ⬜ **S31-h** | `state.py:321` | `is_authenticated()` = `active_auth_source()!='none'` (respektuje twardy przełącznik) | `smoke_core` (oczekiwany false przy `oauth` bez logowania) | S |
-| ⬜ **S31-k** | `state.py:614` + `history.py:163` | `delete_project` kasuje też **pliki** mediów (przez wspólny sandbox media-bases; wydzielić `_media_bases/_within`) | `history_check` `_unit_delete_project_files` (anti-traversal) | M |
-| ⬜ **3.3-e** | `runner.py:179` | flaga `ran` — `record_event` w `finally` pomija turę bez workspace (koniec pustych „code" eventów) | `headless_check` (brak eventu bez ws) | S |
-| ⬜ **3.3-f** | `tools.py:452` | reconcyliacja etykiety `[timeout]` z `returncode==0` — koniec fałszywego timeoutu przy szybkim exit | `agent_selfcheck` `test_run_command_no_false_timeout` | S |
-| ⬜ **P3-3.2-f** | `_ws.py:31` | **rekomendacja: bez zmian** (inwariant trzyma — kosmetyka zasobów); ewentualnie `_closing` skraca `emit()` na zamknięciu (NIE podnosić `JOIN` ponad `EMIT`) | tylko jeśli zmiana | S |
-| ⬜ **S34-e** | — | **already-fixed**: dopisać asercję, że `bypass` nie omija `pre_tool`/`block-dangerous-commands` | `agent_selfcheck` (bypass + groźna komenda = block) | S |
+| ✅ **S31-i** | `responses_client.py` | `usage` **sumowane** przez tury pętli; ostatnia iteracja `max_tool_iters` **nie** wykonuje narzędzi „w próżnię" (break przed egzekucją) | smoke_chat `_unit_responses_mcp_loop` (S31-i) | M |
+| ✅ **S31-h** | `state.py` `is_authenticated` | `= active_auth_source()!='none'` (respektuje twardy przełącznik) | smoke_core `_unit_settings_ownership` (S31-h) | S |
+| ✅ **S31-k** | `state.py` `delete_project` + nowy `media_paths.py` | kasuje też **pliki** mediów przez wspólny sandbox `media_bases/within` (+ root-guard P2-3.2-b) | history_check `test_delete_project_files` | M |
+| ✅ **3.3-e** | `runner.py` `run_turn` | flaga `ran` — `record_event` w `finally` pomija turę bez workspace (koniec pustych „code" eventów) | headless_check `test_no_workspace_no_event` | S |
+| ✅ **3.3-f** | `tools.py` `run_command` | reconcyliacja etykiety `[timeout]` z `returncode==0` — koniec fałszywego timeoutu (`[stopped]` zostaje) | agent_selfcheck `test_run_command_no_false_timeout` | S |
+| ✅ **P3-3.2-f** | `_ws.py` | **bez zmian** (inwariant trzyma) — dopisany komentarz krzyżowy (NIE podnosić `JOIN` ponad `EMIT`) | — (no-change) | S |
+| ✅ **S34-e** | — (already-fixed) | dopisana asercja: `bypass` NIE omija `pre_tool`/`block-dangerous-commands` | agent_selfcheck `test_hooks` (S34-e) | S |
+
+**Domknięcie Fazy D — ✅ ZROBIONE (2026-06-12):** cała runda P2/P3 wdrożona i zielona.
+- **Backend:** 12 suit standalone OK + **`api_smoke` ZIELONY (322 PASS)**. Nowe testy
+  regresyjne dla każdego znaleziska (genjobs cancel/clear/redirect, lazy-init race, auth,
+  delete_project files, recovery except, oauth backoff, HistoryManager concurrency, device/
+  read-cap, web_fetch DNS, hooks fail-closed, 5× route, responses usage, runner, MCP/LSP/Role
+  concurrency, team worktree/late-merge, packages TOCTOU).
+- **Frontend:** `npm test` **197/197**, `typecheck` czysty, `lint` bez nowych ostrzeżeń.
+- **Nowy moduł:** `caelo_core/media_paths.py` (wspólny sandbox media-bases dla S31-k + P2-3.2-b).
+- **Uwaga:** `oauth print→log` (S31-f) i wąskie `except` (S31-d/e) zmieniają **root-moduły**
+  (`oauth_manager.py`/`config.py`/`history_manager.py`) — to fixy logiki, nie restrukturyzacja
+  (zgodne z regułą CLAUDE.md).
 
 ---
 

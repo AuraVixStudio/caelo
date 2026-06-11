@@ -196,7 +196,15 @@ function BrowseTab({ conn }: { conn: Conn }) {
     if (!report) return
     setBusy(true)
     try {
-      await installPackage(conn, { url: report.source_url, consent: true })
+      // S34-c: instaluj DOKŁADNIE bajty pokazane w karcie zgody (fetched_b64 z inspekcji),
+      // nie ponowny fetch URL — serwer mógłby podmienić pakiet między inspekcją a instalacją.
+      // Fallback na url tylko gdy inspekcja nie zwróciła bajtów (np. starszy backend).
+      await installPackage(
+        conn,
+        report.fetched_b64
+          ? { data_b64: report.fetched_b64, consent: true }
+          : { url: report.source_url, consent: true }
+      )
       setInfo(`Installed ${report.manifest.name}.`)
       setReport(null)
       load()

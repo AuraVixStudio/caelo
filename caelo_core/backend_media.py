@@ -47,12 +47,18 @@ class MediaMixin:
         raise ValueError(f"unknown gen job kind: {job.kind}")
 
     def _run_image_job(self, job, cancel) -> list:
+        # S31-a: obraz honoruje cancel_event (best-effort — pojedynczego blokującego POST
+        # nie da się przerwać w locie, ale anulowanie PRZED/PO daje status cancelled, nie done).
+        from caelo_core.genjobs import GenJobCancelled
+
         p = job.params
         prompt = p.get("prompt", "")
         n = int(p.get("n", 1) or 1)
         ratio = p.get("aspect_ratio", "auto")
         resolution = p.get("resolution", "1k")
         model = p.get("model") or None
+        if cancel.is_set():
+            raise GenJobCancelled()
         if job.op == "text2img":
             urls = self.api.generate_image(prompt, n, ratio, resolution, model=model)
             legacy_mode = "generate"
@@ -62,6 +68,8 @@ class MediaMixin:
                 raise ValueError("edit/variation requires at least one reference image")
             urls = self.api.edit_image_b64(prompt, images, n, ratio, resolution, model=model)
             legacy_mode = "edit"
+        if cancel.is_set():
+            raise GenJobCancelled()
         results = self.save_media_urls(urls, prompt, legacy_mode, ".png",
                                        project_id=job.project_id,
                                        meta_extra={"gen_op": job.op, "model": model or ""})
@@ -180,7 +188,13 @@ class MediaMixin:
         target = save_dir / fn
         total = 0
         try:
-            with requests.get(url, timeout=180, stream=True) as r:
+            # S31-j: nie podążaj za redirectami (https->http omijałby guard) i dodatkowo
+            # re-waliduj schemat finalnego URL-a (defense in depth).
+            with requests.get(url, timeout=180, stream=True, allow_redirects=False) as r:
+                if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+                    raise ValueError("refused redirected media URL")
+                if urlparse(r.url).scheme != "https":
+                    raise ValueError("refused non-https media URL (after redirect)")
                 r.raise_for_status()
                 cl = r.headers.get("Content-Length")
                 if cl and cl.isdigit() and int(cl) > MAX_MEDIA_BYTES:

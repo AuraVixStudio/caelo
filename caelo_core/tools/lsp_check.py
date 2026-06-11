@@ -96,6 +96,48 @@ def test_manager() -> None:
         check("manager shutdown clears running", not mgr.list_servers()[0]["running"])
 
 
+def test_concurrent_ensure() -> None:
+    """S34-b: równoległe diagnostics na pliku tego samego języka spawnują serwer RAZ —
+    bez locka `_ensure` (check-then-spawn) startował dwa podprocesy, osierocając pierwszy."""
+    import threading
+    import time
+    from caelo_core.lsp.client import LspClient
+    with tempfile.TemporaryDirectory() as d:
+        fp = str(Path(d) / "a.py")
+        Path(fp).write_text("y = 2\n", encoding="utf-8")
+        configs = {"mockpy": {"command": sys.executable, "args": [_MOCK],
+                              "extensionToLanguage": {".py": "python"}}}
+        mgr = LspManager(configs, workspace_root=Path(d))
+        real_start = LspClient.start
+        count = {"n": 0}
+        clock = threading.Lock()
+
+        def counting_start(self):
+            with clock:
+                count["n"] += 1
+            time.sleep(0.05)  # poszerz okno wyścigu
+            return real_start(self)
+
+        LspClient.start = counting_start
+        try:
+            barrier = threading.Barrier(2)
+
+            def worker():
+                barrier.wait()
+                mgr.diagnostics(fp, "y = 2\n", timeout=3.0)
+
+            ts = [threading.Thread(target=worker) for _ in range(2)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join(10)
+            check("S34-b: concurrent _ensure spawns LSP server once", count["n"] == 1)
+            check("S34-b: exactly one client registered", len(mgr._clients) == 1)
+        finally:
+            LspClient.start = real_start
+            mgr.shutdown()
+
+
 def test_agent_lsp_tool() -> None:
     """Integracja z pętlą: narzędzie `lsp` (READONLY, bez bramki) + pasywna diagnostyka
     po edycie. Atrapa menedżera (bez podprocesu) wstrzyknięta przez lsp_provider."""
@@ -166,6 +208,7 @@ def main() -> int:
     test_uri_roundtrip()
     test_client()
     test_manager()
+    test_concurrent_ensure()  # S34-b
     test_agent_lsp_tool()
     ok = True
     for name, passed in checks:
