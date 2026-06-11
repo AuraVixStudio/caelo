@@ -1375,6 +1375,23 @@ def test_permission_rules() -> None:
         check("B4: denied read leaks no file content",
               all("TOPSECRET" not in (e.get("summary") or "") for e in events))
 
+        # P1-B: deny chroni TREŚĆ/NAZWY też przed narzędziami przeszukującymi (filtr na
+        # WYNIKACH, nie tylko na argumencie). Bez fixu grep("TOPSECRET",".") zwracał linię
+        # z secret/, a glob/list_dir — ścieżki/nazwy z deny-listowanego katalogu.
+        gate.set_rules(deny=["Read(secret/**)"])
+        events, _ = _run_one_tool(ws, gate, "grep", {"pattern": "TOPSECRET", "path": "."})
+        check("P1-B: grep does not leak content from deny-listed path",
+              all("TOPSECRET" not in (e.get("summary") or "") for e in events)
+              and all("secret/k.txt" not in (e.get("summary") or "") for e in events))
+        events, _ = _run_one_tool(ws, gate, "glob", {"pattern": "**/*"})
+        check("P1-B: glob omits deny-listed result paths",
+              all("secret/k.txt" not in (e.get("summary") or "") for e in events))
+        # ukrycie samej NAZWY katalogu wymaga reguły Read(<dir>) (matcher segmentowy)
+        gate.set_rules(deny=["Read(secret)", "Read(secret/**)"])
+        events, _ = _run_one_tool(ws, gate, "list_dir", {"path": "."})
+        check("P1-B: list_dir hides deny-listed entry name",
+              all("secret" not in (e.get("summary") or "") for e in events))
+
     # allow auto-akceptuje write (bez dialogu zatwierdzenia)
     with tempfile.TemporaryDirectory() as d:
         ws = Workspace(d)

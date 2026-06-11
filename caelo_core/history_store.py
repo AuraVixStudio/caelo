@@ -691,6 +691,21 @@ class HistoryStore:
                  float(cost or 0.0), project_id, float(created_at), float(updated_at)),
             )
 
+    def update_gen_job_status(self, *, id: str, status: str,
+                              artifact_ids: Optional[list] = None, error: str = "",
+                              updated_at: float) -> None:
+        """P1-D: lekka aktualizacja TYLKO statusu/wyników po starcie zadania —
+        bez przepisywania wielomegabajtowego `params` (data-URI) przy każdej zmianie
+        statusu (queued→running→done = 3×). Wiersz już istnieje (`submit` robił INSERT),
+        więc brak dopasowania = nieszkodliwy no-op (zadanie usunięte/zreapowane)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE gen_jobs SET status = ?, artifact_ids = ?, error = ?, updated_at = ? "
+                "WHERE id = ?",
+                (status, json.dumps(list(artifact_ids or []), ensure_ascii=False),
+                 error or "", float(updated_at), id),
+            )
+
     def get_gen_job(self, job_id: str) -> Optional[dict]:
         with self._lock:
             row = self._conn.execute(

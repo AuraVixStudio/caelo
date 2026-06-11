@@ -498,6 +498,72 @@ def _unit_route_validation(checks: list) -> None:
                    rejects(lambda: VideoJobReq(prompt="x", duration=999))))
 
 
+def _unit_blob_stripping(checks: list) -> None:
+    """P1-D: to_dict() (odpowiedzi REST) usuwa data-URI; pełne params zostają w bazie
+    (egzekutor/retry); update_gen_job_status nie zeruje params (write-amp)."""
+    from caelo_core.genjobs import GenJobManager
+
+    big = "data:image/png;base64," + "A" * 200000
+    bigv = "data:video/mp4;base64," + "B" * 200000
+
+    with tempfile.TemporaryDirectory() as d:
+        store = _store(d)
+
+        def exec_ok(job, cancel):
+            return []
+
+        mgr = GenJobManager(exec_ok, store=store, workers=2, max_active=16)
+        try:
+            ji = mgr.submit(kind="image", op="edit",
+                            params={"prompt": "x", "n": 1, "images": [big, big, big]})
+            jv = mgr.submit(kind="video", op="edit", params={"prompt": "y", "video": bigv})
+            mgr.wait(ji.id, timeout=10)
+            mgr.wait(jv.id, timeout=10)
+
+            # (1) odpowiedzi listy nie niosą data-URI (placeholder < 1 KB)
+            lean_ok = True
+            for j in mgr.list_jobs(limit=100):
+                d2 = j.to_dict()  # domyślnie stripped
+                for s in d2["params"].get("images", []):
+                    if isinstance(s, str) and len(s) > 1024:
+                        lean_ok = False
+                v = d2["params"].get("video")
+                if isinstance(v, str) and len(v) > 1024:
+                    lean_ok = False
+            checks.append(("P1-D: list/to_dict strips data-URI from params", lean_ok))
+
+            # (2) full=True zwraca realne bajty (egzekutor/retry)
+            checks.append(("P1-D: to_dict(full=True) keeps real bytes",
+                           len(mgr.get(ji.id).to_dict(full=True)["params"]["images"][0]) > 100000))
+
+            # (3/4) baza zachowuje pełne params po stanie terminalnym (update_gen_job_status nie zeruje)
+            checks.append(("P1-D: store keeps full image data-URI after terminal (no write-amp blanking)",
+                           store.get_gen_job(ji.id)["params"]["images"][0] == big))
+            checks.append(("P1-D: store keeps full video data-URI",
+                           store.get_gen_job(jv.id)["params"]["video"] == bigv))
+        finally:
+            mgr.close()
+            store.close()
+
+    # retry zachowuje realne referencje (failed → nowe zadanie z tymi samymi params)
+    with tempfile.TemporaryDirectory() as d:
+        store = _store(d)
+
+        def exec_fail(job, cancel):
+            raise RuntimeError("boom")
+
+        mgr = GenJobManager(exec_fail, store=store, workers=1, max_active=8)
+        try:
+            jf = mgr.submit(kind="image", op="edit", params={"prompt": "x", "n": 1, "images": [big]})
+            mgr.wait(jf.id, timeout=10)
+            again = mgr.retry(jf.id)
+            checks.append(("P1-D: retry preserves real data-URI refs",
+                           again is not None and mgr.get(again.id).params["images"][0] == big))
+        finally:
+            mgr.close()
+            store.close()
+
+
 def main() -> int:
     import logging
     # Wycisz logger silnika: testy CELOWO wywołują błędy/anulowania (handled),
@@ -510,6 +576,7 @@ def main() -> int:
     _unit_cancel(checks)
     _unit_queue_limit(checks)
     _unit_clear(checks)
+    _unit_blob_stripping(checks)
     _unit_backend_image_executor(checks)
     _unit_backend_video_executor(checks)
     _unit_route_validation(checks)

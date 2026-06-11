@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -29,12 +30,25 @@ import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
 
 log = logging.getLogger(__name__)
 
+# P1-A: walidacja id sesji — bez tego `..\..\caelo_auth` (backslash na Windows)
+# albo `../../x` z surowego JSON WS wychodzi z DATA_DIR/sessions i pozwala na
+# odczyt/usunięcie/NADPIS dowolnego *.json. Literał jak `_NAME_RX` w skills/manager.py;
+# generowane id to `secrets.token_urlsafe(8)` = [A-Za-z0-9_-], więc nic realnego nie odpada.
+_SID_RX = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def valid_id(sid) -> bool:
+    """True gdy `sid` to bezpieczna nazwa pliku sesji (bez separatorów/traversal)."""
+    return isinstance(sid, str) and _SID_RX.match(sid) is not None
+
 
 def sessions_dir() -> Path:
     return Path(config.DATA_DIR) / "sessions"  # DATA_DIR czytane LIVE
 
 
 def session_path(sid: str) -> Path:
+    # PURE — bez podnoszenia wyjątku (load() nie ma try wokół, headless woła .exists()).
+    # Bezpieczeństwo egzekwują load/save/delete przez valid_id().
     return sessions_dir() / f"{sid}.json"
 
 
@@ -71,6 +85,8 @@ def load(sid: str) -> dict:
 
     Toleruje stary headless format — uzupełnia brakujące pola (project_id=None,
     title z historii, czasy z mtime). Nie podbija `v` przy odczycie (dopiero `save`)."""
+    if not valid_id(sid):  # P1-A: spreparowany id -> brak sesji (clean miss, nie 500)
+        return {}
     p = session_path(sid)
     if not p.exists():
         return {}
@@ -106,6 +122,9 @@ def save(*, id: str, cwd: str, history: list, project_id: Optional[str] = None,
     """Zapisz sesję (v2) atomowo. Przy istniejącym pliku ZACHOWUJE `created_at`
     i wcześniejsze `project_id`/`title`/`model` (gdy nowe nie podane), ustawia
     `updated_at = teraz`. Best-effort — błąd logowany i połykany (jak headless)."""
+    if not valid_id(id):  # P1-A: nie persistuj pod spreparowaną ścieżką (resume->_persist_session)
+        log.warning("Refusing to save agent session with invalid id")
+        return
     try:
         d = sessions_dir()
         d.mkdir(parents=True, exist_ok=True)
@@ -165,6 +184,8 @@ def list_meta(project_id: Optional[str] = None) -> List[dict]:
 
 def delete(sid: str) -> bool:
     """Usuń plik sesji. True gdy usunięto, False gdy nie istniał / błąd."""
+    if not valid_id(sid):  # P1-A: spreparowany id -> brak usunięcia
+        return False
     p = session_path(sid)
     try:
         if p.exists():

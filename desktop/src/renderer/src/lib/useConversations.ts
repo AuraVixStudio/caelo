@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   loadActiveId,
   loadConversations,
@@ -38,16 +38,42 @@ export function useConversations(): {
     setActiveId(active)
   }, [])
 
-  // Utrwalanie z debounce (koniec generacji / bezczynność).
+  // Najświeższe convos dla flushu przy odmontowaniu (osobny efekt niżej nie zależy od convos).
+  const convosRef = useRef(convos)
+  convosRef.current = convos
+
+  // Utrwalanie z debounce (koniec generacji / bezczynność). Czyści `saveError` po
+  // udanym zapisie (P1-I/g1 — wcześniej baner „storage full" zostawał na zawsze).
   useEffect(() => {
     if (!convos.length) return
     const t = setTimeout(() => {
-      if (!saveConversations(convos)) {
-        setSaveError('Could not save chat history (browser storage is full).')
-      }
+      setSaveError(
+        saveConversations(convos)
+          ? null
+          : 'Could not save chat history (browser storage is full).'
+      )
     }, 800)
     return () => clearTimeout(t)
   }, [convos])
+
+  // FLUSH przy odmontowaniu / twardym zamknięciu okna (P1-I). Osobny efekt z pustymi
+  // zależnościami — jego cleanup NIE odpala się na każdą zmianę convos (debounce wyżej
+  // zachowany), tylko przy realnym unmount. Bez tego clearTimeout gubił oczekujący zapis
+  // (lazy unmount modułu czatu / zamknięcie apki = utrata całej tury). localStorage jest
+  // synchroniczne, więc flush jest tani. pagehide/beforeunload bo cleanup efektu NIE jest
+  // gwarantowany przy niszczeniu okna Electron.
+  useEffect(() => {
+    const onHide = (): void => {
+      saveConversations(convosRef.current)
+    }
+    window.addEventListener('pagehide', onHide)
+    window.addEventListener('beforeunload', onHide)
+    return () => {
+      saveConversations(convosRef.current)
+      window.removeEventListener('pagehide', onHide)
+      window.removeEventListener('beforeunload', onHide)
+    }
+  }, [])
 
   useEffect(() => {
     if (activeId) saveActiveId(activeId)
@@ -66,12 +92,12 @@ export function useConversations(): {
   }
 
   function deleteChat(id: string): void {
-    setConvos((prev) => {
-      const next = prev.filter((c) => c.id !== id)
-      const list = next.length ? next : [newConversation()]
-      if (id === activeId) setActiveId(list[0].id)
-      return list
-    })
+    // P1-I/g2: licz next/activeId POZA updaterem setConvos — updater musi być czysty
+    // (React 19 StrictMode podwójnie go wywołuje; setActiveId w środku = anti-pattern).
+    const next = convos.filter((c) => c.id !== id)
+    const list = next.length ? next : [newConversation()]
+    setConvos(list)
+    if (id === activeId) setActiveId(list[0].id)
   }
 
   return { convos, activeId, active, saveError, setActiveId, patchActive, createChat, deleteChat }

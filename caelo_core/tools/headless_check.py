@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import config  # type: ignore  # noqa: E402
 from caelo_core import headless as H  # noqa: E402
 from caelo_core.agent import llm as LLM  # noqa: E402
+from caelo_core.agent import sessions as S  # noqa: E402
 from caelo_core.agent.permissions import PermissionGate  # noqa: E402
 from caelo_core.agent.workspace import Workspace  # noqa: E402
 
@@ -268,11 +269,45 @@ def test_project_root_flag() -> None:
               ws2 is not None and Path(ws2.root).resolve() == sub.resolve())
 
 
+def test_session_id_traversal() -> None:
+    """P1-A: spreparowany id sesji nie wychodzi z DATA_DIR/sessions (read/delete/OVERWRITE)."""
+    with tempfile.TemporaryDirectory() as data:
+        orig = config.DATA_DIR
+        config.DATA_DIR = Path(data)
+        try:
+            sentinel = Path(data) / "caelo_settings.json"
+            sentinel.write_text('{"keep":true}', encoding="utf-8")
+
+            # ODCZYT: backslash (Windows) i slash nie sięgają poza sessions/
+            check("P1-A: load() rejects backslash traversal", S.load(r"..\..\caelo_settings") == {})
+            check("P1-A: load() rejects slash traversal", S.load("../../caelo_auth") == {})
+
+            # NADPIS: save() spreparowanym id nie tyka sentinela ani nie tworzy pliku poza sessions/
+            S.save(id=r"..\..\caelo_settings", cwd="", history=[{"role": "user", "content": "x"}])
+            S.save(id="../../caelo_settings", cwd="", history=[{"role": "user", "content": "x"}])
+            check("P1-A: save() does not overwrite out-of-dir file",
+                  sentinel.read_text(encoding="utf-8") == '{"keep":true}')
+            sess_files = list((Path(data) / "sessions").glob("*.json")) if (Path(data) / "sessions").exists() else []
+            check("P1-A: save() created no traversal file", sess_files == [])
+
+            # USUNIĘCIE: delete() spreparowanym id zwraca False i nie kasuje sentinela
+            check("P1-A: delete() rejects traversal id", S.delete("../../caelo_settings") is False)
+            check("P1-A: sentinel still exists after delete", sentinel.exists())
+
+            # KONTROLA POZYTYWNA: poprawny id robi round-trip save/load/delete
+            S.save(id="abc-DEF_123", cwd="", history=[{"role": "user", "content": "ok"}])
+            check("P1-A: valid id round-trips", S.load_history("abc-DEF_123") == [{"role": "user", "content": "ok"}])
+            check("P1-A: valid id deletes", S.delete("abc-DEF_123") is True)
+        finally:
+            config.DATA_DIR = orig
+
+
 def main() -> int:
     test_formats()
     test_permission_and_tools()
     test_resolve_tools()
     test_sessions()
+    test_session_id_traversal()
     test_effort()
     test_export()
     test_worktree_flag()

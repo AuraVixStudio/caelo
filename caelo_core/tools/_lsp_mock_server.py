@@ -24,7 +24,13 @@ def _read():
         line = sys.stdin.buffer.readline()
         if not line:
             return None
-    body = sys.stdin.buffer.read(length) if length else b""
+    # P1-C: read(n) na pipe może zwrócić < n bajtów — doczytaj do końca ciała
+    body = bytearray()
+    while length and len(body) < length:
+        chunk = sys.stdin.buffer.read(length - len(body))
+        if not chunk:
+            return None  # EOF w trakcie ciała
+        body.extend(chunk)
     if not body:
         return None
     try:
@@ -65,8 +71,10 @@ def main():
         elif m == "textDocument/hover":
             _send({"jsonrpc": "2.0", "id": mid, "result": {"contents": "mock hover"}})
         elif m == "textDocument/documentSymbol":
+            # P1-C: `pad` rozdmuchuje ciało > bufora pipe (~64 KB) → wymusza wielokrotne
+            # read() po stronie klienta; bez `_read_exact` ciało przyszłoby obcięte.
             _send({"jsonrpc": "2.0", "id": mid, "result": [{
-                "name": "foo", "kind": 12,
+                "name": "foo", "kind": 12, "pad": "x" * 262144,
                 "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 3}},
                 "selectionRange": {"start": {"line": 0, "character": 0},
                                    "end": {"line": 0, "character": 3}}}]})

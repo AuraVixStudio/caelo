@@ -43,6 +43,18 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={{
+          // P1-F: linki z markdownu modelu otwieramy w przeglądarce OS (target=_blank →
+          // setWindowOpenHandler → shell.openExternal). Bez tego klik = nawigacja top-level,
+          // którą `will-navigate` blokuje — link nie robił nic (cytowania działały, bo mają
+          // jawnie target=_blank). rel=noreferrer (implikuje noopener w Chromium).
+          a: ({ children, ...rest }) => {
+            const a = rest as { href?: string; title?: string }
+            return (
+              <a {...a} target="_blank" rel="noreferrer">
+                {children}
+              </a>
+            )
+          },
           // Bloki kodu (```...```) dostają pasek z językiem i przyciskiem Copy.
           pre: ({ children }) => <>{children}</>,
           code: (props) => {

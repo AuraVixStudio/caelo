@@ -16,8 +16,10 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -61,7 +63,10 @@ def main() -> int:
         return 2
 
     token = secrets.token_urlsafe(16)
-    env = dict(os.environ, CAELO_CORE_TOKEN=token)
+    # P1-E: izolowany DATA_DIR — chroni realne %LOCALAPPDATA%\Caelo przy smoke spakowanego .exe
+    # (override honorowany też dla frozen — przed gałęzią IS_FROZEN w config.py).
+    tmp_data = tempfile.mkdtemp(prefix="caelo-sidecar-")
+    env = dict(os.environ, CAELO_CORE_TOKEN=token, CAELO_CORE_DATA_DIR=tmp_data)
     proc = subprocess.Popen(
         [exe], cwd=os.path.dirname(exe), env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -95,6 +100,7 @@ def main() -> int:
             proc.wait(timeout=5)
         except Exception:
             proc.kill()
+        shutil.rmtree(tmp_data, ignore_errors=True)  # P1-E: sprzątanie temp DATA_DIR
 
 
 if __name__ == "__main__":

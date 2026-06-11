@@ -449,6 +449,17 @@ export function ChatView({ conn }: { conn: Conn }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [convo.active?.messages])
 
+  // P1-H: wyzeruj stan przejściowy „na poziomie komponentu" przy zmianie aktywnej
+  // rozmowy. Bez tego pasek błędu i `lastTurnRef` z rozmowy A żyły po przełączeniu na B,
+  // a „Retry" streamował odpowiedź (z historią A) do rozmowy B. Czyścimy też `searchActivity`
+  // (ten sam rodzaj zatrzymanego transientu). Strumień „w locie" NIE jest naprawiany — jego
+  // handlery domykają send-time `convo` i poprawnie trafiają do rozmowy źródłowej.
+  useEffect(() => {
+    setError(null)
+    setSearchActivity(null)
+    lastTurnRef.current = null
+  }, [convo.activeId])
+
   // M9-F2: „Send to → Chat / Describe" — podnieś artefakt jako załącznik (vision),
   // a dla „Describe" wstaw podpowiedź promptu (bez kasowania tekstu użytkownika).
   useEffect(() => {

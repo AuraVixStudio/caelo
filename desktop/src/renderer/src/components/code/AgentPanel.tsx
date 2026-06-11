@@ -177,6 +177,10 @@ export function AgentPanel({
   const onFilesChangedRef = useRef(onFilesChanged)
   onFilesChangedRef.current = onFilesChanged
   const turnWasPlanRef = useRef(false)
+  // P1-G: lustro `busy` dla długożyjącego domknięcia onClose (rejestrowane raz, inaczej
+  // złapałoby busy===false na zawsze).
+  const busyRef = useRef(false)
+  busyRef.current = busy
 
   const nextId = (): string => `e${++idRef.current}`
 
@@ -219,7 +223,22 @@ export function AgentPanel({
         setConnected(true)
         if (workspacePath) agent.setWorkspace(workspacePath)
       },
-      () => setConnected(false)
+      () => {
+        setConnected(false)
+        // P1-G: pad/restart sidecara w trakcie tury (busy) — żadna ramka terminalna
+        // (done/stopped/error) już nie nadejdzie, więc composer utknąłby na „Stop" do
+        // przeładowania. Odblokuj i zostaw ślad. Guard na busyRef, bo onClose woła się też
+        // przy zwykłym unmount i każdym cyklu reconnectu (bez guardu = spam info).
+        if (busyRef.current) {
+          setBusy(false)
+          curAssistant.current = null
+          setPlanPhase((p) => planReducer(p, { type: 'done' }))
+          pushInfo(
+            'Connection to the agent was lost. Reconnecting… your last request may not have completed.',
+            'warn'
+          )
+        }
+      }
     )
     agentRef.current = agent
 

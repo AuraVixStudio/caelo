@@ -585,10 +585,17 @@ class AgentSession:
             except Exception as exc:  # noqa: BLE001
                 result = f"Error: MCP tool failed: {exc}"
         else:
+            # P1-B: reguły deny egzekwowane też na WYNIKACH grep/glob/list_dir (nie tylko
+            # na argumencie). Domknięcie budowane tylko gdy są reguły i narzędzie przeszukuje
+            # → zerowy narzut, gdy ruleset pusty (evaluate_rules i tak short-circuituje).
+            rule_filter = None
+            if name in ("grep", "glob", "list_dir") and not self.gate.ruleset.empty:
+                rule_filter = lambda rel: self.gate.evaluate_rules("read_file", {"path": rel}) == "deny"  # noqa: E731
             result = execute_tool(
                 self.ws, name, args,
                 on_output=lambda chunk: self.emit({"type": "output", "id": call_id, "chunk": chunk}),
                 stop_flag=stop or (lambda: False),  # P0-4: Stop sesji dociera do run_command
+                rule_filter=rule_filter,
             )
         ok = not result.startswith("Error")
         # M14-B5: hook post_tool (np. auto-format po zapisie, log audytu). Nie zmienia wyniku.

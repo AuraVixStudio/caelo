@@ -179,18 +179,22 @@ def read_file(ws: Workspace, path: str, offset: int = 0, limit: int = 2000, **_)
     return numbered
 
 
-def list_dir(ws: Workspace, path: str = ".", **_) -> str:
+def list_dir(ws: Workspace, path: str = ".", rule_filter=None, **_) -> str:
     p = ws.resolve(path)
     if not p.is_dir():
         return f"Error: not a directory: {path}"
     entries = sorted(p.iterdir(), key=lambda e: (e.is_file(), e.name.lower()))
     # P0-7: pomiń wpisy wychodzące poza workspace (symlink/junction na zewnątrz).
+    # P1-B: ukryj NAZWĘ wpisu objętego regułą deny (np. `Read(secret)` ukrywa katalog
+    # `secret`). Uwaga: `Read(secret/**)` NIE złapie gołego segmentu — do ukrycia samego
+    # katalogu trzeba reguły `Read(<dir>)` (matcher segmentowy, patrz permission_rules).
     out = [e.name + ("/" if e.is_dir() else "")
-           for e in entries if _within_root(e, ws.root)]
+           for e in entries
+           if _within_root(e, ws.root) and not (rule_filter and rule_filter(ws.rel(e)))]
     return "\n".join(out) or "(empty)"
 
 
-def glob(ws: Workspace, pattern: str, **_) -> str:
+def glob(ws: Workspace, pattern: str, rule_filter=None, **_) -> str:
     # P0-2: glob nie może uciec z workspace. `ws.root.glob()` omijał `ws.resolve()`,
     # więc wzorzec `../**/*` enumerował pliki POZA korzeniem (wyciek struktury FS,
     # m.in. ścieżek do caelo_auth.json). Odrzucamy wzorce `..`/absolutne na wejściu
@@ -211,11 +215,14 @@ def glob(ws: Workspace, pattern: str, **_) -> str:
     for p in results:
         if any(part in IGNORE_DIRS for part in p.parts):
             continue
+        rel = ws.rel(p)
         try:
-            ws.resolve(ws.rel(p))  # re-walidacja sandboxa (ucieczki przez `..`/symlink)
+            ws.resolve(rel)  # re-walidacja sandboxa (ucieczki przez `..`/symlink)
         except WorkspaceError:
             continue
-        matches.append(ws.rel(p))
+        if rule_filter and rule_filter(rel):  # P1-B: pomiń ścieżkę objętą deny
+            continue
+        matches.append(rel)
     matches.sort()
     if not matches:
         return "(no matches)"
@@ -225,7 +232,7 @@ def glob(ws: Workspace, pattern: str, **_) -> str:
 
 
 def grep(ws: Workspace, pattern: str, path: str = ".", ignore_case: bool = False,
-         max_results: int = 200, **_) -> str:
+         max_results: int = 200, rule_filter=None, **_) -> str:
     base = ws.resolve(path)
     try:
         rx = _rx_engine.compile(pattern, _rx_engine.IGNORECASE if ignore_case else 0)
@@ -244,6 +251,11 @@ def grep(ws: Workspace, pattern: str, path: str = ".", ignore_case: bool = False
         if time.monotonic() > deadline:
             timed_out = True
             break
+        # P1-B: pomiń (przed czytaniem) pliki objęte regułą deny — inaczej grep zwracał
+        # modelowi dopasowane linie z deny-listowanych ścieżek (np. secret/). Filtr per-plik
+        # (1× evaluate_rules na plik), nie per-linia.
+        if rule_filter and rule_filter(ws.rel(f)):
+            continue
         try:
             if f.stat().st_size > GREP_MAX_FILE_BYTES:
                 skipped_large += 1
@@ -617,7 +629,8 @@ _EXECUTORS = {
 
 def execute_tool(ws: Workspace, name: str, args: dict,
                  on_output: Optional[Callable[[str], None]] = None,
-                 stop_flag: Optional[Callable[[], bool]] = None) -> str:
+                 stop_flag: Optional[Callable[[], bool]] = None,
+                 rule_filter: Optional[Callable[[str], bool]] = None) -> str:
     fn = _EXECUTORS.get(name)
     if fn is None:
         return f"Error: unknown tool {name}"
@@ -625,6 +638,10 @@ def execute_tool(ws: Workspace, name: str, args: dict,
     if name == "run_command":
         kwargs["on_output"] = on_output
         kwargs["stop_flag"] = stop_flag
+    # P1-B: reguły `deny` egzekwowane też na WYNIKACH narzędzi przeszukujących —
+    # bez tego `grep`/`glob`/`list_dir` zwracały treść/nazwy z deny-listowanych ścieżek.
+    if rule_filter is not None and name in ("grep", "glob", "list_dir"):
+        kwargs["rule_filter"] = rule_filter
     try:
         return fn(ws, **kwargs)
     except TypeError as exc:

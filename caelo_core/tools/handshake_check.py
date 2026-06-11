@@ -16,8 +16,10 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -55,7 +57,9 @@ def _get(base: str, path: str, token: str | None = None):
 
 def main() -> int:
     token = secrets.token_urlsafe(16)
-    env = dict(os.environ, CAELO_CORE_TOKEN=token)
+    # P1-E: izolowany DATA_DIR (nie realny korzeń repo) — handshake_check też spawnuje sidecar.
+    tmp_data = tempfile.mkdtemp(prefix="caelo-handshake-")
+    env = dict(os.environ, CAELO_CORE_TOKEN=token, CAELO_CORE_DATA_DIR=tmp_data)
     proc = subprocess.Popen(
         [sys.executable, "-m", "caelo_core"],
         cwd=REPO_DIR,
@@ -92,6 +96,7 @@ def main() -> int:
             proc.wait(timeout=5)
         except Exception:
             proc.kill()
+        shutil.rmtree(tmp_data, ignore_errors=True)  # P1-E: sprzątanie temp DATA_DIR
 
 
 if __name__ == "__main__":

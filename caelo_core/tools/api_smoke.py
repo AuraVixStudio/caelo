@@ -21,6 +21,7 @@ import asyncio
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -35,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from caelo_core.tools._smoke_common import (  # noqa: F401
     PREFIX, REPO_DIR, THIS_DIR, PKG_DIR,
     _read_handshake, _get, _post, _delete, _cors_acao, _capture_no_token_warn,
-    _ws_check, _ws_bad_token_rejected,
+    _isolated_env, _ws_check, _ws_bad_token_rejected,
 )
 
 from caelo_core.tools.smoke_chat import (  # noqa: F401,E402
@@ -67,6 +68,7 @@ from caelo_core.tools.smoke_routes import (  # noqa: F401,E402
 )
 from caelo_core.tools.smoke_core import (  # noqa: F401,E402
     _unit_ws_auth,
+    _unit_data_dir_override,
     _unit_rest_token_auth,
     _unit_input_validation,
     _unit_settings_ownership,
@@ -79,7 +81,7 @@ from caelo_core.tools.smoke_core import (  # noqa: F401,E402
 
 def main() -> int:
     token = secrets.token_urlsafe(16)
-    env = dict(os.environ, CAELO_CORE_TOKEN=token)
+    env, tmp_data = _isolated_env(token)  # P1-E: izolowany DATA_DIR (nie realny repo)
     proc = subprocess.Popen(
         [sys.executable, "-m", "caelo_core"],
         cwd=REPO_DIR, env=env,
@@ -92,6 +94,12 @@ def main() -> int:
         print(f"[handshake] port={port} version={info.get('version')}")
 
         checks = []
+
+        # P1-E: żywy sidecar NIE może używać realnego DATA_DIR (korzeń repo);
+        # inaczej `DELETE /genjobs` w smoke_media kasowałby realną listę zadań.
+        checks.append(("P1-E: sidecar runs in isolated DATA_DIR (not repo root)",
+                       os.path.isdir(tmp_data)
+                       and os.path.abspath(tmp_data) != os.path.abspath(REPO_DIR)))
 
         s, body = _get(base, "/health")
         checks.append(("/health == 200", s == 200 and bool(body)))
@@ -242,6 +250,9 @@ def main() -> int:
         # P0-8: deterministic unit check of the WS auth logic (fail-closed/origin).
         _unit_ws_auth(checks)
 
+        # P1-E: CAELO_CORE_DATA_DIR override przekierowuje DATA_DIR (izolacja smoke).
+        _unit_data_dir_override(checks)
+
         # P1-4: every APIManager HTTP call must pass an explicit timeout.
         _unit_api_timeouts(checks)
 
@@ -326,6 +337,7 @@ def main() -> int:
             proc.wait(timeout=5)
         except Exception:
             proc.kill()
+        shutil.rmtree(tmp_data, ignore_errors=True)  # P1-E: sprzątanie temp DATA_DIR
 
 
 if __name__ == "__main__":

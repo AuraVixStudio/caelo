@@ -47,7 +47,18 @@ def _user_data_dir(app_name: str = APP_NAME) -> Path:
 # W wersji spakowanej (.exe) dane trzymamy w profilu użytkownika, bo obok aplikacji
 # (Program Files / katalog tymczasowy) nie wolno / nie da się zapisywać.
 # W trybie deweloperskim zostają obok źródeł (jak dotąd) — nie ruszamy istniejących danych.
-DATA_DIR = _user_data_dir() if IS_FROZEN else BASE_DIR
+#
+# P1-E: override CAELO_CORE_DATA_DIR ma PIERWSZEŃSTWO przed obiema gałęziami — self-checki
+# (api_smoke/handshake_check/sidecar_smoke) ustawiają go na katalog tymczasowy, by NIE
+# chodzić po realnym DATA_DIR użytkownika (dev = korzeń repo; `DELETE /genjobs` w smoke
+# kasowałby realną listę zadań). Electron (main/index.ts) i caelo_core.spec NIE ustawiają
+# tej zmiennej → w produkcji ścieżka jest nietknięta. Wszystkie stałe pochodne (HISTORY_DIR,
+# SETTINGS_FILE, HISTORY_DB_FILE, …) liczą się PONIŻEJ z DATA_DIR, więc dziedziczą override.
+_DATA_DIR_OVERRIDE = os.environ.get("CAELO_CORE_DATA_DIR", "").strip()
+if _DATA_DIR_OVERRIDE:
+    DATA_DIR = Path(_DATA_DIR_OVERRIDE)
+else:
+    DATA_DIR = _user_data_dir() if IS_FROZEN else BASE_DIR
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 

@@ -152,6 +152,20 @@ class LspClient:
             self._proc.stdin.write(header + body)
             self._proc.stdin.flush()
 
+    @staticmethod
+    def _read_exact(stream, n: int) -> bytes:
+        """Doczytaj DOKŁADNIE `n` bajtów ciała. P1-C: `read(n)` na pipe (bufsize=0)
+        może zwrócić mniej niż `n` — większe ciała (diagnostyki/hover) przychodziły
+        obcięte → `json.loads` padał → wiadomość ginęła. `b''` = EOF: zwróć partial,
+        caller przerywa pętlę czytnika (jak istniejące `if not line: break`)."""
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = stream.read(n - len(buf))
+            if not chunk:
+                return bytes(buf)  # pipe zamknięty w trakcie ciała → partial
+            buf.extend(chunk)
+        return bytes(buf)
+
     def _read_loop(self) -> None:
         out = self._proc.stdout if self._proc else None
         if out is None:
@@ -174,7 +188,12 @@ class LspClient:
                     line = out.readline()
                     if not line:
                         return
-                body = out.read(length) if length > 0 else b""
+                if length > 0:
+                    body = self._read_exact(out, length)
+                    if len(body) < length:
+                        break  # pipe zamknięty w trakcie ciała (P1-C) — zakończ czytnik
+                else:
+                    body = b""
                 if not body:
                     continue
                 try:

@@ -51,6 +51,35 @@ def _unit_ws_auth(checks: list) -> None:
     checks.append(("origin: null/none ok", _ws_origin_ok("null") is True and _ws_origin_ok(None) is True))
 
 
+def _unit_data_dir_override(checks: list) -> None:
+    """P1-E: CAELO_CORE_DATA_DIR przekierowuje DATA_DIR i WSZYSTKIE stałe pochodne
+    (SETTINGS_FILE/HISTORY_DB_FILE/…). To gwarancja, że spawnowany sidecar self-checków
+    siada na izolowanym katalogu, nie na realnym repo. Reload w izolacji, potem restore."""
+    import importlib
+    import shutil
+    import tempfile
+
+    sys.path.insert(0, REPO_DIR)
+    import config  # type: ignore  # noqa: E402
+
+    prev = os.environ.get("CAELO_CORE_DATA_DIR")
+    tmp = tempfile.mkdtemp(prefix="caelo-cfg-")
+    try:
+        os.environ["CAELO_CORE_DATA_DIR"] = tmp
+        importlib.reload(config)
+        checks.append(("P1-E: CAELO_CORE_DATA_DIR redirects DATA_DIR + derived paths",
+                       config.DATA_DIR == Path(tmp)
+                       and config.SETTINGS_FILE.parent == Path(tmp)
+                       and config.HISTORY_DB_FILE.parent == Path(tmp)))
+    finally:
+        if prev is None:
+            os.environ.pop("CAELO_CORE_DATA_DIR", None)
+        else:
+            os.environ["CAELO_CORE_DATA_DIR"] = prev
+        importlib.reload(config)  # przywróć DATA_DIR = korzeń repo dla reszty smoke
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def _unit_rest_token_auth(checks: list) -> None:
     """P1-10: require_token jest FAIL-CLOSED bez skonfigurowanego tokenu (jak WS)."""
     import types
@@ -138,15 +167,20 @@ def _unit_settings_ownership(checks: list) -> None:
     import config  # type: ignore  # noqa: E402
     import chats_manager  # type: ignore  # noqa: E402
     import history_manager  # type: ignore  # noqa: E402
+    import oauth_manager  # type: ignore  # noqa: E402
     from caelo_core.state import Backend  # noqa: E402
 
     # config.* czytane są dynamicznie (atrybut); ale legacy moduły zrobiły
-    # `from config import CONFIG_FILE/HISTORY_DIR/CHATS_FILE` → trzeba podmienić też u nich.
+    # `from config import CONFIG_FILE/HISTORY_DIR/CHATS_FILE/AUTH_FILE` → trzeba podmienić też u nich.
+    # P1-E (izolacja): oauth_manager zrobił `from config import AUTH_FILE`, więc bez podmiany
+    # u niego OAuthManager czytałby REALNY caelo_auth.json dewelopera (zalogowany → „oauth
+    # dostępne") i fałszywie psułby asercje „no oauth".
     saved_cfg = {k: getattr(config, k) for k in
                  ("SETTINGS_FILE", "CONFIG_FILE", "CHATS_FILE", "PERMISSIONS_FILE",
                   "AUTH_FILE", "HISTORY_DIR")}
     saved_hist = (history_manager.CONFIG_FILE, history_manager.HISTORY_DIR)
     saved_chats = chats_manager.CHATS_FILE
+    saved_oauth = oauth_manager.AUTH_FILE
 
     with tempfile.TemporaryDirectory() as d:
         dp = __import__("pathlib").Path(d)
@@ -161,6 +195,7 @@ def _unit_settings_ownership(checks: list) -> None:
             history_manager.CONFIG_FILE = config.CONFIG_FILE
             history_manager.HISTORY_DIR = config.HISTORY_DIR
             chats_manager.CHATS_FILE = config.CHATS_FILE
+            oauth_manager.AUTH_FILE = config.AUTH_FILE  # P1-E: izoluj OAuth od realnego loginu
 
             # Sentinel w domenie HistoryManagera (history/chat_history/save_path).
             sentinel = json.dumps(
@@ -205,6 +240,7 @@ def _unit_settings_ownership(checks: list) -> None:
                 setattr(config, k, v)
             history_manager.CONFIG_FILE, history_manager.HISTORY_DIR = saved_hist
             chats_manager.CHATS_FILE = saved_chats
+            oauth_manager.AUTH_FILE = saved_oauth
 
 
 def _unit_json_corrupt_backup(checks: list) -> None:

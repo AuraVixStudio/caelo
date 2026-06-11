@@ -63,6 +63,10 @@ def test_client() -> None:
 
         syms = c.query("documentSymbol", fp, "x", "python", 0, 0)
         check("client documentSymbol returns list", isinstance(syms, list) and syms and syms[0]["name"] == "foo")
+        # P1-C: duże ciało (256 KB `pad`) musi przyjść w całości — bez `_read_exact`
+        # short-read obcina je, json.loads pada, query() timeoutuje (None/brak `pad`).
+        check("P1-C: lsp reassembles large body (no short-read truncation)",
+              isinstance(syms, list) and syms and len(syms[0].get("pad", "")) == 262144)
         c.stop()
         check("client stops (not alive)", not c.alive)
 

@@ -72,18 +72,31 @@ export class MicCapture {
   private worklet: AudioWorkletNode | null = null
   private source: MediaStreamAudioSourceNode | null = null
   private sink: GainNode | null = null
+  // P1-J: intencja stop() niesiona przez OBA awaity w start(). W chwili, gdy stop()
+  // pada podczas `await getUserMedia`, this.stream jest jeszcze null — stop() nie ma
+  // czego zatrzymać; flaga pozwala wznowionemu start() samemu ubić świeży track.
+  private stopped = false
 
   constructor(private opts: MicCaptureOptions) {}
 
   /** Zwraca `true`, gdy przechwytywanie ruszyło; `false` przy odmowie/braku audio
    *  (lub gdy `stop()` ubiegł asynchroniczne wejście). */
   async start(): Promise<boolean> {
+    this.stopped = false // reset dla wielokrotnego użycia instancji (start po stop)
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
       })
     } catch {
       this.opts.onError?.('Microphone access was denied.')
+      return false
+    }
+    // P1-J: stop() mógł paść podczas await getUserMedia — wtedy this.stream był jeszcze
+    // null, więc stop() nie zatrzymał tego (właśnie pozyskanego) tracku. Ubij go tu i wyjdź
+    // przed zbudowaniem jakiegokolwiek AudioContext/grafu.
+    if (this.stopped) {
+      this.stream.getTracks().forEach((t) => t.stop())
+      this.stream = null
       return false
     }
     const ctx = new (audioCtxCtor())({ sampleRate: this.opts.sampleRate })
@@ -101,7 +114,7 @@ export class MicCapture {
       return false
     }
     // stop() mógł wystartować podczas await addModule — wtedy ctx już znullowany/podmieniony.
-    if (this.ctx !== ctx || !this.stream) return false
+    if (this.stopped || this.ctx !== ctx || !this.stream) return false
 
     this.source = ctx.createMediaStreamSource(this.stream)
     const node = new AudioWorkletNode(ctx, 'pcm-capture')
@@ -119,6 +132,7 @@ export class MicCapture {
   }
 
   stop(): void {
+    this.stopped = true // P1-J: zarejestruj intencję synchronicznie (widoczna w start() po await)
     try {
       if (this.worklet) this.worklet.port.onmessage = null
       this.worklet?.port.close()

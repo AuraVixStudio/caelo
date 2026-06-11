@@ -24,6 +24,7 @@ import os
 import secrets
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -33,6 +34,18 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PKG_DIR = os.path.dirname(THIS_DIR)
 REPO_DIR = os.path.dirname(PKG_DIR)
 PREFIX = "__CAELO_CORE_READY__"
+
+
+def _isolated_env(token: str) -> tuple[dict, str]:
+    """P1-E: środowisko dla spawnowanego sidecara z IZOLOWANYM katalogiem danych.
+
+    Zwraca `(env, tmp_data_dir)`. Bez tego self-checki chodziłyby po realnym
+    `config.DATA_DIR` (dev = korzeń repo) — a `DELETE /genjobs` skasowałby realną
+    listę zadań użytkownika. `CAELO_CORE_DATA_DIR` ma pierwszeństwo w config.py.
+    Wołający sprząta `tmp` w finally (`shutil.rmtree(tmp, ignore_errors=True)`)."""
+    tmp = tempfile.mkdtemp(prefix="caelo-smoke-")
+    env = dict(os.environ, CAELO_CORE_TOKEN=token, CAELO_CORE_DATA_DIR=tmp)
+    return env, tmp
 
 
 def _read_handshake(proc: subprocess.Popen, timeout: float = 25.0) -> dict:

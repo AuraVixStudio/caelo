@@ -41,22 +41,65 @@ ACTIVE = (QUEUED, RUNNING)
 IMAGE_OPS = ("text2img", "edit", "variation")
 VIDEO_OPS = ("text2video", "img2video", "edit", "extend")
 
-# --- zgrubny szacunek kosztu (transparentność BYO-key, NIE cennik xAI) --------
-# Obraz tani, wideo droższe (rośnie z długością). Wartości celowo ostrożne; służą
-# do pokazania userowi rzędu wielkości jego wydatków, nie do rozliczeń.
-IMAGE_COST_PER_OUTPUT = 0.02   # USD za pojedynczy wygenerowany obraz
-VIDEO_COST_PER_SECOND = 0.10   # USD za sekundę wideo
+# P1-D: klucze `params`, które mogą nieść base64 data-URI (obraz: refs `images` /
+# pojedynczy `image`; wideo: `video`/`image`). Te bloby (do 12 MB obraz, 64 MB wideo)
+# rozdmuchują `GET /genjobs` do dziesiątek MB na każdy tick pollingu → reset połączenia.
+_BLOB_PARAM_KEYS = ("images", "image", "video")
+
+
+def _strip_blobs(params: dict) -> dict:
+    """Płytka kopia `params` z data-URI zastąpionymi krótkim placeholderem. Zostawia
+    nietknięte URL-e https i pozostałe pola (prompt/n/resolution/model…). Tylko do
+    ODPOWIEDZI listy/statusu; egzekutor i `retry` używają pełnych `params` z bazy."""
+    def _omit(v):
+        if isinstance(v, str) and v.startswith("data:"):
+            return f"<data-uri {len(v)} bytes omitted>"
+        return v
+
+    out = dict(params or {})
+    for k in _BLOB_PARAM_KEYS:
+        if k not in out:
+            continue
+        v = out[k]
+        if isinstance(v, list):
+            out[k] = [_omit(e) for e in v]
+        else:
+            out[k] = _omit(v)
+    return out
+
+# --- szacunek kosztu wg cennika xAI (transparentność BYO-key) -----------------
+# Stawki PER-MODEL wg oficjalnego cennika xAI (https://docs.x.ai/developers/pricing,
+# zweryfikowane 2026-06-07). Obraz rozliczany za sztukę, wideo za sekundę; "quality"
+# i preview są droższe. Służą do pokazania userowi rzędu wielkości jego wydatków
+# (BYO-key), nie do rozliczeń — faktyczne zużycie potwierdza konto xAI.
+IMAGE_COST_PER_IMAGE = {
+    "grok-imagine-image": 0.02,          # $0.02 / image (standard, domyślny)
+    "grok-imagine-image-quality": 0.05,  # $0.05 / image (wyższa jakość)
+}
+VIDEO_COST_PER_SECOND = {
+    "grok-imagine-video": 0.05,              # $0.050 / sec
+    "grok-imagine-video-1.5-preview": 0.08,  # $0.080 / sec (domyślny)
+}
+# Stawka, gdy model nieznany/niepodany → model domyślny z config.py
+# (DEFAULT_IMAGE_MODEL = grok-imagine-image, DEFAULT_VIDEO_MODEL = …-video-1.5-preview).
+DEFAULT_IMAGE_COST_PER_IMAGE = 0.02
+DEFAULT_VIDEO_COST_PER_SECOND = 0.08
 
 
 def estimate_cost(kind: str, op: str, params: dict) -> float:
-    """Zgrubny szacunek kosztu zadania (USD) z parametrów. Czysta funkcja."""
+    """Zgrubny szacunek kosztu zadania (USD) z parametrów. Czysta funkcja.
+    Stawka zależy od `params["model"]` (cennik xAI); nieznany/niepodany model →
+    stawka modelu domyślnego."""
     try:
+        model = params.get("model") or ""
         if kind == "image":
             n = int(params.get("n", 1) or 1)
-            return round(IMAGE_COST_PER_OUTPUT * max(1, n), 4)
+            rate = IMAGE_COST_PER_IMAGE.get(model, DEFAULT_IMAGE_COST_PER_IMAGE)
+            return round(rate * max(1, n), 4)
         if kind == "video":
             dur = int(params.get("duration", 6) or 6)
-            return round(VIDEO_COST_PER_SECOND * max(1, dur), 4)
+            rate = VIDEO_COST_PER_SECOND.get(model, DEFAULT_VIDEO_COST_PER_SECOND)
+            return round(rate * max(1, dur), 4)
     except (TypeError, ValueError):
         pass
     return 0.0
@@ -85,8 +128,14 @@ class GenJob:
     created_at: float = 0.0
     updated_at: float = 0.0
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    def to_dict(self, full: bool = False) -> dict:
+        """Słownik zadania. `full=False` (domyślnie, wszystkie odpowiedzi REST) usuwa
+        data-URI z `params` (P1-D). `full=True` (egzekutor/retry/wewnętrznie) zwraca
+        pełne `params`."""
+        d = asdict(self)
+        if not full:
+            d["params"] = _strip_blobs(self.params)
+        return d
 
     @classmethod
     def from_row(cls, row: dict) -> "GenJob":
@@ -277,7 +326,10 @@ class GenJobManager:
     def _set(self, job: GenJob, status: str) -> GenJob:
         job.status = status
         job.updated_at = time.time()
-        self._persist(job)
+        # P1-D: po starcie zmienia się tylko status/artefakty/error — NIE przepisuj
+        # wielomegabajtowego `params` (data-URI) pod globalnym lockiem przy każdej
+        # tranzycji. Wiersz wstawił już `submit`/`_persist`.
+        self._persist_status(job)
         self._notify(job)
         return job
 
@@ -291,6 +343,19 @@ class GenJobManager:
             )
         except Exception:  # noqa: BLE001 — persistencja nie może wywrócić workera
             _log.warning("could not persist gen_job %s", job.id, exc_info=True)
+
+    def _persist_status(self, job: GenJob) -> None:
+        """P1-D: aktualizacja samego statusu/wyników (bez `params`). Fallback do
+        pełnego `_persist`, jeśli magazyn nie ma metody (kompatybilność atrap)."""
+        upd = getattr(self._store, "update_gen_job_status", None)
+        if upd is None:
+            self._persist(job)
+            return
+        try:
+            upd(id=job.id, status=job.status, artifact_ids=job.artifact_ids,
+                error=job.error, updated_at=job.updated_at)
+        except Exception:  # noqa: BLE001 — persistencja nie może wywrócić workera
+            _log.warning("could not persist gen_job status %s", job.id, exc_info=True)
 
     def _notify(self, job: GenJob) -> None:
         if self._on_update is not None:
