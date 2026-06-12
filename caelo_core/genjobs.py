@@ -89,7 +89,14 @@ DEFAULT_VIDEO_COST_PER_SECOND = 0.08
 def estimate_cost(kind: str, op: str, params: dict) -> float:
     """Zgrubny szacunek kosztu zadania (USD) z parametrów. Czysta funkcja.
     Stawka zależy od `params["model"]` (cennik xAI); nieznany/niepodany model →
-    stawka modelu domyślnego."""
+    stawka modelu domyślnego.
+
+    ROAD-3.6-d: wideo rozliczane jest za **długość WYJŚCIA**, nie za żądany
+    `duration`. `text2video`/`img2video` produkują klip o długości `duration`,
+    ale `edit` zachowuje długość ŹRÓDŁA, a `extend` to ŹRÓDŁO + dodane sekundy —
+    więc dla nich liczymy z `source_duration` (gdy klient go zna). Bez niego
+    spadamy na `duration` (brak regresji: niedoszacowanie, nie crash). Funkcja
+    pozostaje czysta (bez importu `api_manager`/`state`)."""
     try:
         model = params.get("model") or ""
         if kind == "image":
@@ -97,9 +104,16 @@ def estimate_cost(kind: str, op: str, params: dict) -> float:
             rate = IMAGE_COST_PER_IMAGE.get(model, DEFAULT_IMAGE_COST_PER_IMAGE)
             return round(rate * max(1, n), 4)
         if kind == "video":
-            dur = int(params.get("duration", 6) or 6)
             rate = VIDEO_COST_PER_SECOND.get(model, DEFAULT_VIDEO_COST_PER_SECOND)
-            return round(rate * max(1, dur), 4)
+            dur = int(params.get("duration", 6) or 6)
+            src = int(params.get("source_duration", 0) or 0)
+            if op == "edit":
+                billed = src or dur          # edycja nie zmienia długości źródła
+            elif op == "extend":
+                billed = src + dur if src else dur   # źródło + dodane sekundy
+            else:
+                billed = dur                 # text2video / img2video
+            return round(rate * max(1, billed), 4)
     except (TypeError, ValueError):
         pass
     return 0.0

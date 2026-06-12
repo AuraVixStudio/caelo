@@ -95,3 +95,6 @@ worktrees/
 # Lokalna kopia oficjalnej dystrybucji Grok CLI używana jako materiał źródłowy do
 # analizy parytetu M19 — nie commitujemy jej do repo OSS.
 /PLIKI Z GROK BUILD/
+# ROAD-3.6-e: lokalny zrzut brand-packa (pobrany pakiet). Wyselekcjonowany,
+# wersjonowany zestaw brandu żyje w assets/brand/ — to tylko robocza kopia.
+/files/

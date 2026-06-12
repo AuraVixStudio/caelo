@@ -659,6 +659,34 @@ def _unit_blob_stripping(checks: list) -> None:
             store.close()
 
 
+def _unit_cost_source_duration(checks: list) -> None:
+    """ROAD-3.6-d: wideo edit/extend rozliczane wg długości ŹRÓDŁA, nie domyślnego
+    `duration=6`. text2video/img2video bez zmian. Funkcja czysta (bez api_manager)."""
+    from caelo_core.genjobs import estimate_cost, DEFAULT_VIDEO_COST_PER_SECOND
+
+    rate = DEFAULT_VIDEO_COST_PER_SECOND  # brak modelu w params → stawka domyślna
+
+    # edit: źródło 12 s → koszt rate*12, a NIE rate*6 (sedno buga)
+    edit_cost = estimate_cost("video", "edit",
+                              {"video": "https://x/v.mp4", "source_duration": 12})
+    checks.append(("ROAD-3.6-d: video/edit billed by source length (!= rate*6)",
+                   edit_cost == round(rate * 12, 4) and edit_cost != round(rate * 6, 4)))
+
+    # edit bez source_duration → fallback na duration (brak regresji)
+    checks.append(("ROAD-3.6-d: video/edit without source falls back to duration",
+                   estimate_cost("video", "edit", {"duration": 6}) == round(rate * 6, 4)))
+
+    # extend: źródło 12 s + 4 s przedłużenia → rate*16
+    ext_cost = estimate_cost("video", "extend",
+                             {"video": "https://x/v.mp4", "source_duration": 12, "duration": 4})
+    checks.append(("ROAD-3.6-d: video/extend billed by source + added seconds",
+                   ext_cost == round(rate * 16, 4)))
+
+    # text2video nietknięte: rate*duration
+    checks.append(("ROAD-3.6-d: text2video still billed by requested duration",
+                   estimate_cost("video", "text2video", {"duration": 6}) == round(rate * 6, 4)))
+
+
 def main() -> int:
     import logging
     # Wycisz logger silnika: testy CELOWO wywołują błędy/anulowania (handled),
@@ -672,6 +700,7 @@ def main() -> int:
     _unit_queue_limit(checks)
     _unit_clear(checks)
     _unit_blob_stripping(checks)
+    _unit_cost_source_duration(checks)
     _unit_clear_keeps_active(checks)
     _unit_backend_image_executor(checks)
     _unit_backend_video_executor(checks)

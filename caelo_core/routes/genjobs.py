@@ -63,6 +63,10 @@ class VideoJobReq(BaseModel):
     model: Optional[str] = Field(None, max_length=64)
     image: Optional[str] = None  # data-URI: kadr startowy dla img2video
     video: Optional[str] = None  # https URL lub data:video — źródło dla edit/extend
+    # ROAD-3.6-d: długość źródła (s) dla edit/extend — wyjście zachowuje długość
+    # źródła, więc koszt liczymy z niej, nie z domyślnego `duration`. Opcjonalne;
+    # klient podaje, gdy zna długość źródła (np. z HTMLVideoElement.duration).
+    source_duration: Optional[int] = Field(None, ge=1, le=V.MAX_VIDEO_DURATION)
 
     @field_validator("image")
     @classmethod

@@ -27,8 +27,8 @@ asar: true
 # (albo odkomentuj i wpisz poniżej). Publikacja dzieje się tylko z flagą `--publish`.
 publish:
   - provider: github
-    # owner: <github-owner>
-    # repo: caelo
+    owner: AuraVixStudio
+    repo: caelo
 
 win:
   target:

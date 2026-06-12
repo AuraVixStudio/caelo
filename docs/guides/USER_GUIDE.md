@@ -53,6 +53,21 @@ are separate (M22):** opening a folder in **Code** binds it to its own *code* pr
 history) and does **not** change your active chat project, so code folders no longer clutter the
 chat project list.
 
+**What the active project controls — and "All projects".** Per-project **instructions** and
+**knowledge** apply to the **active** project only; they are never merged across projects.
+- With a project selected, its instructions are prepended to that chat's system prompt, and its
+  knowledge documents are available to attach.
+- With **"All projects"** selected (no active project), **no** project instructions and **no**
+  knowledge are applied — the chat list simply shows every conversation. This is the
+  **lowest-token** state.
+
+**Knowledge is opt-in, one project at a time — it never inflates your tokens silently.** Knowledge
+documents are **never** sent automatically. They reach a chat only when you click **"Attach all"**
+in a project's settings, and only *that* (active) project's documents are attached — there is no
+"attach every project's files at once". So having several projects that each hold documents does
+**not** increase your token usage on its own: you only pay for documents in the turn where you
+explicitly attach them, and only for the one project you're in.
+
 **Send-to.** Most results can be forwarded to another module — e.g. send a chat code block to
 the **Code** agent, or send a generated image into **Video** as a source frame. Look for the
 send/▾ action on cards and message blocks.
