@@ -3,6 +3,12 @@ import { Search } from 'lucide-react'
 import { filterCommands, type Command } from '../lib/commands'
 import { cn } from '../lib/cn'
 
+// S35-m: selektor fokusowalnych (jak w ui/Popover) — Tab krąży w modalu, nie ucieka w tło.
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const LIST_ID = 'command-palette-list'
+const optionId = (i: number): string => `command-palette-opt-${i}`
+
 /** Paleta komend (M9-F5) — Ctrl/Cmd-K. Modal z fuzzy-search nad komendami; nawigacja
  *  klawiaturą (↑/↓/Enter/Esc). Prezentacyjny: komendy + open/onClose z App. */
 export function CommandPalette({
@@ -17,6 +23,7 @@ export function CommandPalette({
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const results = useMemo(() => filterCommands(commands, query), [commands, query])
 
   // Reset + autofocus przy otwarciu.
@@ -57,6 +64,27 @@ export function CommandPalette({
     }
   }
 
+  // S35-m: focus-trap — Tab/Shift+Tab krąży w obrębie modalu (jak ui/Popover).
+  function onPanelKeyDown(e: KeyboardEvent<HTMLDivElement>): void {
+    if (e.key !== 'Tab') return
+    const panel = panelRef.current
+    if (!panel) return
+    const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
+    if (items.length === 0) {
+      e.preventDefault()
+      return
+    }
+    const first = items[0]
+    const last = items[items.length - 1]
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[15vh]"
@@ -64,9 +92,12 @@ export function CommandPalette({
       role="presentation"
     >
       <div
+        ref={panelRef}
         className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onPanelKeyDown}
         role="dialog"
+        aria-modal="true"
         aria-label="Command palette"
       >
         <div className="flex items-center gap-2 border-b border-border px-3">
@@ -78,16 +109,24 @@ export function CommandPalette({
             onKeyDown={onKeyDown}
             placeholder="Jump to a mode or action…"
             aria-label="Command palette search"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-controls={LIST_ID}
+            aria-autocomplete="list"
+            aria-activedescendant={results.length ? optionId(active) : undefined}
             className="w-full bg-transparent py-3 text-sm text-fg outline-none placeholder:text-muted"
           />
         </div>
-        <div className="max-h-80 overflow-y-auto p-1">
+        <div className="max-h-80 overflow-y-auto p-1" role="listbox" id={LIST_ID} aria-label="Commands">
           {results.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted">No matching commands</p>
           ) : (
             results.map((c, i) => (
               <button
                 key={c.id}
+                id={optionId(i)}
+                role="option"
+                aria-selected={i === active}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => run(c)}
                 className={cn(

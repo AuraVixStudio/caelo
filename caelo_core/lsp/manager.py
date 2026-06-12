@@ -15,12 +15,18 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 from caelo_core.lsp.client import DEFAULT_DIAGNOSTICS_WAIT_S, LspClient
 
 log = logging.getLogger(__name__)
+
+# S34-f-3: instancja serwera, która przeżyła tyle sekund, liczy się jako „stabilna" —
+# kolejny crash zeruje budżet restartów (cap chroni przed crash-loopem, nie przed
+# rzadkimi, niezależnymi awariami rozłożonymi w czasie).
+_STABLE_RUN_S = 60.0
 
 
 class LspManager:
@@ -29,6 +35,7 @@ class LspManager:
         self._configs: dict = configs or {}
         self._clients: dict[str, LspClient] = {}
         self._restarts: dict[str, int] = {}
+        self._started_at: dict[str, float] = {}  # S34-f-3: monotonic startu (reset budżetu)
         # S34-b: jeden RLock — get_lsp() zwraca JEDEN współdzielony manager dla wszystkich
         # sesji (też równoległych subagentów); bez locka `_ensure` (check-then-spawn) startował
         # ten sam serwer dwukrotnie i osieracał pierwszy podproces.
@@ -62,6 +69,11 @@ class LspManager:
                 return None
             if c is not None:  # padł — restart wg polityki
                 maxr = int(cfg.get("maxRestarts", 3))
+                # S34-f-3: jeśli poprzednia instancja działała STABILNIE (> próg), wyzeruj
+                # budżet — inaczej trzy niezależne crashe rozłożone na godziny trwale
+                # wyłączały diagnostyki języka (cap nigdy się nie resetował poza restart()).
+                if time.monotonic() - self._started_at.get(name, 0.0) > _STABLE_RUN_S:
+                    self._restarts[name] = 0
                 if not cfg.get("restartOnCrash", True) or self._restarts.get(name, 0) >= maxr:
                     return None
                 self._restarts[name] = self._restarts.get(name, 0) + 1
@@ -75,6 +87,7 @@ class LspManager:
                 log.warning("LSP server %r failed to start", name, exc_info=True)
                 return None
             self._clients[name] = client
+            self._started_at[name] = time.monotonic()  # S34-f-3
             return client
 
     def _client_for(self, abs_path: str) -> Optional[LspClient]:

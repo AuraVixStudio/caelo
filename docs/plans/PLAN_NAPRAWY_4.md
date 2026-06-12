@@ -323,27 +323,28 @@ I/O jak korupcję**. Bazą jest jeden wzorzec lazy-init-z-lockiem (jak `history_
 
 **Najpierw** wspólny prymityw błędów (ROAD-4.1-d), bo absorbuje 3 pozycje:
 
-#### ⬜ ROAD-4.1-d — Jeden toast/status-line `[M]`
-Nowy `components/ui/Toast` (wzór: pasek z ChatView). Przepiąć przez niego: **S35-e**
-(`useWorkspace` Ctrl+S/openFile/selectWorkspace cisza → `lastError`/`onError`), **S35-j**
-(`useDictation` odmowa mikrofonu / błąd STT — 2× `catch{}`), **S35-h** (`attachments` —
-odrzucone pliki z powodem `too-large|binary`). Likwiduje „klasę cichych porażek". Testy:
-`useWorkspace.test.tsx`/`useDictation.test.tsx`/`attachments.test.ts` (jsdom) + render toastu.
+#### ✅ ROAD-4.1-d + S35-e/h/j — Jeden toast/status-line `[M]` — ZROBIONE
+Nowy `components/ui/Toast.tsx` (`ToastProvider`+`useToast`, no-op bez providera; wpięty w
+`App.tsx`). Przepięte przez niego: **S35-e** (`useWorkspace` saveActive/openFile/selectWorkspace),
+**S35-j** (`useDictation` odmowa mikrofonu / błąd STT — koniec 2× `catch{}`), **S35-h**
+(`fileToAttachment` → wynik rozróżnialny `{ok|reason}`, `useAttachments` pokazuje pominięte
+pliki z powodem). Testy: `Toast.test.tsx`, `useWorkspaceToast.test.tsx`, `useDictationToast.test.tsx`,
+`attachmentsFile.test.tsx` (9 PASS).
 
 Pozostałe S35 (niezależne):
 
 | ID | Plik:linia | Naprawa | Test | Eff |
 |---|---|---|---|---|
-| ⬜ **S35-a** | `serverState.ts:163` | write-through cache dla wszystkich pól `SettingsPatch` (effort/search/voice) — koniec cofania po remount | `serverState.test.ts` (pure `mergeSettings`) | S |
-| ⬜ **S35-c** | `useTts.ts:32` | epoka `reqRef` — dwa szybkie „Read aloud" = ostatni wygrywa (koniec 2 audio naraz) | `useTts.test.tsx` (play 1×) | S |
-| ⬜ **S35-d** | `Terminal.tsx:8` | `ResizeObserver` (refit przy separatorze), initial `resize` na `onopen` (pty ≠ 80×24), live theme przez `term.options.theme` (bez recreate WS) | `termTheme` pure + grep `ResizeObserver`/`onopen…resize` | M |
-| ⬜ **S35-f** | `main/index.ts:249` | zepsuty handshake JSON → `killCoreForRestart` (jak `verifyConnection:188`) + czyszczenie watchdoga; koniec osieroconego sidecara | extract `onHandshakeLine` + test `killSpy` | S |
-| ⬜ **S35-i** | `ChatView.tsx:447`, `AgentPanel.tsx:250` | stick-to-bottom + „Jump to bottom" (wspólny `useStickToBottom`); **zachować** wymuszony scroll karty approval (commit 23b64c4) | `stickToBottom.test.ts` (`isNearBottom`) | M |
-| ⬜ **S35-k** | `CodeEditor.tsx:9,31` | `useMemo(() => langFor(path), [path])` — koniec rekonfiguracji CM6 na każdy znak | `CodeEditor.test.tsx` (stała referencja przy zmianie value) | S |
-| ⬜ **S35-l** | `api.ts:1291` (+`agentClient.ts`) | `stop()` w CONNECTING zamyka socket (`ws.close()`) + guard w `onopen` — koniec tury mimo Stop | `streamChat.test.ts` (close wołany, brak ramki `chat`) | S |
-| ⬜ **S35-b** | `Settings.tsx:230` | `text-warning`→`text-warn` (token istnieje) | `styleTokens.test.ts` (grep) | S |
-| ⬜ **S35-g** | `useConversations.ts:42,68` | (domknięte w **P1-I**) `saveError` czyszczone na sukces; `setActiveId` poza updaterem | w `useConversations.test.tsx` | S |
-| ⬜ **S35-m** | `CommandPalette.tsx`, `Extensions.tsx`, `AgentPanel.tsx:764`, `ChatView.tsx:983` | A11y: focus-trap+`combobox/listbox` (port z `Popover`), taby `tablist/tab/tabpanel`, dropdowny slash/@ `listbox/option`+`aria-activedescendant` | `CommandPalette.test.tsx`/`Extensions.test.tsx` (role) | M(P3) |
+| ✅ **S35-a** | `serverState.ts` | pure `mergeSettings` — write-through cache dla WSZYSTKICH pól odpowiedzi (effort/search/voice) | serverState.test.ts | S |
+| ✅ **S35-c** | `useTts.ts` | epoka `reqRef` — dwa szybkie „Read aloud" = ostatni wygrywa (koniec 2 audio) | useTts.test.tsx (play 1×) | S |
+| ✅ **S35-d** | `Terminal.tsx` | `ResizeObserver` (refit przy separatorze), initial `resize` na `onopen`, live theme przez `term.options.theme` (bez recreate WS) | sourceGuards.test.ts | M |
+| ✅ **S35-f** | `main/index.ts` | zepsuty handshake JSON → `clearSupervisionTimers`+`killCoreForRestart` (jak `verifyConnection`) — koniec osieroconego sidecara | sourceGuards.test.ts | S |
+| ✅ **S35-i** | `ChatView.tsx`, `AgentPanel.tsx` + nowy `useStickToBottom.ts` | stick-to-bottom + „Jump to bottom"; **zachowany** wymuszony scroll karty approval (`status==='awaiting'`) | stickToBottom.test.ts (`isNearBottom`) | M |
+| ✅ **S35-k** | `CodeEditor.tsx` | `useMemo(() => langFor(path), [path])` (langFor wyeksportowany) — koniec rekonfiguracji CM6 na każdy znak | components/CodeEditor.test.tsx | S |
+| ✅ **S35-l** | `api.ts` `streamChat` | `stop()` w CONNECTING zamyka socket + guard w `onopen` — koniec tury mimo Stop (agentClient: WS trwały, nie auto-wysyła tury → bez zmian) | streamChat.test.ts | S |
+| ✅ **S35-b** | `Settings.tsx` | `text-warning`→`text-warn` (token istnieje) | styleTokens.test.ts | S |
+| ✅ **S35-g** | `useConversations.ts` | **domknięte w P1-I** (`saveError` czyszczone na sukces; `setActiveId` poza updaterem) | useConversations.test.tsx | S |
+| ✅ **S35-m** | `CommandPalette.tsx`, `Extensions.tsx`, `AgentPanel.tsx`, `ChatView.tsx` | A11y: CommandPalette `combobox/listbox/option`+`aria-activedescendant`+focus-trap; Extensions `tablist/tab/tabpanel`+roving tabindex+strzałki; dropdowny slash/@ `listbox/option` | CommandPalette.test.tsx + Extensions.test.tsx (role) | M(P3) |
 
 ---
 
@@ -351,12 +352,26 @@ Pozostałe S35 (niezależne):
 
 | ID | Plik:linia | Naprawa | Test | Eff |
 |---|---|---|---|---|
-| ⬜ **S34-d** | `sandbox/wrap.py:116` (+nowy `routes/sandbox.py`) | pokazać w UI „OS sandbox unavailable on Windows" (`sandbox_availability()` + `GET /sandbox/status`); zachowanie `wrap()` bez zmian (fail-open intencjonalny) | `sandbox_check` `test_availability` | M |
-| ⬜ **S34-f-1** | `mcp/client.py:129` + `lsp/client.py:177` | cap długości linii stdout MCP (`MAX_MCP_LINE_BYTES`) + clamp absurdalnego `Content-Length` | `mcp_check`/`lsp_check` | S |
-| ⬜ **S34-f-2** | `lsp/client.py:129` | `stop()` daje okno `wait(timeout=2)` przed `_tree_kill` (jak MCP) | `lsp_check` (czysty exit) | S |
-| ⬜ **S34-f-3** | `lsp/manager.py:56` | reset `_restarts` po stabilnym biegu (próg czasu, nie „każdy start") — koniec trwałej śmierci serwera | `lsp_check` `test_restart_budget_resets` | S |
-| ⬜ **S34-f-4** | `sandbox/wrap.py:65` + `profiles.py:81` | `--tmpfs /tmp` w strict (bwrap) + reguła `/tmp` w seatbelt — kompilatory/git działają pod strict | `sandbox_check` (`--tmpfs` w argv) | S |
-| ⬜ **S34-f-5** | `packages/manager.py:133` + `hooks.py:261` | `datetime.now(timezone.utc)` — sortowalne, forensyka audytu | `packages_check` (tz-aware) | S |
+| ✅ **S34-d** | `sandbox/wrap.py` + nowy `routes/sandbox.py` + `Extensions.tsx` | `sandbox_availability()` + `GET /sandbox/status`; UI: „OS sandbox unavailable on Windows…" gdy profil≠off i niedostępny; `wrap()` bez zmian | sandbox_check `test_availability` | M |
+| ✅ **S34-f-1** | `mcp/client.py` + `lsp/client.py` | cap linii stdout MCP (`readline(limit)`+resync) + clamp `Content-Length` w LSP | mcp_check + lsp_check (cap defined) | S |
+| ✅ **S34-f-2** | `lsp/client.py` `stop()` | okno `wait(STOP_EXIT_WAIT_S)` przed `_tree_kill` (jak MCP) | lsp_check | S |
+| ✅ **S34-f-3** | `lsp/manager.py` `_ensure` | reset `_restarts` po stabilnym biegu (`_STABLE_RUN_S`, nie „każdy start") | lsp_check `test_restart_budget_resets` | S |
+| ✅ **S34-f-4** | `sandbox/wrap.py` (bwrap+seatbelt) | `--tmpfs /tmp` w strict (bwrap) + allow `/tmp`+`/private/tmp` w seatbelt | sandbox_check (`--tmpfs` w argv) | S |
+| ✅ **S34-f-5** | `packages/manager.py` + `hooks.py` | `datetime.now(timezone.utc)` — sortowalne, forensyka audytu | packages_check (tz-aware) | S |
+
+**Domknięcie Faz E + F — ✅ ZROBIONE (2026-06-12):**
+- **Faza E (frontend P2/P3):** wspólny `components/ui/Toast` (wpięty w `App.tsx`, no-op bez
+  providera) zlikwidował klasę cichych porażek (Ctrl+S/mikrofon/STT/załączniki); `mergeSettings`
+  write-through; `useTts` epoka; `CodeEditor` useMemo; `streamChat.stop()` w CONNECTING; Terminal
+  ResizeObserver+initial-resize+live-theme; bad-handshake→restart; wspólny `useStickToBottom`
+  (+„Jump to bottom", zachowany scroll karty approval); A11y (CommandPalette combobox/listbox,
+  Extensions tablist/tab/tabpanel, dropdowny listbox/option).
+- **Faza F (backend minor):** `sandbox_availability()`+`GET /sandbox/status`+notka w Extensions
+  (S34-d); cap linii MCP (`readline(limit)`) + clamp Content-Length LSP; okno czystego exitu LSP;
+  reset budżetu restartów po stabilnym biegu; `--tmpfs /tmp` w strict; tz-aware timestampy.
+- **Testy:** front **224/224** (+27), typecheck czysty, lint bez nowych ostrzeżeń (2 istniejące
+  w `Image.tsx`/`Video.tsx`). Backend 12 suit + **api_smoke 322 PASS**. Nowe pliki: `Toast.tsx`,
+  `useStickToBottom.ts`, `routes/sandbox.py` + 9 plików testów front.
 
 ---
 

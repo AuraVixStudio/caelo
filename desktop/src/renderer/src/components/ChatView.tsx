@@ -37,6 +37,7 @@ import {
 } from '../lib/api'
 import { saveSettings, useModels, useSettings } from '../lib/serverState'
 import { toApiMessages } from '../lib/attachments'
+import { useStickToBottom } from '../lib/useStickToBottom'
 import {
   citationLabel,
   dedupeCitations,
@@ -388,7 +389,8 @@ export function ChatView({ conn }: { conn: Conn }) {
   // Voice: czytanie odpowiedzi na głos (TTS → useTts); dyktowanie promptu (STT → useDictation).
   const [defaultVoice, setDefaultVoice] = useState('eve')
 
-  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // S35-i: auto-scroll tylko gdy user przy dole + przycisk „Jump to bottom".
+  const { scrollRef, atBottom, onScroll, scrollToBottom } = useStickToBottom()
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   // P2-11: historia ostatniej tury (do „Retry" po błędzie streamingu).
   const lastTurnRef = useRef<ChatMessage[] | null>(null)
@@ -443,11 +445,10 @@ export function ChatView({ conn }: { conn: Conn }) {
     if (settings.voice) setDefaultVoice(settings.voice)
   }, [settings])
 
-  // Auto-scroll na dół przy zmianie treści.
+  // Auto-scroll na dół przy zmianie treści — TYLKO gdy user jest blisko dołu (S35-i).
   useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [convo.active?.messages])
+    scrollToBottom()
+  }, [convo.active?.messages, scrollToBottom])
 
   // P1-H: wyzeruj stan przejściowy „na poziomie komponentu" przy zmianie aktywnej
   // rozmowy. Bez tego pasek błędu i `lastTurnRef` z rozmowy A żyły po przełączeniu na B,
@@ -938,33 +939,44 @@ export function ChatView({ conn }: { conn: Conn }) {
             </p>
           </div>
         ) : (
-          <div
-            className="flex-1 overflow-y-auto"
-            ref={scrollRef}
-            role="log"
-            aria-live="polite"
-            aria-label="Conversation"
-          >
-            <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
-              {messages.map((m, i) => (
-                <ChatMessageRow
-                  key={i}
-                  message={m}
-                  index={i}
-                  isSpeaking={tts.speakingIdx === i}
-                  basedOnDocument={
-                    m.role === 'assistant' &&
-                    !!messages[i - 1]?.attachments?.some((a) => a.kind === 'document')
-                  }
-                  streaming={
-                    stream.streaming && m.role === 'assistant' && i === messages.length - 1
-                  }
-                  conn={conn}
-                  onCopy={copyMessage}
-                  onSpeak={tts.speak}
-                />
-              ))}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto"
+              ref={scrollRef}
+              onScroll={onScroll}
+              role="log"
+              aria-live="polite"
+              aria-label="Conversation"
+            >
+              <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
+                {messages.map((m, i) => (
+                  <ChatMessageRow
+                    key={i}
+                    message={m}
+                    index={i}
+                    isSpeaking={tts.speakingIdx === i}
+                    basedOnDocument={
+                      m.role === 'assistant' &&
+                      !!messages[i - 1]?.attachments?.some((a) => a.kind === 'document')
+                    }
+                    streaming={
+                      stream.streaming && m.role === 'assistant' && i === messages.length - 1
+                    }
+                    conn={conn}
+                    onCopy={copyMessage}
+                    onSpeak={tts.speak}
+                  />
+                ))}
+              </div>
             </div>
+            {!atBottom ? (
+              <button
+                onClick={() => scrollToBottom(true)}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted shadow-[var(--shadow)] outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Jump to bottom
+              </button>
+            ) : null}
           </div>
         )}
 
@@ -996,9 +1008,12 @@ export function ChatView({ conn }: { conn: Conn }) {
                 <div className="border-b border-border px-3 py-1.5 text-[11px] font-medium text-muted">
                   Commands
                 </div>
+                <div role="listbox" aria-label="Slash commands">
                 {slashMatches.map((c, i) => (
                   <button
                     key={c.name}
+                    role="option"
+                    aria-selected={i === slashIdx}
                     onMouseEnter={() => setSlashIdx(i)}
                     onClick={() => pickSlash(c)}
                     className={cn(
@@ -1010,6 +1025,7 @@ export function ChatView({ conn }: { conn: Conn }) {
                     <span className="truncate text-xs text-muted">{c.description}</span>
                   </button>
                 ))}
+                </div>
               </div>
             ) : null}
             <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />

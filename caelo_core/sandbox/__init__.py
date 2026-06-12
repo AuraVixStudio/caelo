@@ -17,6 +17,7 @@ from caelo_core.sandbox.profiles import (
 from caelo_core.sandbox.wrap import (
     linux_bwrap_argv,
     log_event,
+    sandbox_availability,
     seatbelt_profile,
     wrap,
     wrap_command,
@@ -25,4 +26,5 @@ from caelo_core.sandbox.wrap import (
 __all__ = [
     "VALID_PROFILES", "Profile", "build_profile", "resolve_profile", "sensitive_paths",
     "wrap", "wrap_command", "linux_bwrap_argv", "seatbelt_profile", "log_event",
+    "sandbox_availability",
 ]

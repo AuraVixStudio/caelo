@@ -40,6 +40,7 @@ DEFAULT_REQUEST_TIMEOUT_S = 30.0   # list/handshake — szybkie metadane
 DEFAULT_CALL_TIMEOUT_S = 120.0     # tools/call — narzędzie może liczyć dłużej
 START_TIMEOUT_S = 20.0             # handshake (initialize) musi zdążyć w tym oknie
 STDERR_RING = 50                   # ile ostatnich linii stderr trzymać do diagnostyki
+MAX_MCP_LINE_BYTES = 8 * 1024 * 1024   # S34-f-1: cap pojedynczej linii stdout (OOM)
 
 
 class McpError(Exception):
@@ -126,25 +127,43 @@ class StdioTransport(McpTransport):
         except Exception as exc:  # noqa: BLE001
             raise McpError(f"cannot start MCP server: {exc}")
 
+        def _dispatch(line: str) -> None:
+            line = line.strip()
+            if not line:
+                return
+            try:
+                obj = json.loads(line)
+            except Exception:
+                # Niektóre serwery psują kontrakt i logują na stdout — pomiń nie-JSON
+                # zamiast wywracać czytnik.
+                log.debug("MCP non-JSON stdout line ignored: %.200s", line)
+                return
+            if isinstance(obj, dict):
+                try:
+                    on_message(obj)
+                except Exception:  # noqa: BLE001
+                    log.exception("MCP on_message handler failed")
+
         def _read_stdout() -> None:
             assert self._proc is not None and self._proc.stdout is not None
+            # S34-f-1: czytnik z cap'em długości linii. `readline(limit)` wraca po \n LUB po
+            # `limit` znakach — nie blokuje (jak `read(n)`) i nie alokuje w nieskończoność
+            # przy zepsutym/wrogim serwerze wypisującym gigantyczny blob bez \n. Linia bez
+            # \n o długości > cap = odrzuć i dociągnij do następnego \n (resync).
+            stream = self._proc.stdout
             try:
-                for line in self._proc.stdout:
-                    line = line.strip()
+                while True:
+                    line = stream.readline(MAX_MCP_LINE_BYTES + 1)
                     if not line:
+                        break  # EOF (stdout zamknięty / kill)
+                    if len(line) > MAX_MCP_LINE_BYTES and not line.endswith("\n"):
+                        log.warning("MCP stdout line exceeds cap; dropping to next newline")
+                        while True:
+                            tail = stream.readline(MAX_MCP_LINE_BYTES + 1)
+                            if not tail or tail.endswith("\n"):
+                                break
                         continue
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        # Niektóre serwery psują kontrakt i logują na stdout — pomiń
-                        # nie-JSON zamiast wywracać czytnik.
-                        log.debug("MCP non-JSON stdout line ignored: %.200s", line)
-                        continue
-                    if isinstance(obj, dict):
-                        try:
-                            on_message(obj)
-                        except Exception:  # noqa: BLE001
-                            log.exception("MCP on_message handler failed")
+                    _dispatch(line)
             except (ValueError, OSError):
                 pass  # stdout zamknięty (kill) — oczekiwane
 

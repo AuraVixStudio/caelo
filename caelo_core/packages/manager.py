@@ -28,7 +28,7 @@ import re
 import shutil
 import threading
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -131,7 +131,7 @@ class PackageManager:
             "requires": manifest["requires"],
             "permissions": manifest["permissions"],
             "integrity": manifest["integrity"],
-            "installed_at": datetime.now().isoformat(timespec="seconds"),
+            "installed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),  # S34-f-5: tz-aware
         }
         with self._lock:
             items = [p for p in self._installed()

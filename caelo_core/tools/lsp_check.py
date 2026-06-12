@@ -138,6 +138,38 @@ def test_concurrent_ensure() -> None:
             mgr.shutdown()
 
 
+def test_restart_budget_resets() -> None:
+    """S34-f-3: serwer, który działał STABILNIE (>próg), po crashu dostaje wyzerowany
+    budżet restartów; szybkie crashe (świeży start) nadal trafiają w cap."""
+    import time
+    import types
+    from caelo_core.lsp.client import MAX_LSP_BODY_BYTES, STOP_EXIT_WAIT_S
+    from caelo_core.lsp.manager import _STABLE_RUN_S
+
+    configs = {"mockpy": {"command": sys.executable, "args": [_MOCK],
+                          "extensionToLanguage": {".py": "python"}}}
+    with tempfile.TemporaryDirectory() as d:
+        mgr = LspManager(configs, workspace_root=Path(d))
+        # stabilny bieg (>próg temu) + budżet wyczerpany → reset i re-spawn
+        mgr._clients["mockpy"] = types.SimpleNamespace(alive=False)
+        mgr._restarts["mockpy"] = 3
+        mgr._started_at["mockpy"] = time.monotonic() - (_STABLE_RUN_S + 60)
+        c = mgr._ensure("mockpy")
+        check("S34-f-3: stable run resets restart budget (re-spawns)",
+              c is not None and mgr._restarts["mockpy"] == 1)
+        mgr.shutdown()
+        # świeży start (crash-loop) → cap trzyma
+        mgr._clients["mockpy"] = types.SimpleNamespace(alive=False)
+        mgr._restarts["mockpy"] = 3
+        mgr._started_at["mockpy"] = time.monotonic()
+        c2 = mgr._ensure("mockpy")
+        check("S34-f-3: rapid crashes still trip the cap",
+              c2 is None and mgr._restarts["mockpy"] == 3)
+        check("S34-f-1/f-2: LSP body cap + clean-exit window defined",
+              MAX_LSP_BODY_BYTES > 0 and STOP_EXIT_WAIT_S > 0)
+        mgr.shutdown()
+
+
 def test_agent_lsp_tool() -> None:
     """Integracja z pętlą: narzędzie `lsp` (READONLY, bez bramki) + pasywna diagnostyka
     po edycie. Atrapa menedżera (bez podprocesu) wstrzyknięta przez lsp_provider."""
@@ -209,6 +241,7 @@ def main() -> int:
     test_client()
     test_manager()
     test_concurrent_ensure()  # S34-b
+    test_restart_budget_resets()  # S34-f-3 (+ S34-f-1/f-2 caps)
     test_agent_lsp_tool()
     ok = True
     for name, passed in checks:

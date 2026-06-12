@@ -18,6 +18,10 @@ export function useTts(
   voiceRef.current = voice
   const speakingRef = useRef<number | null>(null)
   speakingRef.current = speakingIdx
+  // S35-c: epoka żądania — dwa szybkie „Read aloud" nie mogą zagrać dwóch audio naraz
+  // (drugie speak pauzuje audioRef, ale 1. request mógł być jeszcze w trakcie await; ten
+  // licznik unieważnia poprzedni in-flight TTS — ostatni klik wygrywa).
+  const reqRef = useRef(0)
 
   useEffect(() => {
     return () => {
@@ -39,6 +43,7 @@ export function useTts(
         }
         audioRef.current = null
       }
+      const myReq = ++reqRef.current // unieważnia każdy wcześniejszy in-flight request
       if (speakingRef.current === idx) {
         setSpeakingIdx(null) // klik w aktywny = stop
         return
@@ -46,14 +51,16 @@ export function useTts(
       setSpeakingIdx(idx)
       try {
         const r = await textToSpeech(conn, { text: content, voice_id: voiceRef.current })
+        if (reqRef.current !== myReq) return // nowszy speak ubiegł ten — nie odtwarzaj
         const audio = playBase64Audio(r.audio_b64, r.mime)
         audioRef.current = audio
         audio.onended = () => {
+          if (reqRef.current !== myReq) return
           audioRef.current = null
           setSpeakingIdx((cur) => (cur === idx ? null : cur))
         }
       } catch {
-        setSpeakingIdx(null)
+        if (reqRef.current === myReq) setSpeakingIdx(null)
       }
     },
     [conn]

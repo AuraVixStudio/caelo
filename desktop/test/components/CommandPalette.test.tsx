@@ -14,7 +14,8 @@ function makeCommands(run = vi.fn()): Command[] {
   ]
 }
 
-const input = (): HTMLElement => screen.getByRole('textbox', { name: 'Command palette search' })
+// S35-m: input to combobox, wyniki to listbox/option (wcześniej textbox + zwykłe button).
+const input = (): HTMLElement => screen.getByRole('combobox', { name: 'Command palette search' })
 
 describe('CommandPalette', () => {
   it('renders nothing when closed', () => {
@@ -25,23 +26,23 @@ describe('CommandPalette', () => {
   it('shows the dialog and all commands when open', () => {
     render(<CommandPalette open onClose={() => {}} commands={makeCommands()} />)
     expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Chat/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Voice/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Settings/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Chat/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Voice/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Settings/ })).toBeInTheDocument()
   })
 
   it('filters commands by the search query', async () => {
     render(<CommandPalette open onClose={() => {}} commands={makeCommands()} />)
     await userEvent.type(input(), 'voice')
-    expect(screen.getByRole('button', { name: /Voice/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Chat/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Voice/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Chat/ })).not.toBeInTheDocument()
   })
 
   it('runs a command and closes on click', async () => {
     const run = vi.fn()
     const onClose = vi.fn()
     render(<CommandPalette open onClose={onClose} commands={makeCommands(run)} />)
-    await userEvent.click(screen.getByRole('button', { name: /Settings/ }))
+    await userEvent.click(screen.getByRole('option', { name: /Settings/ }))
     expect(run).toHaveBeenCalledTimes(1)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -68,5 +69,22 @@ describe('CommandPalette', () => {
     render(<CommandPalette open onClose={() => {}} commands={makeCommands()} />)
     await userEvent.type(input(), 'zzzzz')
     expect(screen.getByText('No matching commands')).toBeInTheDocument()
+  })
+
+  // --- S35-m: semantyka A11y (combobox/listbox/option + aria-activedescendant) ---
+  it('ma role combobox/listbox/option i aktualizuje aria-activedescendant strzałką', async () => {
+    render(<CommandPalette open onClose={() => {}} commands={makeCommands()} />)
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+
+    const combo = input()
+    expect(combo).toHaveAttribute('aria-expanded', 'true')
+    const first = combo.getAttribute('aria-activedescendant')
+    expect(first).toBeTruthy()
+    await userEvent.type(combo, '{ArrowDown}')
+    expect(combo.getAttribute('aria-activedescendant')).not.toBe(first)
+    // aktywna opcja ma aria-selected=true
+    const selected = screen.getAllByRole('option').filter((o) => o.getAttribute('aria-selected') === 'true')
+    expect(selected).toHaveLength(1)
   })
 })

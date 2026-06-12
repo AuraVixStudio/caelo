@@ -24,30 +24,40 @@ export function isDocumentFile(file: File): boolean {
   return /\.(pdf|docx|xlsx|pptx|doc|xls|ppt)$/i.test(file.name)
 }
 
+// S35-h: rozróżnialny wynik — odrzucenie niesie POWÓD, by UI mogło powiedzieć userowi,
+// czemu plik nie wszedł (za duży vs binarny), zamiast cicho go zjeść.
+export type AttachReason = 'too-large' | 'binary'
+export type AttachResult =
+  | { ok: true; att: ChatAttachment }
+  | { ok: false; reason: AttachReason; name: string }
+
 /**
  * Plik → załącznik. Obraz: data-URI (vision). Dokument (PDF/arkusz): data-URI
  * (Q&A nad dokumentem). Inny: próbujemy odczytać jako tekst (kod/notatki). Zwraca
- * null, gdy plik za duży albo binarny (bajt NUL) i nie jest rozpoznanym dokumentem.
+ * `{ok:false, reason}`, gdy plik za duży albo binarny (bajt NUL) i nie jest dokumentem.
  */
-export async function fileToAttachment(file: File): Promise<ChatAttachment | null> {
+export async function fileToAttachment(file: File): Promise<AttachResult> {
   if (file.type.startsWith('image/')) {
-    if (file.size > MAX_IMAGE_BYTES) return null
-    return { id: aid(), name: file.name, kind: 'image', uri: await fileToDataUri(file) }
+    if (file.size > MAX_IMAGE_BYTES) return { ok: false, reason: 'too-large', name: file.name }
+    return { ok: true, att: { id: aid(), name: file.name, kind: 'image', uri: await fileToDataUri(file) } }
   }
   if (isDocumentFile(file)) {
-    if (file.size > MAX_DOCUMENT_BYTES) return null
+    if (file.size > MAX_DOCUMENT_BYTES) return { ok: false, reason: 'too-large', name: file.name }
     return {
-      id: aid(),
-      name: file.name,
-      kind: 'document',
-      uri: await fileToDataUri(file),
-      mime: file.type || 'application/octet-stream'
+      ok: true,
+      att: {
+        id: aid(),
+        name: file.name,
+        kind: 'document',
+        uri: await fileToDataUri(file),
+        mime: file.type || 'application/octet-stream'
+      }
     }
   }
-  if (file.size > MAX_TEXT_BYTES) return null
+  if (file.size > MAX_TEXT_BYTES) return { ok: false, reason: 'too-large', name: file.name }
   const text = await file.text()
-  if (text.includes(String.fromCharCode(0))) return null // bajt NUL => binarny, pomijamy
-  return { id: aid(), name: file.name, kind: 'text', text }
+  if (text.includes(String.fromCharCode(0))) return { ok: false, reason: 'binary', name: file.name }
+  return { ok: true, att: { id: aid(), name: file.name, kind: 'text', text } }
 }
 
 /** Doklej treść plików tekstowych do promptu (wspólne dla czatu i agenta). */

@@ -95,6 +95,10 @@ def test_manager() -> None:
         reloaded_ids = {s["id"] for s in mgr2.all_status()}
         check("manager reloads config", "mock" in reloaded_ids)
         mgr2.shutdown()
+        # S34-f-1: cap długości linii stdout zdefiniowany (bounded reader exercised powyżej
+        # przez czytanie odpowiedzi mock-serwera — tu pilnujemy, że cap istnieje).
+        from caelo_core.mcp.client import MAX_MCP_LINE_BYTES
+        check("S34-f-1: MCP stdout line cap defined", MAX_MCP_LINE_BYTES > 0)
 
 
 def test_concurrent_start() -> None:

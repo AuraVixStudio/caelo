@@ -50,6 +50,7 @@ from caelo_core.routes import (
     packages,
     permissions,
     projects,
+    sandbox,
     sessions,
     settings,
     skills,
@@ -184,6 +185,7 @@ def create_app(
     app.include_router(commands.router, dependencies=guard)  # M14-B4: komendy slash
     app.include_router(skills.router, dependencies=guard)  # M14-B6: biblioteka skilli
     app.include_router(packages.router, dependencies=guard)  # M16: marketplace pakietów
+    app.include_router(sandbox.router, dependencies=guard)  # S34-d: status sandboxa OS
     # WebSockety same weryfikują token z query (nagłówków nie da się ustawić w WS).
     app.include_router(chat.router)
     app.include_router(agent.router)

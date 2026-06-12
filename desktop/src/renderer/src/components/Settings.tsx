@@ -227,7 +227,8 @@ export function Settings({ conn }: { conn: Conn }) {
             <span className="font-medium text-fg">{SOURCE_LABEL[activeSource]}</span>
           </p>
           {noCredForPref ? (
-            <p className="mb-3 text-sm text-warning">
+            // S35-b: poprawny token ostrzeżenia to `text-warn` (był nieistniejący wariant)
+            <p className="mb-3 text-sm text-warn">
               {pref === 'oauth'
                 ? '“xAI account” selected, but you are not signed in — sign in below, or pick another source.'
                 : '“API key” selected, but no key is stored — add one below, or pick another source.'}

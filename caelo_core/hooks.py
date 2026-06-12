@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -278,7 +278,7 @@ class HookManager:
 
     # --- audyt ---
     def _audit(self, entry: dict) -> None:
-        entry = {"ts": datetime.now().isoformat(timespec="seconds"), **entry}
+        entry = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **entry}  # S34-f-5: tz-aware (forensyka)
         line = json.dumps(entry, ensure_ascii=False)
         with self._audit_lock:
             try:

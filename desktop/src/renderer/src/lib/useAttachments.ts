@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { fileToAttachment } from './attachments'
 import type { ChatAttachment } from './api'
+import { useToast } from '../components/ui/Toast'
 
 /**
  * Załączniki wiadomości (P2-3) — identyczny kod `addFiles`/`removeAttachment`
@@ -17,13 +18,23 @@ export function useAttachments(): {
   clear: () => void
 } {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const toast = useToast() // S35-h: powiedz, czemu pliki zostały pominięte (nie cisza)
 
   async function addFiles(files: FileList | File[] | null): Promise<void> {
     if (!files) return
-    const loaded = (await Promise.all(Array.from(files).map(fileToAttachment))).filter(
-      Boolean
-    ) as ChatAttachment[]
-    if (loaded.length) setAttachments((prev) => [...prev, ...loaded])
+    const results = await Promise.all(Array.from(files).map(fileToAttachment))
+    const ok = results.flatMap((r) => (r.ok ? [r.att] : []))
+    const rejected = results.filter((r) => !r.ok) as { reason: 'too-large' | 'binary'; name: string }[]
+    if (ok.length) setAttachments((prev) => [...prev, ...ok])
+    if (rejected.length) {
+      const reason = (r: { reason: string }): string =>
+        r.reason === 'too-large' ? 'too large' : 'not a text file'
+      toast.push(
+        `Skipped ${rejected.length} file(s): ` +
+          rejected.map((r) => `${r.name} (${reason(r)})`).join(', '),
+        'error'
+      )
+    }
   }
 
   const add = useCallback((att: ChatAttachment): void => {

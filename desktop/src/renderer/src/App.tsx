@@ -21,6 +21,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { AppCommandPalette } from './components/AppCommandPalette'
 import { IconButton } from './components/ui/IconButton'
 import { Tooltip } from './components/ui/Tooltip'
+import { ToastProvider } from './components/ui/Toast'
 import { ThemeToggle } from './components/ui/ThemeToggle'
 import { BrandLockup, BrandMark, BrandTile } from './components/ui/BrandMark'
 import type { CoreConnection } from './types'
@@ -223,6 +224,7 @@ export default function App() {
   const status = STATUS[conn.status]
 
   return (
+    <ToastProvider>
     <HubProvider conn={c} navigate={(m) => setActive(m as Module)}>
     <div className="flex h-screen overflow-hidden bg-bg text-fg">
       <aside
@@ -296,5 +298,6 @@ export default function App() {
       />
     </div>
     </HubProvider>
+    </ToastProvider>
   )
 }

@@ -249,6 +249,12 @@ function startCore(): void {
         } catch (err) {
           connection = { status: 'error', error: `Bad handshake: ${String(err)}` }
           broadcast()
+          // S35-f: zepsuty handshake JSON parkował w 'error' z ŻYWYM sidecarem — watchdog
+          // patrzy tylko na 'starting', więc nic go nie ubijało. Wyczyść watchdoga (i tak
+          // już rozbrojony przez throw przed clearTimeout) i ubij, by ścieżka exit→restart
+          // (backoff + MAX_RESTARTS) zadziałała, jak przy verifyConnection failure (powyżej).
+          clearSupervisionTimers()
+          if (coreProcess && !manualStop) killCoreForRestart(`bad handshake: ${String(err)}`)
         }
       } else if (line) {
         console.log('[caelo-core]', line)

@@ -188,6 +188,14 @@ async function api<T>(conn: Conn, path: string, init?: ApiInit): Promise<T> {
   return (await res.json()) as T
 }
 
+// S34-d: status sandboxa OS — czy izolacja jest faktycznie dostępna na tej platformie.
+export interface SandboxStatus {
+  profile: string
+  availability: { platform: string; available: boolean; mechanism: string; reason: string }
+}
+export const getSandboxStatus = (c: Conn): Promise<SandboxStatus> =>
+  api<SandboxStatus>(c, '/sandbox/status')
+
 export const getModels = (c: Conn): Promise<ModelsResp> => api<ModelsResp>(c, '/models')
 export const getSettings = (c: Conn): Promise<SettingsResp> => api<SettingsResp>(c, '/settings')
 export const getAuthStatus = (c: Conn): Promise<AuthResp> => api<AuthResp>(c, '/auth/status')
@@ -1227,10 +1235,23 @@ export function streamChat(
   const wsUrl =
     conn.baseUrl.replace(/^http/, 'ws') + '/chat/stream?token=' + encodeURIComponent(conn.token)
   let finished = false
+  let stopRequested = false // S35-l: Stop może przyjść, gdy WS jest CONNECTING
   let acc = '' // backend streamuje przyrostowo (P1-3); sklejamy, by onDelta dostawał pełny tekst
   const ws = new WebSocket(wsUrl)
 
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'chat', ...payload }))
+  ws.onopen = () => {
+    // S35-l: jeśli Stop padł podczas łączenia — NIE zaczynaj tury (inaczej socket otwierał
+    // się, wysyłał 'chat' i bieg trwał mimo Stop). Zamknij i wyjdź.
+    if (stopRequested) {
+      try {
+        ws.close()
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    ws.send(JSON.stringify({ type: 'chat', ...payload }))
+  }
   ws.onmessage = (ev) => {
     let m: {
       type?: string
@@ -1293,8 +1314,16 @@ export function streamChat(
 
   return {
     stop: () => {
+      stopRequested = true
       try {
-        ws.send(JSON.stringify({ type: 'stop' }))
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'stop' }))
+        } else if (ws.readyState === WebSocket.CONNECTING) {
+          // S35-l: Stop w trakcie łączenia — `send` zgubiłby ramkę i tura ruszyłaby po
+          // onopen. Zamykamy gniazdo; finished=true → onclose nie pokaże fałszywego błędu.
+          finished = true
+          ws.close()
+        }
       } catch {
         /* ignore */
       }

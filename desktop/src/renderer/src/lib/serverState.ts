@@ -160,17 +160,26 @@ export function useSettings(conn: Conn): {
  * nigdy nie wraca z serwera — odzwierciedlamy tylko `has_api_key`. Zwraca/propaguje
  * błąd jak `putSettings` (wołający pokazuje realny wynik — por. P1-6).
  */
+/**
+ * S35-a: scal `patch` w cache write-through dla KAŻDEGO pola odpowiedzi (nie tylko 4
+ * wcześniej obsługiwanych) — wcześniej zapis `chat_effort`/`chat_search_mode`/`voice`…
+ * nie trafiał do cache i cofał się w UI po remount. Iterujemy po kluczach odpowiedzi:
+ * `api_key`/`auth_source` nie są polami `SettingsResp` (api_key tylko przełącza
+ * `has_api_key`), więc się nie skopiują. Czysta funkcja — testowalna bez sieci.
+ */
+export function mergeSettings(current: SettingsResp, patch: SettingsPatch): SettingsResp {
+  const next = { ...current } as Record<string, unknown>
+  const p = patch as Record<string, unknown>
+  for (const k of Object.keys(current)) {
+    if (p[k] !== undefined) next[k] = p[k]
+  }
+  if (patch.api_key) next.has_api_key = true
+  return next as unknown as SettingsResp
+}
+
 export async function saveSettings(conn: Conn, patch: SettingsPatch): Promise<{ ok: boolean }> {
   const res = await putSettings(conn, patch)
   const current = settingsResource.peek(conn)
-  if (current) {
-    const next: SettingsResp = { ...current }
-    if (patch.chat_model !== undefined) next.chat_model = patch.chat_model
-    if (patch.code_model !== undefined) next.code_model = patch.code_model
-    if (patch.system_prompt !== undefined) next.system_prompt = patch.system_prompt
-    if (patch.chat_temperature !== undefined) next.chat_temperature = patch.chat_temperature
-    if (patch.api_key) next.has_api_key = true
-    settingsResource.write(conn, next)
-  }
+  if (current) settingsResource.write(conn, mergeSettings(current, patch))
   return res
 }

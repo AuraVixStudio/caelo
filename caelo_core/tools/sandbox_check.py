@@ -108,6 +108,8 @@ def test_wrap_linux() -> None:
     st_bw = sandbox.linux_bwrap_argv(["echo", "hi"], st, root="/ws", bwrap="bwrap",
                                      exists=lambda p: True)
     check("wrap(linux): binds the root rw", "--bind" in st_bw and "/ws" in st_bw)
+    check("wrap(linux): strict mounts tmpfs /tmp (S34-f-4)",
+          "--tmpfs" in st_bw and "/tmp" in st_bw)
 
     no = sandbox.wrap(["echo", "hi"], st, root="/ws", platform="linux",
                       which=lambda n: None)
@@ -135,6 +137,8 @@ def test_wrap_macos() -> None:
     check("wrap(macos): seatbelt denies network (strict)", "(deny network*)" in sb)
     check("wrap(macos): seatbelt allows write to root",
           '(allow file-write* (subpath "/ws"))' in sb)
+    check("wrap(macos): strict allows write to /tmp (S34-f-4)",
+          '(allow file-write* (subpath "/tmp"))' in sb)
     check("wrap(macos): seatbelt denies sensitive paths",
           ".ssh" in sb and "(deny file*" in sb)
     check("wrap(macos): workspace allows read-all",
@@ -170,12 +174,28 @@ def test_run_command_off_noop() -> None:
         config.SANDBOX_PROFILE = prev
 
 
+def test_availability() -> None:
+    """S34-d: sandbox_availability raportuje, czy OS-sandbox jest faktycznie dostępny."""
+    av = sandbox.sandbox_availability
+    win = av(platform="win32")
+    check("availability: windows unavailable (S34-d)",
+          win["available"] is False and win["mechanism"] == "none" and "Windows" in win["reason"])
+    check("availability: macos available via seatbelt (S34-d)",
+          av(platform="darwin")["available"] is True
+          and av(platform="darwin")["mechanism"] == "seatbelt")
+    check("availability: linux without bwrap unavailable (S34-d)",
+          av(platform="linux", which=lambda n: None)["available"] is False)
+    check("availability: linux with bwrap available (S34-d)",
+          av(platform="linux", which=lambda n: "/usr/bin/bwrap")["available"] is True)
+
+
 def main() -> int:
     test_profiles()
     test_resolve_config()
     test_wrap_linux()
     test_wrap_macos()
     test_wrap_noop()
+    test_availability()  # S34-d
     test_run_command_off_noop()
 
     print("\n=== sandbox OS self-check (M19-B7, no real exec) ===")

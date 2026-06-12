@@ -53,6 +53,9 @@ def seatbelt_profile(profile: Profile) -> str:
     parts.append("(deny file-write*)")
     for w in profile.write_paths:
         parts.append(f"(allow file-write* (subpath {_sb_quote(w)}))")
+    if not profile.read_all:  # S34-f-4: strict — /tmp zapisywalny (kompilatory/git tam piszą)
+        for t in ("/tmp", "/private/tmp"):
+            parts.append(f"(allow file-write* (subpath {_sb_quote(t)}))")
     for d in profile.deny_paths:  # zawsze zabronione (sekrety) — na końcu, by wygrały
         parts.append(f"(deny file* (subpath {_sb_quote(d)}))")
     return "\n".join(parts)
@@ -74,6 +77,9 @@ def linux_bwrap_argv(argv: List[str], profile: Profile, *, root: Optional[str],
         for p in _STRICT_RO_SYSTEM:
             if ex(p):
                 cmd += ["--ro-bind", p, p]
+        # S34-f-4: świeży tmpfs /tmp (izolowany od hosta) — bez niego kompilatory/git/
+        # toolchainy padają pod strict. Deny-paths montują się PÓŹNIEJ, więc to nie osłabia.
+        cmd += ["--tmpfs", "/tmp"]
     # Zapisywalne korzenie (rebind RW — nadpisuje ro-bind).
     for w in profile.write_paths:
         if w and ex(w):
@@ -117,6 +123,25 @@ def wrap(argv, profile: Profile, *, root: Optional[str] = None,
     log.warning("sandbox '%s' requested but no OS sandbox on %s; running WITHOUT it",
                 profile.name, plat)
     return argv
+
+
+def sandbox_availability(platform: Optional[str] = None,
+                         which: Optional[Callable[[str], Optional[str]]] = None) -> dict:
+    """S34-d: czy OS-sandbox jest faktycznie dostępny na tej platformie (PURE, testowalne).
+    macOS → seatbelt (zawsze); Linux → bwrap iff na PATH; Windows/inne → niedostępny.
+    Renderer pokazuje ostrzeżenie, gdy profil ≠ off, a `available` jest False (na Windows
+    `wrap()` to cichy no-op — user mógłby zakładać izolację, której nie ma)."""
+    plat = platform or sys.platform
+    finder = which or shutil.which
+    if plat == "darwin":
+        return {"platform": plat, "available": True, "mechanism": "seatbelt", "reason": ""}
+    if plat.startswith("linux"):
+        has = bool(finder("bwrap"))
+        return {"platform": plat, "available": has,
+                "mechanism": "bwrap" if has else "none",
+                "reason": "" if has else "bwrap not on PATH"}
+    return {"platform": plat, "available": False, "mechanism": "none",
+            "reason": "OS sandbox unavailable on Windows"}
 
 
 def wrap_command(argv, *, root: Optional[str] = None) -> List[str]:

@@ -32,6 +32,8 @@ DEFAULT_STARTUP_TIMEOUT_S = 30.0
 DEFAULT_REQUEST_TIMEOUT_S = 15.0
 DEFAULT_DIAGNOSTICS_WAIT_S = 1.5   # best-effort: ile czekać na publishDiagnostics po edycie
 STDERR_RING = 50
+MAX_LSP_BODY_BYTES = 32 * 1024 * 1024   # S34-f-1: clamp absurdalnego Content-Length (OOM)
+STOP_EXIT_WAIT_S = 2.0                   # S34-f-2: okno na czyste wyjście przed tree-kill
 
 
 class LspError(Exception):
@@ -129,12 +131,22 @@ class LspClient:
     def stop(self) -> None:
         if self._proc is None:
             return
+        proc = self._proc
         try:
             self._send({"jsonrpc": "2.0", "id": self._new_id(), "method": "shutdown"})
             self._send({"jsonrpc": "2.0", "method": "exit"})
         except Exception:  # noqa: BLE001
             pass
-        _tree_kill(self._proc)
+        # S34-f-2: daj serwerowi OKNO na czyste wyjście (flush indeksu) — dopiero potem
+        # tree-kill (jak StdioTransport.close w MCP; wcześniej LSP killował natychmiast).
+        try:
+            proc.wait(timeout=STOP_EXIT_WAIT_S)
+        except Exception:  # noqa: BLE001 (TimeoutExpired itd.) — wymuś
+            _tree_kill(proc)
+            try:
+                proc.wait(timeout=3)
+            except Exception:  # noqa: BLE001
+                pass
         self._proc = None
 
     # --- transport (Content-Length) ----------------------------------------------
@@ -188,6 +200,10 @@ class LspClient:
                     line = out.readline()
                     if not line:
                         return
+                if length > MAX_LSP_BODY_BYTES:  # S34-f-1: wrogi/zepsuty nagłówek → nie alokuj
+                    log.warning("LSP %s: Content-Length %d exceeds cap; closing reader",
+                                self.name, length)
+                    break
                 if length > 0:
                     body = self._read_exact(out, length)
                     if len(body) < length:

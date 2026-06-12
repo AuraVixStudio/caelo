@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { speechToText, type Conn } from './api'
 import { blobToBase64, MicRecorder } from './audio'
+import { useToast } from '../components/ui/Toast'
 
 /** Wstrzyknij dyktowany tekst do istniejącego pola (M12-F1): dokleja po spacji,
  *  bez wiodącej spacji dla pustego pola. Czysta funkcja — wspólna dla czatu/agenta. */
@@ -21,6 +22,7 @@ export function useDictation(
 ): { recording: boolean; busy: boolean; toggle: () => Promise<void> } {
   const [recording, setRecording] = useState(false)
   const [busy, setBusy] = useState(false)
+  const toast = useToast() // S35-j: odmowa mikrofonu / błąd STT nie mogą iść w pustkę
   const recorderRef = useRef<MicRecorder | null>(null)
   // onText przez ref — handler stabilny, zawsze świeży callback.
   const onTextRef = useRef(onText)
@@ -47,7 +49,7 @@ export function useDictation(
         const t = (r.text || '').trim()
         if (t) onTextRef.current(t)
       } catch {
-        /* ignore */
+        toast.push('Could not transcribe audio. Please try again.', 'error')
       } finally {
         setBusy(false)
       }
@@ -58,7 +60,7 @@ export function useDictation(
         recorderRef.current = rec
         setRecording(true)
       } catch {
-        /* mic denied */
+        toast.push('Microphone access was denied or unavailable.', 'error')
       }
     }
   }

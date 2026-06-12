@@ -73,6 +73,7 @@ import {
   type PlanPhase
 } from '../../lib/agentTrust'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
+import { useStickToBottom } from '../../lib/useStickToBottom'
 import { filterSessions, historyToEntries, sessionsForWorkspace } from '../../lib/agentSession'
 import { detectSuggest, fuzzyFiles, applyFileSuggest } from '../../lib/composerSuggest'
 import { filterSlashCommands, expandTemplate, matchSlash } from '../../lib/slashCommands'
@@ -172,7 +173,8 @@ export function AgentPanel({
   const agentRef = useRef<AgentConnection | null>(null)
   const curAssistant = useRef<string | null>(null)
   const idRef = useRef(0)
-  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // S35-i: auto-scroll tylko gdy user przy dole (karta approval wymusza — niżej).
+  const { scrollRef, atBottom, onScroll, scrollToBottom } = useStickToBottom()
   // Handlery rejestrowane są raz — świeże wersje przez refy.
   const onFilesChangedRef = useRef(onFilesChanged)
   onFilesChangedRef.current = onFilesChanged
@@ -267,16 +269,14 @@ export function AgentPanel({
   }, [workspacePath, connected])
 
   useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    // Dosuń do dołu PO ułożeniu layoutu (rAF). Bez tego wysokość świeżo rozwiniętej
-    // karty approval (detale + przyciski Accept/Reject/Always) bywa mierzona za wcześnie
-    // i przyciski lądują pod foldem — użytkownik nie może ich kliknąć.
-    const id = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight
-    })
+    // S35-i: dosuń do dołu PO ułożeniu layoutu (rAF). Karta approval (detale + przyciski
+    // Accept/Reject/Always) MUSI być w widoku, by dało się ją kliknąć — wymuszamy scroll
+    // (force), pomijając strażnik stick-to-bottom; w pozostałych przypadkach honorujemy go.
+    const last = entries[entries.length - 1]
+    const force = !!last && last.kind === 'tool' && last.status === 'awaiting'
+    const id = requestAnimationFrame(() => scrollToBottom(force))
     return () => cancelAnimationFrame(id)
-  }, [entries])
+  }, [entries, scrollToBottom])
 
   // M9-F2: „Send to → Code" — podnieś artefakt jako załącznik agenta (np. obraz),
   // a opcjonalny prompt wstaw do pola (bez kasowania tekstu użytkownika).
@@ -712,31 +712,42 @@ export function AgentPanel({
         />
       </header>
 
-      <div
-        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
-        ref={scrollRef}
-        role="log"
-        aria-live="polite"
-        aria-label="Agent activity"
-      >
-        {entries.length === 0 ? (
-          <p className="text-xs text-muted">
-            Ask the agent to read, edit or run code in the workspace.
-          </p>
-        ) : (
-          // `shrink-0`: bez tego dzieci kontenera flex-col KURCZĄ się (flex-shrink:1),
-          // więc przy wielu wpisach „ściskają się jak prasą" i lista nie przewija —
-          // zamiast tego mają zachować naturalną wysokość i przepełnić (scroll).
-          entries.map((e) => (
-            <div key={e.id} className="shrink-0">
-              <EntryView
-                entry={e}
-                onApprove={approve}
-                streaming={busy && e.kind === 'assistant' && e.id === curAssistant.current}
-              />
-            </div>
-          ))
-        )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
+          ref={scrollRef}
+          onScroll={onScroll}
+          role="log"
+          aria-live="polite"
+          aria-label="Agent activity"
+        >
+          {entries.length === 0 ? (
+            <p className="text-xs text-muted">
+              Ask the agent to read, edit or run code in the workspace.
+            </p>
+          ) : (
+            // `shrink-0`: bez tego dzieci kontenera flex-col KURCZĄ się (flex-shrink:1),
+            // więc przy wielu wpisach „ściskają się jak prasą" i lista nie przewija —
+            // zamiast tego mają zachować naturalną wysokość i przepełnić (scroll).
+            entries.map((e) => (
+              <div key={e.id} className="shrink-0">
+                <EntryView
+                  entry={e}
+                  onApprove={approve}
+                  streaming={busy && e.kind === 'assistant' && e.id === curAssistant.current}
+                />
+              </div>
+            ))
+          )}
+        </div>
+        {!atBottom ? (
+          <button
+            onClick={() => scrollToBottom(true)}
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted shadow-[var(--shadow)] outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Jump to bottom
+          </button>
+        ) : null}
       </div>
 
       <TeamView
@@ -785,11 +796,12 @@ export function AgentPanel({
             <div className="border-b border-border px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted">
               {suggestTok?.kind === 'slash' ? 'Commands' : 'Files'}
             </div>
-            <ul className="max-h-56 overflow-y-auto py-1">
+            <ul className="max-h-56 overflow-y-auto py-1" role="listbox" aria-label={suggestTok?.kind === 'slash' ? 'Commands' : 'Files'}>
               {suggestions.map((s, i) => (
-                <li key={s.value}>
+                <li key={s.value} role="option" aria-selected={i === suggestIdx}>
                   <button
                     type="button"
+                    tabIndex={-1}
                     onMouseDown={(e) => {
                       e.preventDefault()
                       pickSuggestion(i)

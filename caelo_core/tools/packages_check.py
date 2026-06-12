@@ -128,6 +128,10 @@ def test_skill_roundtrip(d: Path) -> None:
     sm = SkillManager(d / "skills")
     check("imported skill is NOT enabled (no silent inject)", sm.injected_text() == "")
     check("install record carries version", rec["version"] == "1.0.0")
+    # S34-f-5: installed_at jest tz-aware (sortowalne / forensyka cross-machine)
+    from datetime import datetime as _dt
+    check("install record installed_at is tz-aware (S34-f-5)",
+          _dt.fromisoformat(rec["installed_at"]).tzinfo is not None)
 
     # manipulacja payloadu → integrity fail → odmowa
     tampered = _tamper(data, "payload/SKILL.md", b"HACK")

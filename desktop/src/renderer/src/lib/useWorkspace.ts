@@ -7,6 +7,7 @@ import {
   gitStatus,
   type Conn
 } from './api'
+import { useToast } from '../components/ui/Toast'
 
 export interface EditorTab {
   path: string
@@ -45,6 +46,7 @@ export function useWorkspace(conn: Conn): {
   const [gitKey, setGitKey] = useState(0)
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
+  const toast = useToast() // S35-e: nieudany Ctrl+S / open / wybór folderu nie może iść w pustkę
 
   const tabsRef = useRef<EditorTab[]>([])
   tabsRef.current = tabs
@@ -78,8 +80,9 @@ export function useWorkspace(conn: Conn): {
       setTreeKey((k) => k + 1)
       refreshGit()
     } catch (e) {
-      // P1-6: nie połykaj po cichu wyboru workspace przez użytkownika.
+      // P1-6/S35-e: nie połykaj po cichu wyboru workspace przez użytkownika.
       console.error('Failed to set workspace:', e)
+      toast.push('Could not set workspace folder.', 'error')
     }
   }
 
@@ -103,10 +106,10 @@ export function useWorkspace(conn: Conn): {
         setTabs((prev) => [...prev, { path, content: r.content, dirty: false }])
         setActivePath(path)
       } catch {
-        /* ignore */
+        toast.push(`Could not open ${path}.`, 'error')
       }
     },
-    [conn]
+    [conn, toast]
   )
 
   function changeContent(path: string, content: string): void {
@@ -129,7 +132,8 @@ export function useWorkspace(conn: Conn): {
       setTabs((prev) => prev.map((t) => (t.path === tab.path ? { ...t, dirty: false } : t)))
       refreshGit()
     } catch {
-      /* ignore */
+      // S35-e: zakładka zostaje „dirty" (zapis się nie udał) + widoczny komunikat.
+      toast.push(`Could not save ${tab.path}.`, 'error')
     }
   }
 
