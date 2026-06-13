@@ -2,8 +2,15 @@ name: Release
 
 # M15-9: budowa instalatorów per-OS na runnerze danego systemu (cross-compile
 # sidecara PyInstaller jest niepraktyczny — każdy OS buduje swój własny sidecar).
-# Wyzwalane TAGIEM `v*` (np. v1.2.0) lub ręcznie. Publikuje do GitHub Releases →
-# tworzy feed (latest.yml) dla auto-update (M15-8, electron-updater).
+# Wyzwalane TAGIEM `v*` (np. v1.2.0) lub ręcznie.
+#
+# ROAD-TOP2 / Faza B Krok 6.4: ten workflow BUDUJE artefakty, ale ich NIE PUBLIKUJE.
+# Cert Caelo (Asseco SimplySign) jest chmurowy/nieeksportowalny → podpis działa wyłącznie
+# LOKALNIE u usera (SimplySign Desktop), nie na runnerze GitHuba. Podpisane wydanie + feed
+# `latest.yml` (auto-update, M15-8/electron-updater) tworzy user lokalnie
+# (`npm run dist:full` + `electron-builder --publish always`, runbook Krok 6.4). Tutaj
+# `--publish never` + upload-artifact, żeby CI NIE wypchnął niepodpisanego buildu na tag
+# (kolizja z lokalnym wydaniem + serwowanie niepodpisanych binariów przez auto-update).
 #
 # Windows jest platformą główną; mac/Linux budują się „na żądanie" — fail-fast: false,
 # więc brak certów/zależności na jednym OS nie blokuje pozostałych.
@@ -13,11 +20,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write          # tworzenie GitHub Release + upload artefaktów
+  contents: read           # CI tylko buduje/waliduje; podpisane wydania publikuje user lokalnie (Krok 6.4)
 
 jobs:
   build:
-    name: Build & publish (${{ matrix.os }})
+    name: Build (UNSIGNED, ${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -59,16 +66,22 @@ jobs:
         working-directory: desktop
         run: npm ls electron-updater || npm install electron-updater
 
-      - name: Build & publish installer
+      # ROAD-TOP2 / Krok 6.4: `--publish never` — CI NIE może podpisać (cert chmurowy
+      # SimplySign jest lokalny), więc nie publikujemy. Build waliduje pakowanie cross-OS.
+      - name: Build installer (UNSIGNED — validation only, never published)
         working-directory: desktop
-        run: npx --no-install electron-builder --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # --- Podpisywanie (opcjonalne; uzupełnij sekrety, by włączyć) ---
-          # Windows Authenticode:
-          #   CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          #   CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          # macOS Developer ID + notaryzacja:
-          #   APPLE_ID: ${{ secrets.APPLE_ID }}
-          #   APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          #   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx --no-install electron-builder --publish never
+
+      # Artefakty do wglądu/diagnostyki builda (NIE są wydaniem). Pełne, PODPISANE wydanie
+      # Windows publikuje user lokalnie (SimplySign Desktop aktywny) — runbook Krok 6.4.
+      - name: Upload unsigned build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: caelo-unsigned-${{ matrix.os }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+          if-no-files-found: ignore
+          retention-days: 7

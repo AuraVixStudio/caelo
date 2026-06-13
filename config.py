@@ -203,13 +203,24 @@ AGENT_GIT_WORKTREE = os.environ.get("CAELO_GIT_WORKTREE", "").strip().lower() in
 # cap rozmiaru + SSRF-guard (blok loopback/sieci prywatnych). **Opt-in, domyślnie OFF**
 # (jak inne M19) — narzędzie UKRYTE przed modelem, gdy wyłączone. Włącz `CAELO_WEB_FETCH=1`.
 # `CAELO_WEB_FETCH_DOMAINS` (CSV hostów) = dodatkowa twarda restrykcja na poziomie
-# egzekutora (pusta = bez restrykcji tam; decyduje bramka/reguły). `web_search` odłożony
-# (decyzja PLAN_M19_TIER3 §11 — najpierw prosty, gated `web_fetch`).
+# egzekutora (pusta = bez restrykcji tam; decyduje bramka/reguły). Pokrewne `web_search`
+# (live search BEZ bramki) jest niżej — Faza-G/TOP1 (M19-Tier3 §11 odkładał je za prostym,
+# gated `web_fetch`; teraz wdrożone).
 WEB_FETCH_ENABLED = os.environ.get("CAELO_WEB_FETCH", "").strip().lower() in ("1", "true", "yes", "on")
 WEB_FETCH_ALLOW_DOMAINS = [d.strip().lower() for d in
                           os.environ.get("CAELO_WEB_FETCH_DOMAINS", "").split(",") if d.strip()]
 WEB_FETCH_MAX_BYTES = 512 * 1024   # cap pobranej treści (bajty przed dekodowaniem)
 WEB_FETCH_TIMEOUT_S = 20           # timeout pojedynczego pobrania (sekundy)
+
+# Faza-G / TOP1 (web_search w agencie) — narzędzie `web_search` dla agenta kodowania:
+# live web/X search REUŻYWAJĄCE `responses_client` (te same serwerowe narzędzia
+# `web_search`/`x_search`, których używa czat M10). READONLY → BEZ bramki (jak `lsp`): tylko
+# pobiera i CYTUJE, nic nie mutuje. Zwraca syntezę + listę „Sources" (cytowania) do modelu.
+# Płatne wywołanie xAI (BYO-key), ale model woła je tylko na żądanie zadania (świeże info /
+# wersje API / błędy). **Domyślnie ON** (jak `CHAT_MEDIA_TOOLS` — koszt = klucz usera);
+# wyłącz `CAELO_WEB_SEARCH=0`. Gdy off — narzędzie UKRYTE przed modelem.
+WEB_SEARCH_ENABLED = os.environ.get("CAELO_WEB_SEARCH", "1").strip().lower() in ("1", "true", "yes", "on")
+WEB_SEARCH_MAX_SOURCES = 8         # ile cytowań skleić w listę „Sources" zwracaną modelowi
 
 # M20: narzędzia generowania mediów w czacie (image/video) jako function-calling.
 # Grok robi to natywnie, ale Responses API NIE ma serwerowego image-gen → własne
@@ -318,6 +329,19 @@ DEFAULT_CHAT_MODELS = [
     "grok-3",
 ]
 DEFAULT_CHAT_MODEL = "grok-4.3"
+
+# Przybliżony rozmiar okna kontekstowego modelu (do miernika UI agenta). To SZACUNEK
+# (xAI nie udostępnia tego stabilnie per-model) — używany tylko do paska „X/Y (Z%)".
+_CONTEXT_WINDOW_DEFAULT = 256_000
+
+
+def context_window_for(model: str) -> int:
+    """Przybliżony rozmiar okna kontekstowego (tokeny) dla miernika UI. Szacunek —
+    rodzina grok-3 ma mniejsze okno; grok-4.x / grok-build / nieznane → duże okno."""
+    m = (model or "").lower()
+    if m.startswith("grok-3"):
+        return 131_072
+    return _CONTEXT_WINDOW_DEFAULT
 
 # --- Modele obrazu (zakładka Image: generowanie + edycja) ---
 # "quality" daje lepszą jakość za wyższą cenę; standard jest tańszy i jest domyślny.

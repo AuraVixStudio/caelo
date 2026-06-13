@@ -250,6 +250,48 @@ def test_interop() -> None:
         mgr.shutdown()
 
 
+def test_catalog() -> None:
+    """Faza-G/TOP4: kurowany katalog MCP — wpisy dobrze uformowane, id unikalne/slug-safe,
+    inputy spójne (token placeholder w command dla 'arg'; env_key dla 'env'), `catalog()`
+    zwraca kopię, a „install" reużywa add_server z enabled=False (install != autostart)."""
+    import re as _re
+
+    from caelo_core.mcp.catalog import catalog
+
+    entries = catalog()
+    check("TOP4: catalog is non-empty", len(entries) > 0)
+    ids = [e.get("id") for e in entries]
+    check("TOP4: catalog ids unique + slug-safe",
+          len(ids) == len(set(ids))
+          and all(_re.fullmatch(r"[a-z0-9][a-z0-9-]*", i or "") for i in ids))
+
+    ok_entries = True
+    for e in entries:
+        if e.get("transport") != "stdio" or not e.get("command"):
+            ok_entries = False
+        for inp in e.get("inputs") or []:
+            if inp.get("target") not in ("arg", "env"):
+                ok_entries = False
+            if inp.get("target") == "env" and not inp.get("env_key"):
+                ok_entries = False
+            # token placeholder dla 'arg' MUSI istnieć w command (renderer go podstawia)
+            if inp.get("target") == "arg" and ("{" + (inp.get("key") or "") + "}") not in (e.get("command") or []):
+                ok_entries = False
+    check("TOP4: catalog entries well-formed (stdio+command, inputs consistent)", ok_entries)
+    check("TOP4: catalog() returns a fresh copy", catalog() is not entries and catalog() == entries)
+
+    # install != autostart: dodanie wpisu z enabled=False NIE startuje serwera.
+    fs = next(e for e in entries if e["id"] == "filesystem")
+    with tempfile.TemporaryDirectory() as d:
+        mgr = McpManager(Path(d) / "caelo_mcp.json")
+        cmd = ["/tmp" if t == "{path}" else t for t in fs["command"]]  # renderer podstawia {path}
+        cfg = mgr.add_server({"id": fs["id"], "name": fs["name"], "transport": "stdio",
+                              "command": cmd, "enabled": False})
+        check("TOP4: catalog install adds server disabled (install != autostart)",
+              cfg["enabled"] is False and cfg.get("status") != "ready")
+        mgr.shutdown()
+
+
 def main() -> int:
     test_client()
     test_manager()
@@ -257,6 +299,7 @@ def main() -> int:
     test_remote()
     test_corrupt_config()
     test_interop()
+    test_catalog()           # Faza-G/TOP4
 
     print("\n=== MCP client/manager self-check (M14-B1/B2) ===")
     ok = True

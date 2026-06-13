@@ -35,8 +35,17 @@ win:
     - target: nsis
       arch:
         - x64
-  # Podpisywanie Authenticode (opcjonalne) — ustaw CSC_LINK + CSC_KEY_PASSWORD w env
-  # CI; bez tego instalator jest niepodpisany (SmartScreen ostrzeże). Patrz docs/PLAN_M15 §Podpisywanie.
+  # --- Podpisywanie Authenticode: cert CHMUROWY Asseco SimplySign (Faza B / runbook Krok 6.3) ---
+  # Klucz jest NIEEKSPORTOWALNY (autoryzacja przez aplikację mobilną), więc NIE używamy
+  # CSC_LINK/.pfx ani podpisu w CI — electron-builder woła `signtool` po cert ze SKLEPU
+  # certyfikatów Windows (wirtualna karta SimplySign Desktop). Podpis robimy LOKALNIE
+  # (`npm run dist:full` na maszynie usera z aktywnym SimplySign Desktop). Odkomentuj i wpisz
+  # dane SWOJEGO certu (CN albo Thumbprint z `Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert`):
+  # certificateSubjectName: "<CN certu SimplySign>"   # ALBO: certificateSha1: "<THUMBPRINT>"
+  # rfc3161TimeStampServer: http://time.certum.pl     # znacznik czasu Certum (podpis przeżyje wygaśnięcie certu)
+  # signingHashAlgorithms: [sha256]
+  # Sidecar `caelo-core.exe` (extraResources) NIE jest objęty podpisem instalatora — podpisz go
+  # OSOBNO przy budowie: ustaw $env:CAELO_SIGN_THUMBPRINT przed `build_sidecar.ps1` (patrz skrypt).
 
 nsis:
   oneClick: false

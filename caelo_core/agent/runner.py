@@ -101,6 +101,27 @@ class AgentRunner:
         """Historia bieżącej sesji (do utrwalenia/wznowienia w headless/ACP)."""
         return self._session.history if self._session is not None else []
 
+    @property
+    def usage(self) -> dict:
+        """M17-B6: skumulowane tokeny sesji orkiestratora (`input_tokens`/`output_tokens`)
+        + miernik okna kontekstowego (`context_tokens` = bieżące zajęcie, `max_context` =
+        przybliżony limit modelu tury). Transport WS emituje je po turze do panelu agenta.
+        Brak sesji / mock bez `usage` → zera."""
+        sess = self._session
+        out = {"input_tokens": 0, "output_tokens": 0, "context_tokens": 0,
+               "max_context": config.context_window_for(self._model)}
+        if sess is None:
+            return out
+        u = sess.usage
+        if isinstance(u, dict):
+            out["input_tokens"] = int(u.get("input_tokens", 0) or 0)
+            out["output_tokens"] = int(u.get("output_tokens", 0) or 0)
+        try:
+            out["context_tokens"] = int(sess.context_tokens() or 0)
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
     def emit(self, ev: dict) -> None:
         """Sink ramek: łapie finalną odpowiedź tury (M9-B2), potem przekazuje do
         transportu. Tylko `assistant_done` najwyższego poziomu (subagenci opakowani)."""

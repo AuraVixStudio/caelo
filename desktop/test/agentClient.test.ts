@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { AgentConnection } from '../src/renderer/src/lib/agentClient'
+import { AgentConnection, parseAgentEvent } from '../src/renderer/src/lib/agentClient'
 
 // P1-G: po padzie/restarcie sidecara composer agenta zostawał zablokowany na „Stop",
 // bo żadna ramka terminalna nie nadchodziła. AgentPanel resetuje `busy` w onClose — ten
@@ -52,5 +52,46 @@ describe('AgentConnection — onClose funnel (P1-G)', () => {
     expect(FakeWS.last?.close).toHaveBeenCalled() // błąd wymusił close()
     expect(onClose).toHaveBeenCalledTimes(1) // close → onclose → onClose
     conn.close()
+  })
+})
+
+describe('parseAgentEvent — ramki info/usage', () => {
+  it('usage: normalizuje liczby (tokeny + miernik kontekstu)', () => {
+    expect(
+      parseAgentEvent({
+        type: 'usage',
+        input_tokens: 1200,
+        output_tokens: 340,
+        context_tokens: 8000,
+        max_context: 256000
+      })
+    ).toEqual({
+      type: 'usage',
+      input_tokens: 1200,
+      output_tokens: 340,
+      context_tokens: 8000,
+      max_context: 256000
+    })
+    // niepoprawne pola → 0 (zera pomija konsument)
+    expect(parseAgentEvent({ type: 'usage' })).toEqual({
+      type: 'usage',
+      input_tokens: 0,
+      output_tokens: 0,
+      context_tokens: 0,
+      max_context: 0
+    })
+  })
+
+  it('info: domyślny poziom = info, "warn" zachowany', () => {
+    expect(parseAgentEvent({ type: 'info', text: 'limit reached', level: 'warn' })).toEqual({
+      type: 'info',
+      text: 'limit reached',
+      level: 'warn'
+    })
+    expect(parseAgentEvent({ type: 'info', text: 'hi' })).toEqual({
+      type: 'info',
+      text: 'hi',
+      level: 'info'
+    })
   })
 })

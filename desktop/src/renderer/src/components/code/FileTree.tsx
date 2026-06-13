@@ -15,16 +15,42 @@ const TreeNode = memo(function TreeNode({
   entry,
   depth,
   activePath,
+  refreshKey,
   onOpen
 }: {
   conn: Conn
   entry: TreeEntry
   depth: number
   activePath: string | null
+  refreshKey: number
   onOpen: (path: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [children, setChildren] = useState<TreeEntry[] | null>(null)
+
+  // Zmiany plików (agent/zapis/undo → refreshKey++) muszą odświeżyć ROZWINIĘTE katalogi:
+  // korzeń odświeża FileTree, ale dzieci są cache'owane w stanie węzła i bez tego zostają
+  // nieaktualne (np. nowy folder build/ w rozwiniętym katalogu się nie pokazuje). Rozwinięty
+  // → pobierz na nowo; zwinięty → wyczyść cache, by następne rozwinięcie pobrało świeże.
+  useEffect(() => {
+    if (entry.type !== 'dir') return
+    let cancelled = false
+    if (open) {
+      fsTree(conn, entry.path)
+        .then((t) => {
+          if (!cancelled) setChildren(t.entries)
+        })
+        .catch(() => {
+          if (!cancelled) setChildren([])
+        })
+    } else {
+      setChildren(null)
+    }
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey])
 
   async function toggle(): Promise<void> {
     if (entry.type === 'file') {
@@ -88,6 +114,7 @@ const TreeNode = memo(function TreeNode({
               entry={c}
               depth={depth + 1}
               activePath={activePath}
+              refreshKey={refreshKey}
               onOpen={onOpen}
             />
           ))
@@ -125,6 +152,7 @@ export function FileTree({
           entry={e}
           depth={0}
           activePath={activePath}
+          refreshKey={refreshKey}
           onOpen={onOpen}
         />
       ))}

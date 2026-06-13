@@ -26,7 +26,7 @@
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
-| E | Agent kodowania | P1 | 🟡 | 2026-06-08 | E1 ✅ (pełny bieg + edycje accept-edits); naprawione 3 bugi (izolacja CAELO.md, „prasa"/scroll, approve); zostają E2–E10 (diff approval, plan, checkpointy, sesje, komendy, glob, LSP) |
+| E | Agent kodowania | P1 | 🟡 | 2026-06-13 | **E1–E3 ✅** (pełny bieg, diff approval, plan mode). Naprawiono 12 bugów/UX z weryfikacji (rundy 1–6): izolacja CAELO.md, scroll/approve, max-iter+finalizacja, miernik kontekstu na żywo, wskaźnik pracy, dymki usera, wklejanie zrzutu, pisownia wg języka systemu, odświeżanie drzewa plików, reguła run_command, **odporne edit_file (taby/CRLF)**. Zostają E4–E10 (4 tryby/bypass, checkpointy, CAELO.md, sesje, komendy, glob, LSP) |
 | F | Subagenci / zespoły | P2 | ⬜ | | |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
@@ -220,13 +220,77 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > (`65744c0` shrink-0 + `23b64c4` rAF auto-scroll). Po fixach: pełny bieg z edycjami (accept-edits) działa,
 > wpisy w pełnej wysokości, lista płynnie się przewija, analiza renderuje markdown. **Zostają E2–E10.**
 
+> **Postęp 2026-06-13 (4 spostrzeżenia z weryfikacji E — NAPRAWIONE w kodzie, do re-testu live):**
+> (1) **Wklejanie zrzutu** — composer Code dostał `onPaste` (parytet z czatem: obraz ze schowka →
+> załącznik). (2) **Licznik tokenów** — nowa ramka WS `usage` (skumulowane `input/output_tokens` sesji)
+> + badge „N tok" w nagłówku panelu agenta (reset na New/Open session). (3) **„Max iterations reached"** —
+> domyślny `max_iters` 25→**50** ORAZ po wyczerpaniu limitu agent robi JEDNĄ finalną turę **bez narzędzi**
+> (`_finalize_on_limit` w `session.py`) → użytkownik dostaje podsumowanie/plan + notkę „send another
+> message to continue" zamiast surowego błędu (nowa ramka `info`). (4) **Poprawianie pisowni** — proces
+> main Electrona: `setSpellCheckerLanguages(['en-US','pl'])` + handler `context-menu` z sugestiami /
+> „Add to dictionary" / Cut-Copy-Paste (jak w Claude Code). Self-checki zielone (agent_selfcheck OK,
+> typecheck/lint/Vitest 244 OK). ⚠️ **Re-test live u usera**: realne tokeny w badge, finalne podsumowanie
+> po limicie (wymaga realnego xAI), podkreślenia pisowni (słowniki Hunspell pobiera Electron — w sieci
+> TLS-interception mogą nie wejść).
+
+> **Postęp 2026-06-13 (runda 2 — UX panelu Code; do re-testu live):** #1 (max iterations) POTWIERDZONE
+> przez usera (agent dokończył i przedstawił plan). Dalsze 4 spostrzeżenia → NAPRAWIONE w kodzie:
+> (2) **Miernik okna kontekstowego** — backend liczy `context_tokens` (realne `usage.input` z ostatniego
+> wywołania LUB szacunek ~4 znaki/token, fallback offline) + `max_context` (`config.context_window_for`,
+> SZACUNEK per model) → ramka `usage` → pasek „X/Y · %" w nagłówku panelu (kolor ostrzega przy zapełnieniu;
+> tooltip z sumą tokenów sesji). UWAGA: na ścieżce agenta `llm.py` celowo NIE wysyła `stream_options.
+> include_usage` (ryzyko 4xx na krytycznej ścieżce), więc realne tokeny pojawią się tylko gdy serwer i tak
+> je zwróci — inaczej miernik pokazuje szacunek. (3) **Wskaźnik pracy** — trwały pasek „Working… / Running
+> <tool>… / Writing… / Waiting for approval…" z licznikiem sekund, widoczny przez całą turę (jasny sygnał,
+> że agent żyje). (4) **Wiadomości użytkownika** — wyrównane w PRAWO, dymek z akcentem (odróżnienie od
+> odpowiedzi/narzędzi agenta po lewej). (5) **Pisownia w czacie** — menu kontekstowe jest GLOBALNE (działa
+> i w czacie, i w Code); „No suggestions" w teście wynika z braku słownika PL (Hunspell nie pobrał się w
+> sieci TLS-interception) — naprawa = `NODE_EXTRA_CA_CERTS` lub pobranie słownika, NIE kod. Self-checki
+> zielone (agent/headless/acp OK, typecheck/lint/Vitest 244 OK).
+
+> **Postęp 2026-06-13 (runda 3 — miernik na żywo):** user „dalej nie widzę licznika" — dwie przyczyny:
+> (a) ramka `usage` szła TYLKO na końcu tury → w trakcie długiej tury miernik się nie pojawiał;
+> (b) **sidecar Python nie hot-reloaduje** zmian backendu (Vite HMR odświeża tylko renderer — stąd #3
+> działało, a `usage` nie). Naprawa kodu: `session._emit_usage()` woła się **po KAŻDYM wywołaniu LLM**
+> w turze (live miernik, jak Claude Code) + przy finalizacji limitu. WYMAGANE u usera: **pełny restart
+> `npm run dev`** (Ctrl+C + ponownie), by sidecar wczytał backend rundy 2/3. Self-checki agent/headless/
+> acp = OK.
+
+> **Postęp 2026-06-13 (runda 4):** ✅ licznik tokenów/kontekstu POTWIERDZONY przez usera („114k/256k").
+> Ostatnie: słownik pisowni ma podążać za **językiem systemu**, nie być na sztywno EN. Naprawa
+> ([main/index.ts](../../desktop/src/main/index.ts)): zamiast `['en-US','pl']` biorę języki z
+> `app.getPreferredSystemLanguages()` (dopasowanie kodów `pl-PL`→`pl`, cap 3, kolejność systemu;
+> fallback EN tylko gdy brak). Na polskim Windowsie → polskie sugestie. **Wszystkie spostrzeżenia
+> usera z E-weryfikacji zamknięte.** (Słowniki nadal pobiera Electron; sieć usera działa — EN się
+> pobrał — więc PL też powinien.)
+
+> **Postęp 2026-06-13 (runda 5):** ✅ wklejanie zrzutu w Code potwierdzone. Dwie nowe sprawy:
+> (a) **Drzewo plików nie odświeżało się** — agent tworzył pliki/foldery (np. `build/`, `ReadyToInstall/`),
+> a nie pojawiały się w panelu. Przyczyna: [FileTree.tsx](../../desktop/src/renderer/src/components/code/FileTree.tsx)
+> `refreshKey` odświeżał TYLKO korzeń, a `TreeNode` cache'uje dzieci w stanie i nie pobierał ich ponownie.
+> Naprawa: `refreshKey` przekazany do każdego `TreeNode` → rozwinięty katalog pobiera dzieci na nowo,
+> zwinięty czyści cache; dodatkowo ramka `checkpoint` odświeża drzewo NA ŻYWO (write_file/edit_file w
+> trakcie tury), a `run_command` (build/) dochodzi na `done`. (b) **Reguła run_command** w SYSTEM_PROMPT
+> agenta + wzmocniony opis narzędzia: jeden program/wywołanie, BEZ `&&`/`|`/`;`/`&`/`>`/`<`/`2>&1` (agent
+> marnował iteracje na łańcuchy odrzucane przez P0-1; teraz wie, że ma rozbijać kroki i nie przekierowywać
+> wyjścia). Self-checki agent OK; typecheck/lint/Vitest 244 OK.
+
+> **Postęp 2026-06-13 (runda 6):** agent **zapętlił się na `edit_file`** (wielokrotne „old_string
+> not found" na pliku DAZ SDK — taby vs spacje). Naprawa [tools.py](../../caelo_core/agent/tools.py):
+> wspólny matcher `_compute_edit` (egzekucja + preview spójne): exact → fallback CRLF (model wysłał
+> `\r\n`, plik znormalizowany do `\n`) → fallback **tolerujący wcięcia/białe znaki** (`_flexible_line_span`:
+> blok linii zgodny po `.strip()`, TYLKO 1 trafienie — bez zgadywania) → czytelny błąd „kopiuj verbatim
+> albo użyj write_file". + wskazówka edit_file w SYSTEM_PROMPT (kopiuj dokładnie; po porażce re-read /
+> write_file; nie pętl). Nowe testy: indent/CRLF/ambiguous (+4, agent_selfcheck OK). UWAGA: backend →
+> wymaga restartu `npm run dev`.
+
 - [x] **E1 — Pełny bieg agenta.**  ✅ 2026-06-08. Agent czytał (read_file/grep/list_dir) i edytował pliki (edit_file App.tsx/icon-generator.ts) w accept-edits; pętla domknięta, analiza wyrenderowana.
   - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
 
-- [ ] **E2 — Diff approval.** Mutacja → karta zatwierdzenia z **diffem** (accept/reject per plik); plik binarny → znacznik „binary"/„new".
+- [x] **E2 — Diff approval.**  ✅ 2026-06-13. Karta zatwierdzenia z czytelnym unified diff + Accept/Reject/Always allow (potwierdzone na żywo).
   - *Oczekiwane:* accept zapisuje, reject pomija; diff czytelny.
 
-- [ ] **E3 — Tryb planowania.** Selektor Mode → **plan** → zadanie wymagające zmian.
+- [x] **E3 — Tryb planowania.**  ✅ 2026-06-13. Plan mode: READONLY działa, write_file „Blocked in plan mode", plan → faza review (Approve & run) — potwierdzone na żywo. (Sub-punkt „plan nie tworzy checkpointu" pokrywa selfcheck B2.)
   - *Oczekiwane:* READONLY działa, MUTATING „Blocked in plan mode", plan NIE tworzy checkpointu.
 
 - [ ] **E4 — 4 tryby.** Przejdź ask → accept-edits → plan → bypass; sprawdź baner per tryb (ostrzeżenie dla bypass).

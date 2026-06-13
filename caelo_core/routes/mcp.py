@@ -15,6 +15,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from caelo_core.mcp.catalog import catalog as mcp_catalog
 from caelo_core.state import Backend, get_backend
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -40,6 +41,14 @@ class EnabledReq(BaseModel):
 @router.get("")
 def list_servers(b: Backend = Depends(get_backend)) -> dict:
     return {"servers": b.mcp.all_status()}
+
+
+# Faza-G/TOP4: kurowany katalog serwerów MCP do „one-click" dodania. Czyste dane (bez Backend);
+# instalacja reużywa POST /mcp (add_server) z enabled=False po stronie UI (install != autostart).
+# MUSI być przed `GET /{sid}` (inaczej `/mcp/catalog` złapałby się jako sid="catalog").
+@router.get("/catalog")
+def get_catalog() -> dict:
+    return {"catalog": mcp_catalog()}
 
 
 @router.post("")

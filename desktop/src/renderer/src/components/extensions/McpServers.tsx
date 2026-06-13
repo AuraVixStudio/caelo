@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Play, Plug, RefreshCw, Share2, Square, Trash2 } from 'lucide-react'
+import { Play, Plug, Plus, RefreshCw, Share2, Square, Trash2 } from 'lucide-react'
 import {
   addMcpServer,
   exportPackage,
+  listMcpCatalog,
   listMcpServers,
   removeMcpServer,
   setMcpEnabled,
   startMcpServer,
   stopMcpServer,
   type Conn,
+  type McpCatalogEntry,
   type McpServerInfo,
   type McpServerInput
 } from '../../lib/api'
 import { downloadBase64 } from '../../lib/packages'
+import { commandPreview, missingRequired, resolveCatalogEntry } from '../../lib/mcpCatalog'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
@@ -33,6 +36,10 @@ export function McpServers({ conn }: { conn: Conn }) {
   const [servers, setServers] = useState<McpServerInfo[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null) // server id being acted on
+  // Faza-G/TOP4: kurowany katalog MCP („one-click"). catInputs = wartości pól per wpis.
+  const [catalog, setCatalog] = useState<McpCatalogEntry[]>([])
+  const [catInputs, setCatInputs] = useState<Record<string, Record<string, string>>>({})
+  const [catBusy, setCatBusy] = useState<string | null>(null)
 
   const reload = useCallback(() => {
     listMcpServers(conn)
@@ -46,6 +53,13 @@ export function McpServers({ conn }: { conn: Conn }) {
   useEffect(() => {
     reload()
   }, [reload])
+
+  // Faza-G/TOP4: katalog jest statyczny — pobierz raz na połączenie.
+  useEffect(() => {
+    listMcpCatalog(conn)
+      .then((r) => setCatalog(r.catalog))
+      .catch(() => setCatalog([]))
+  }, [conn])
 
   // Add-server form state
   const [transport, setTransport] = useState<'stdio' | 'remote'>('stdio')
@@ -63,6 +77,27 @@ export function McpServers({ conn }: { conn: Conn }) {
       setError(String((e as Error)?.message || e))
     } finally {
       setBusy(null)
+    }
+  }
+
+  function setCatInput(entryId: string, key: string, value: string): void {
+    setCatInputs((m) => ({ ...m, [entryId]: { ...(m[entryId] ?? {}), [key]: value } }))
+  }
+
+  // Faza-G/TOP4: „install" wpisu katalogu = addMcpServer z enabled=false (NIE startuje serwera).
+  // Komenda jest widoczna (consent); start to osobna, potwierdzana akcja niżej.
+  async function onAddCatalog(entry: McpCatalogEntry): Promise<void> {
+    const vals = catInputs[entry.id] ?? {}
+    if (missingRequired(entry, vals).length > 0) return
+    setCatBusy(entry.id)
+    try {
+      await addMcpServer(conn, resolveCatalogEntry(entry, vals))
+      setCatInputs((m) => ({ ...m, [entry.id]: {} }))
+      reload()
+    } catch (e) {
+      setError(String((e as Error)?.message || e))
+    } finally {
+      setCatBusy(null)
     }
   }
 
@@ -97,6 +132,79 @@ export function McpServers({ conn }: { conn: Conn }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {catalog.length > 0 ? (
+        <Card
+          title="Catalog"
+          subtitle="Add a popular MCP server in one click. Installing does NOT start it — review the command, then start it yourself."
+        >
+          <div className="flex flex-col gap-3">
+            {catalog.map((entry) => {
+              const added = servers.some((s) => s.id === entry.id)
+              const vals = catInputs[entry.id] ?? {}
+              const blocked = missingRequired(entry, vals).length > 0
+              return (
+                <div key={entry.id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-fg">{entry.name}</span>
+                        <Badge tone="neutral">{entry.category}</Badge>
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted">{entry.description}</p>
+                    </div>
+                    <div className="shrink-0">
+                      {added ? (
+                        <Badge tone="success">Added</Badge>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled={catBusy === entry.id || blocked}
+                          onClick={() => onAddCatalog(entry)}
+                          icon={<Plus size={14} />}
+                        >
+                          Add
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {!added && entry.inputs && entry.inputs.length > 0 ? (
+                    <div className="mt-2 grid gap-2">
+                      {entry.inputs.map((inp) => (
+                        <Field key={inp.key} label={inp.label + (inp.required ? ' *' : '')}>
+                          <Input
+                            value={vals[inp.key] ?? ''}
+                            onChange={(e) => setCatInput(entry.id, inp.key, e.target.value)}
+                            placeholder={inp.placeholder}
+                            type={inp.secret ? 'password' : 'text'}
+                            className={inp.target === 'arg' ? 'font-mono text-xs' : undefined}
+                          />
+                        </Field>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="mt-2 truncate font-mono text-[11px] text-muted">
+                    {commandPreview(entry, vals)}
+                  </p>
+                  <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
+                    {entry.requires ? <span>Requires {entry.requires}</span> : null}
+                    {entry.homepage ? (
+                      <a
+                        href={entry.homepage}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline hover:text-fg"
+                      >
+                        docs
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      ) : null}
+
       <Card title="Add an MCP server" subtitle="Connect external tools/data to chat and the agent.">
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-[160px_1fr] gap-3">

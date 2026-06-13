@@ -58,7 +58,7 @@ export function citationLabel(c: Citation): string {
   return citationHost(c.url)
 }
 
-function formatTokens(n: number): string {
+export function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
   return String(n)
 }

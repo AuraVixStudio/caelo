@@ -626,6 +626,12 @@ def _unit_mcp_routes(checks: list) -> None:
             except HTTPException as e:
                 bad400 = e.status_code == 400
             checks.append(("/mcp add stdio without command -> 400", bad400))
+
+            # Faza-G/TOP4: kurowany katalog (handler; routing /mcp/catalog vs /{sid} pilnuje
+            # kolejność rejestracji — catalog przed {sid}).
+            cat = mr.get_catalog()["catalog"]
+            checks.append(("/mcp/catalog returns curated entries (incl. filesystem)",
+                           len(cat) > 0 and any(e.get("id") == "filesystem" for e in cat)))
         except Exception as exc:  # noqa: BLE001
             checks.append((f"mcp routes: scenario ran ({exc})", False))
         finally:

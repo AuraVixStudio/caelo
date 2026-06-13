@@ -120,8 +120,10 @@ TOOLS = [
     {"type": "function", "function": {
         "name": "run_command",
         "description": ("Run a single program in the workspace. Requires approval. Returns exit "
-                        "code + output. Shell operators are NOT allowed (no & | ; < > $ ` ( ) { } "
-                        "or newlines) — to chain steps, issue separate run_command calls."),
+                        "code + combined stdout/stderr, so NEVER redirect output (no 2>&1, >, <). "
+                        "Shell operators are NOT allowed (no && | ; & < > $ ` ( ) { } or newlines) "
+                        "and such calls are rejected — to chain steps, issue separate run_command "
+                        "calls (e.g. 'mkdir build' as its own call, then the next command)."),
         "parameters": {"type": "object", "properties": {
             "command": {"type": "string"},
             "cwd": {"type": "string", "description": "Working dir relative to workspace (optional)."},
@@ -358,20 +360,75 @@ def write_file(ws: Workspace, path: str, content: str = "", **_) -> str:
     return f"Wrote {len(content)} chars to {path}"
 
 
+def _flexible_line_span(text: str, needle: str) -> Optional[tuple]:
+    """Fallback dla edit_file: znajdź blok ciągłych linii w `text`, których wersje po
+    .strip() zgadzają się z liniami `needle` (po .strip()). Toleruje różnice WCIĘĆ
+    (taby vs spacje) i końcowych białych znaków — najczęstszą przyczynę „old_string not
+    found", gdy model nie odtworzy dokładnie formatowania. Zwraca (start, end) — offsety
+    znakowe fragmentu do podmiany — TYLKO gdy DOKŁADNIE jedno trafienie (bez zgadywania)."""
+    n_lines = needle.split("\n")
+    if not any(s.strip() for s in n_lines):
+        return None  # sam whitespace — zbyt ryzykowne, by zgadywać
+    n_norm = [s.strip() for s in n_lines]
+    t_lines = text.split("\n")
+    span = len(n_lines)
+    if span > len(t_lines):
+        return None
+    offsets, acc = [], 0
+    for ln in t_lines:
+        offsets.append(acc)
+        acc += len(ln) + 1  # +1 za '\n' między liniami
+    matches = [i for i in range(0, len(t_lines) - span + 1)
+               if all(t_lines[i + j].strip() == n_norm[j] for j in range(span))]
+    if len(matches) != 1:
+        return None
+    i = matches[0]
+    last = i + span - 1
+    return (offsets[i], offsets[last] + len(t_lines[last]))
+
+
+def _compute_edit(text: str, old_string: str, new_string: str,
+                  replace_all: bool) -> tuple:
+    """Wspólna logika edit_file (egzekucja ORAZ preview, by były spójne): exact match →
+    fallback CRLF (model wysłał \\r\\n, plik znormalizowany do \\n) → fallback tolerujący
+    wcięcia/białe znaki (dokładnie 1 trafienie). Zwraca (new_text, note) przy sukcesie
+    albo (None, 'not found' | 'not unique (N matches)') przy porażce."""
+    count = text.count(old_string)
+    if count == 0:
+        alt = old_string.replace("\r\n", "\n").replace("\r", "\n")
+        if alt != old_string and text.count(alt) > 0:
+            old_string, count = alt, text.count(alt)
+        elif not replace_all:
+            span = _flexible_line_span(text, old_string)
+            if span is not None:
+                start, end = span
+                return (text[:start] + new_string + text[end:],
+                        "1 replacement, matched ignoring indentation/whitespace")
+            return (None, "not found")
+        else:
+            return (None, "not found")
+    if count > 1 and not replace_all:
+        return (None, f"not unique ({count} matches)")
+    new_text = text.replace(old_string, new_string) if replace_all else text.replace(old_string, new_string, 1)
+    return (new_text, f"{count if replace_all else 1} replacement(s)")
+
+
 def edit_file(ws: Workspace, path: str, old_string: str, new_string: str,
               replace_all: bool = False, **_) -> str:
     p = ws.resolve(path)
     if not p.exists():
         return f"Error: file not found: {path}"
     text = p.read_text(encoding="utf-8", errors="replace")
-    count = text.count(old_string)
-    if count == 0:
-        return f"Error: old_string not found in {path}"
-    if count > 1 and not replace_all:
-        return f"Error: old_string is not unique in {path} ({count} matches). Add context or set replace_all."
-    new_text = text.replace(old_string, new_string) if replace_all else text.replace(old_string, new_string, 1)
+    new_text, note = _compute_edit(text, old_string, new_string, replace_all)
+    if new_text is None:
+        if note == "not found":
+            return (f"Error: old_string not found in {path}. It must match the file EXACTLY, "
+                    f"including indentation (tabs vs spaces) and whitespace. Re-read the file "
+                    f"and copy the text verbatim, or use write_file to rewrite the whole file.")
+        return (f"Error: old_string is {note} in {path}. Add surrounding context to make it "
+                f"unique, or set replace_all.")
     atomic_write_text(p, new_text)  # P0-7: zapis atomowy
-    return f"Edited {path} ({count if replace_all else 1} replacement(s))"
+    return f"Edited {path} ({note})"
 
 
 def scrubbed_env() -> dict:
@@ -661,6 +718,100 @@ def web_fetch(ws: Workspace, url: str = "", max_bytes: Optional[int] = None, **_
     return text + ("\n… (truncated)" if truncated else "")
 
 
+# --- web_search (Faza-G / TOP1) — live search READONLY, bez bramki ---
+def web_search(query: str = "", *, api_key_provider: Callable[[], str],
+               base: Optional[str] = None, model: str = "",
+               sources: Optional[list] = None,
+               stop_flag: Optional[Callable[[], bool]] = None, **_) -> str:
+    """TOP1: live web/X search jako READONLY narzędzie agenta (BEZ bramki).
+
+    REUŻYWA silnika live-search z `responses_client` (serwerowe narzędzia
+    `web_search`/`x_search` Responses API — to samo, czego używa czat M10): zapytanie
+    idzie jako pojedyncza tura, model przeszukuje sieć i zwraca tekst + adnotacje-
+    cytowania. Tu skleja się odpowiedź z numerowaną listą „Sources" (URL + tytuł), żeby
+    model dostał ZACYTOWANE wyniki. Płatne wywołanie xAI (BYO-key), ale czysto czytające —
+    dlatego, jak `lsp`, biegnie bez zatwierdzenia. Błąd sieci/modelu → generyczny
+    `Error: …` (log surowy), by jedno nieudane wyszukiwanie nie wywróciło tury.
+
+    `model` = model bieżącej tury agenta (rodzina grok-4 obsługuje live-search); pusty →
+    fallback `config.DEFAULT_CHAT_MODEL`. `base` = baza API (jak wołania LLM sesji)."""
+    q = (query or "").strip()
+    if not q:
+        return "Error: web_search requires a non-empty query"
+    # Leniwy import — responses_client ciągnie config/requests; trzymamy tools.py lekki
+    # przy imporcie i unikamy cyklu (responses_client to warstwa czatu).
+    from caelo_core import responses_client as _rc
+    src = [s for s in sources if isinstance(s, str)] if isinstance(sources, list) else None
+    search_tools = _rc.build_search_tools(mode="on", sources=src)
+    try:
+        result = _rc.stream_response(
+            [{"role": "user", "content": q}],
+            model=model or config.DEFAULT_CHAT_MODEL,
+            api_key_provider=api_key_provider,
+            temperature=0,
+            tools=search_tools,
+            stop_flag=stop_flag,
+            base=base,
+        )
+    except Exception as exc:  # noqa: BLE001 — sieć/model od xAI: komunikat generyczny, log surowy
+        log.warning("web_search failed for %r", q, exc_info=True)
+        return f"Error: web_search failed ({type(exc).__name__})"
+    text = (result.get("text") or "").strip()
+    citations = result.get("citations") or []
+    if not text and not citations:
+        return "(no results)"
+    cap = getattr(config, "WEB_SEARCH_MAX_SOURCES", 8)
+    out = text or "(no answer text returned)"
+    if citations:
+        lines = ["", "Sources:"]
+        for i, c in enumerate(citations[:cap], 1):
+            url = (c.get("url") or "").strip()
+            title = (c.get("title") or "").strip()
+            lines.append(f"[{i}] {title + ' — ' if title else ''}{url}".rstrip())
+        out += "\n" + "\n".join(lines)
+    return out
+
+
+# --- update_plan (Faza-G / TOP3) — live checklist agenta (jak TodoWrite) ---
+PLAN_STATUSES = ("pending", "in_progress", "completed")
+PLAN_MAX_STEPS = 40       # anty-bloat: czytelna checklista, nie wall-of-text
+PLAN_STEP_MAXLEN = 200    # cap długości pojedynczego kroku
+
+
+def normalize_plan(steps) -> list[dict]:
+    """TOP3: znormalizuj kroki planu z argumentów narzędzia `update_plan` na
+    `[{content, status}]`. Tolerancyjna na warianty (goły string zamiast obiektu;
+    klucz `step`/`content`/`text`; zły/brak status → 'pending'); cap liczby i długości,
+    pomija puste. Czysta funkcja (testowalna, bez sieci/IO)."""
+    out: list[dict] = []
+    if not isinstance(steps, list):
+        return out
+    for it in steps[:PLAN_MAX_STEPS]:
+        if isinstance(it, str):
+            content, status = it, "pending"
+        elif isinstance(it, dict):
+            content = it.get("content") or it.get("step") or it.get("text") or ""
+            status = it.get("status") or "pending"
+        else:
+            continue
+        content = str(content).strip()[:PLAN_STEP_MAXLEN]
+        if not content:
+            continue
+        if status not in PLAN_STATUSES:
+            status = "pending"
+        out.append({"content": content, "status": status})
+    return out
+
+
+def plan_summary(items: list[dict]) -> str:
+    """Krótkie potwierdzenie stanu planu jako wynik narzędzia (wraca do modelu)."""
+    if not items:
+        return "Plan cleared."
+    done = sum(1 for i in items if i.get("status") == "completed")
+    active = sum(1 for i in items if i.get("status") == "in_progress")
+    return f"Plan updated: {len(items)} step(s) — {done} done, {active} in progress."
+
+
 _EXECUTORS = {
     "read_file": read_file,
     "list_dir": list_dir,
@@ -725,8 +876,11 @@ def preview_change(ws: Workspace, name: str, args: dict) -> Optional[dict]:
             if name == "write_file":
                 new = args.get("content", "")
             else:
+                # Ten sam matcher co egzekucja (exact → CRLF → tolerancja wcięć), żeby diff
+                # w karcie zatwierdzenia odpowiadał temu, co realnie zapisze edit_file.
                 os_, ns = args.get("old_string", ""), args.get("new_string", "")
-                new = old.replace(os_, ns) if args.get("replace_all") else old.replace(os_, ns, 1)
+                computed, _note = _compute_edit(old, os_, ns, bool(args.get("replace_all")))
+                new = computed if computed is not None else old
             return {"kind": "diff", "path": args["path"], "created": not exists,
                     "diff": _udiff(old, new, args["path"])}
         if name == "run_command":

@@ -416,6 +416,84 @@ function createWindow(): void {
     callback(permission === 'media' || permission === 'fullscreen')
   })
 
+  // Sprawdzanie pisowni: języki wg USTAWIEŃ SYSTEMU (np. polski na polskim Windowsie),
+  // nie hardkodowany angielski. Czerwone podkreślenia pokazuje Chromium domyślnie; menu
+  // z poprawkami budujemy w 'context-menu' poniżej. Słowniki Hunspell pobiera Electron
+  // przy starcie — w sieci z TLS-interception pobranie może się nie udać (brak podkreśleń),
+  // ale apka działa dalej (stąd try/catch). macOS używa NSSpellChecker (to no-op tam).
+  try {
+    const ses = mainWindow.webContents.session
+    const available = new Set(ses.availableSpellCheckerLanguages)
+    // Dopasuj kod języka systemu do dostępnych w spellcheckerze: dokładny ('en-US'),
+    // bazowy ('pl-PL' → 'pl'), albo dowolny regionalny wariant tej samej bazy.
+    const resolve = (pref: string): string | null => {
+      if (available.has(pref)) return pref
+      const base = pref.split('-')[0]
+      if (available.has(base)) return base
+      for (const a of available) if (a.split('-')[0] === base) return a
+      return null
+    }
+    // Zachowaj kolejność preferencji systemu, bez duplikatów, cap 3 (mniej pobierań).
+    const langs: string[] = []
+    for (const pref of app.getPreferredSystemLanguages()) {
+      const r = resolve(pref)
+      if (r && !langs.includes(r)) langs.push(r)
+      if (langs.length >= 3) break
+    }
+    // Fallback, gdy żaden język systemu nie ma słownika — angielski (jeśli dostępny).
+    if (!langs.length) {
+      const en = resolve('en-US')
+      if (en) langs.push(en)
+    }
+    if (langs.length) ses.setSpellCheckerLanguages(langs)
+  } catch (err) {
+    console.warn('[main] spellchecker setup failed:', err)
+  }
+
+  // Menu kontekstowe (prawy klik): poprawki pisowni + standardowa edycja (jak w
+  // Claude Code). Bez tego podkreślone błędy nie dają się poprawić kliknięciem.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const template: Electron.MenuItemConstructorOptions[] = []
+    const wc = mainWindow?.webContents
+    if (!wc) return
+
+    // Sugestie pisowni dla podkreślonego słowa (tylko w polach edytowalnych).
+    if (params.isEditable && params.misspelledWord) {
+      for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
+        template.push({ label: suggestion, click: () => wc.replaceMisspelling(suggestion) })
+      }
+      if (params.dictionarySuggestions.length === 0) {
+        template.push({ label: 'No suggestions', enabled: false })
+      }
+      template.push({ type: 'separator' })
+      template.push({
+        label: 'Add to dictionary',
+        click: () => wc.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+      })
+      template.push({ type: 'separator' })
+    }
+
+    // Standardowe akcje edycji — włączane wg editFlags bieżącego zaznaczenia/pola.
+    const ef = params.editFlags
+    if (params.isEditable) {
+      template.push({ role: 'undo', enabled: ef.canUndo })
+      template.push({ role: 'redo', enabled: ef.canRedo })
+      template.push({ type: 'separator' })
+      template.push({ role: 'cut', enabled: ef.canCut })
+      template.push({ role: 'copy', enabled: ef.canCopy })
+      template.push({ role: 'paste', enabled: ef.canPaste })
+      template.push({ type: 'separator' })
+      template.push({ role: 'selectAll' })
+    } else if (params.selectionText) {
+      // Prawy klik na zaznaczonym tekście poza polem (np. transkrypt) → Kopiuj.
+      template.push({ role: 'copy', enabled: ef.canCopy })
+      template.push({ role: 'selectAll' })
+    }
+
+    if (template.length === 0) return
+    Menu.buildFromTemplate(template).popup({ window: mainWindow ?? undefined })
+  })
+
   if (rendererUrl) {
     void mainWindow.loadURL(rendererUrl)
   } else {

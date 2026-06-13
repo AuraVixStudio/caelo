@@ -52,6 +52,12 @@ export interface LspDiagnostic {
   line?: number // range.start.line (0-based)
 }
 
+// Faza-G/TOP3: pozycja live checklist agenta (ramka `plan` z narzędzia update_plan).
+export interface PlanItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
 export type AgentEvent =
   | { type: 'workspace'; path: string }
   // M21: aktywne id trwałej sesji (po połączeniu / wznowieniu / nowej sesji).
@@ -66,8 +72,20 @@ export type AgentEvent =
   | { type: 'stopped' }
   | { type: 'done' }
   | { type: 'error'; error: string }
+  // Miękka notka z backendu (np. osiągnięty limit kroków) — render jako wpis info.
+  | { type: 'info'; text: string; level: 'info' | 'warn' }
+  // Licznik tokenów sesji + miernik okna kontekstowego (panel agenta).
+  | {
+      type: 'usage'
+      input_tokens: number
+      output_tokens: number
+      context_tokens: number
+      max_context: number
+    }
   // M19-B3: pasywna diagnostyka LSP po edycie pliku.
   | { type: 'diagnostics'; path: string; items: LspDiagnostic[] }
+  // Faza-G/TOP3: live checklist (TODO) bieżącego zadania — render w AgentPanel.
+  | { type: 'plan'; items: PlanItem[] }
   // M17 — zespół subagentów (multipleks po agent_id na tym samym WS):
   | { type: 'subagent'; agent_id: string; role: string; task: string; event: AgentEvent }
   | ({ type: 'subagent_status' } & SubagentStatus)
@@ -156,6 +174,16 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
       return { type: 'done' }
     case 'error':
       return { type: 'error', error: asString(o.error, 'error') }
+    case 'info':
+      return { type: 'info', text: asString(o.text), level: o.level === 'warn' ? 'warn' : 'info' }
+    case 'usage':
+      return {
+        type: 'usage',
+        input_tokens: asNum(o.input_tokens),
+        output_tokens: asNum(o.output_tokens),
+        context_tokens: asNum(o.context_tokens),
+        max_context: asNum(o.max_context)
+      }
     case 'diagnostics': {
       const rawItems = Array.isArray(o.items) ? o.items : []
       const items: LspDiagnostic[] = rawItems.map((it) => {
@@ -170,6 +198,20 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
         }
       })
       return { type: 'diagnostics', path: asString(o.path), items }
+    }
+    case 'plan': {
+      const rawItems = Array.isArray(o.items) ? o.items : []
+      const items: PlanItem[] = rawItems
+        .map((it) => {
+          const d = asRecord(it)
+          const s = d.status
+          return {
+            content: asString(d.content),
+            status: s === 'in_progress' || s === 'completed' ? s : 'pending'
+          } as PlanItem
+        })
+        .filter((i) => i.content)
+      return { type: 'plan', items }
     }
     case 'subagent': {
       const inner = parseAgentEvent(o.event) // zagnieżdżona ramka subagenta

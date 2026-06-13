@@ -876,6 +876,33 @@ export const startMcpServer = (c: Conn, id: string): Promise<{ server: McpServer
 export const stopMcpServer = (c: Conn, id: string): Promise<{ server: McpServerInfo }> =>
   api(c, `/mcp/${encodeURIComponent(id)}/stop`, { method: 'POST' })
 
+// Faza-G/TOP4: kurowany katalog serwerów MCP („one-click"). Install reużywa addMcpServer
+// (enabled=false → install != autostart); część wpisów ma `inputs` do uzupełnienia (ścieżka/klucz).
+export interface McpCatalogInput {
+  key: string
+  label: string
+  target: 'arg' | 'env'
+  env_key?: string // dla target === 'env'
+  placeholder?: string
+  required?: boolean
+  secret?: boolean // pole hasłowe w UI
+}
+export interface McpCatalogEntry {
+  id: string
+  name: string
+  description: string
+  category: string
+  transport: 'stdio' | 'remote'
+  command?: string[]
+  env?: Record<string, string>
+  url?: string
+  inputs?: McpCatalogInput[]
+  homepage?: string
+  requires?: string
+}
+export const listMcpCatalog = (c: Conn): Promise<{ catalog: McpCatalogEntry[] }> =>
+  api(c, '/mcp/catalog')
+
 export interface HookInfo {
   id: string
   event: 'pre_tool' | 'post_tool' | 'pre_session'

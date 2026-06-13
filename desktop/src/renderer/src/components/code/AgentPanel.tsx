@@ -73,7 +73,9 @@ import {
   type PlanPhase
 } from '../../lib/agentTrust'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
+import { formatTokens } from '../../lib/searchState'
 import { useStickToBottom } from '../../lib/useStickToBottom'
+import { planCounts, type PlanItem } from '../../lib/agentPlan'
 import { filterSessions, historyToEntries, sessionsForWorkspace } from '../../lib/agentSession'
 import { detectSuggest, fuzzyFiles, applyFileSuggest } from '../../lib/composerSuggest'
 import { filterSlashCommands, expandTemplate, matchSlash } from '../../lib/slashCommands'
@@ -103,6 +105,80 @@ function modeIcon(id: AgentMode, size = 14): ReactNode {
     default:
       return <ShieldCheck size={size} />
   }
+}
+
+// Faza-G/TOP3: live checklist agenta (TODO) — przypięta u góry konwersacji, aktualizowana
+// w trakcie przebiegu (narzędzie update_plan → ramka `plan`). Pełna lista zastępuje poprzednią.
+function PlanWidget({ items }: { items: PlanItem[] }): ReactNode {
+  const { total, done } = planCounts(items)
+  return (
+    <div className="shrink-0 border-b border-border bg-accent/5 px-3 py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">
+        <ListChecks size={13} />
+        <span>Plan</span>
+        <span className="ml-auto tabular-nums">
+          {done}/{total}
+        </span>
+      </div>
+      <ul className="flex flex-col gap-0.5">
+        {items.map((it, i) => (
+          <li key={i} className="flex items-start gap-1.5 text-xs">
+            <span className="mt-0.5 shrink-0">
+              {it.status === 'completed' ? (
+                <Check size={13} className="text-success" />
+              ) : it.status === 'in_progress' ? (
+                <Loader2 size={13} className="animate-spin text-accent" />
+              ) : (
+                <Square size={13} className="text-muted" />
+              )}
+            </span>
+            <span
+              className={cn(
+                it.status === 'completed' && 'text-muted line-through',
+                it.status === 'in_progress' && 'font-medium text-fg'
+              )}
+            >
+              {it.content}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// #2: miernik okna kontekstowego (pasek X/Y + %) — jak w Claude Code. `context_tokens`
+// = bieżące zajęcie (realne usage.input lub szacunek), `max_context` = przybliżony limit
+// modelu. Kolor ostrzega, gdy okno się zapełnia.
+function ContextMeter({
+  usage
+}: {
+  usage: { input_tokens: number; output_tokens: number; context_tokens: number; max_context: number }
+}): ReactNode {
+  const max = usage.max_context > 0 ? usage.max_context : 0
+  const pct = max > 0 ? Math.min(100, Math.round((usage.context_tokens / max) * 100)) : 0
+  const total = usage.input_tokens + usage.output_tokens
+  const title =
+    `Context window ≈ ${usage.context_tokens.toLocaleString()} / ${max.toLocaleString()} tokens (${pct}%)` +
+    (total > 0 ? `\nSession total: ${total.toLocaleString()} tokens` : '') +
+    `\n(approximate — context size is estimated)`
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted" title={title}>
+      <span className="hidden h-1.5 w-12 overflow-hidden rounded-full bg-surface-3 md:block">
+        <span
+          className={cn(
+            'block h-full rounded-full',
+            pct >= 90 ? 'bg-error' : pct >= 70 ? 'bg-warn' : 'bg-accent'
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="tabular-nums">
+        {formatTokens(usage.context_tokens)}
+        {max > 0 ? <span className="opacity-60">/{formatTokens(max)}</span> : null}
+      </span>
+    </span>
+  )
 }
 
 export type Entry =
@@ -163,11 +239,22 @@ export function AgentPanel({
   const [teamNodes, setTeamNodes] = useState<SubAgentMap>({})
   const [merges, setMerges] = useState<TeamMerge[]>([])
   const [teamReport, setTeamReport] = useState<TeamReport | null>(null)
+  // Faza-G/TOP3: live checklist (TODO) bieżącego zadania — ramka `plan` z update_plan.
+  const [plan, setPlan] = useState<PlanItem[]>([])
+  // Licznik tokenów + miernik okna kontekstowego (ramka `usage` po każdej turze).
+  const [usage, setUsage] = useState<{
+    input_tokens: number
+    output_tokens: number
+    context_tokens: number
+    max_context: number
+  } | null>(null)
   // M14/M19: autouzupełnianie composera agenta — slash-komendy ("/") i @-pliki.
   const [fileList, setFileList] = useState<string[]>([])
   const [caret, setCaret] = useState(0)
   const [suggestIdx, setSuggestIdx] = useState(0)
   const [suggestDismissed, setSuggestDismissed] = useState(false)
+  // #3: licznik czasu bieżącej tury — wskaźnik pracy „Working… {n}s" (czy agent żyje).
+  const [elapsed, setElapsed] = useState(0)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const agentRef = useRef<AgentConnection | null>(null)
@@ -268,6 +355,17 @@ export function AgentPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
 
+  // #3: tykający licznik czasu tury — żywy znak, że agent pracuje (nie zaciął się).
+  useEffect(() => {
+    if (!busy) {
+      setElapsed(0)
+      return
+    }
+    const start = Date.now()
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [busy])
+
   useEffect(() => {
     // S35-i: dosuń do dołu PO ułożeniu layoutu (rAF). Karta approval (detale + przyciski
     // Accept/Reject/Always) MUSI być w widoku, by dało się ją kliknąć — wymuszamy scroll
@@ -310,6 +408,8 @@ export function AgentPanel({
       }
       case 'tool_call': {
         curAssistant.current = null
+        // Faza-G/TOP3: update_plan ma własny widżet (ramka `plan`) — nie dubluj go wierszem narzędzia.
+        if (e.name === 'update_plan') break
         setEntries((prev) => [
           ...prev,
           {
@@ -345,9 +445,16 @@ export function AgentPanel({
         setTeamReport(e.report)
         refreshMergesRef.current()
         break
+      case 'plan':
+        // Faza-G/TOP3: pełna lista przychodzi za każdym razem → podmień (live checklist).
+        setPlan(e.items)
+        break
       case 'checkpoint':
-        // M13-F3: agent zsnapshotował pliki → odśwież oś checkpointów.
+        // M13-F3: agent zsnapshotował pliki → odśwież oś checkpointów ORAZ drzewo plików
+        // (write_file/edit_file tworzą pliki w trakcie tury — niech pojawią się na bieżąco,
+        // nie dopiero po `done`; wyjścia run_command jak build/ i tak dochodzą na `done`).
         refreshCheckpointsRef.current()
+        onFilesChangedRef.current()
         break
       case 'output':
         setEntries((prev) =>
@@ -390,6 +497,21 @@ export function AgentPanel({
         setEntries((prev) => [...prev, { kind: 'error', id: nextId(), text: e.error }])
         setBusy(false)
         setPlanPhase((p) => planReducer(p, { type: 'done' }))
+        break
+      case 'info':
+        // Miękka notka z backendu (np. osiągnięty limit kroków) — wpis info w transkrypcie.
+        pushInfo(e.text, e.level)
+        break
+      case 'usage':
+        // Licznik + miernik kontekstu (zera pomijamy — mock/brak danych z serwera).
+        if (e.context_tokens > 0 || e.input_tokens > 0 || e.output_tokens > 0) {
+          setUsage({
+            input_tokens: e.input_tokens,
+            output_tokens: e.output_tokens,
+            context_tokens: e.context_tokens,
+            max_context: e.max_context
+          })
+        }
         break
       case 'diagnostics': {
         // M19-B3: pasywna diagnostyka LSP po edycie — pokaż w transkrypcie (puste pomiń).
@@ -450,6 +572,7 @@ export function AgentPanel({
     ])
     curAssistant.current = null
     turnWasPlanRef.current = usePlan
+    setPlan([]) // Faza-G/TOP3: nowa tura → czyść live checklist (agent re-emituje, gdy kontynuuje)
     setPlanPhase((p) => planReducer(p, { type: 'send', plan: usePlan }))
     setBusy(true)
     setInput('')
@@ -532,6 +655,8 @@ export function AgentPanel({
     setTeamNodes({})
     setTeamReport(null)
     setPlanPhase('idle')
+    setPlan([])
+    setUsage(null) // nowa sesja → wyzeruj licznik tokenów
     agentRef.current?.setSession(null)
   }
 
@@ -549,6 +674,8 @@ export function AgentPanel({
       setTeamNodes({})
       setTeamReport(null)
       setPlanPhase('idle')
+      setPlan([])
+      setUsage(null) // wznowiona sesja → licznik narośnie od kolejnej tury (backend kumuluje od 0)
       setSessionId(meta.id)
       agentRef.current?.setSession(meta.id)
     } catch {
@@ -636,6 +763,15 @@ export function AgentPanel({
 
   const showApproveRun = canApproveRun(planPhase, busy)
   const banner = modeBanner(mode)
+  // #3: etykieta bieżącej aktywności agenta — z ostatniego wpisu transkryptu.
+  const lastEntry = entries[entries.length - 1]
+  let workLabel = 'Thinking…'
+  if (lastEntry?.kind === 'tool') {
+    if (lastEntry.status === 'awaiting') workLabel = 'Waiting for your approval…'
+    else if (lastEntry.status === 'pending') workLabel = `Running ${lastEntry.name}…`
+  } else if (lastEntry?.kind === 'assistant') {
+    workLabel = 'Writing…'
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
@@ -706,6 +842,7 @@ export function AgentPanel({
             />
           )}
         </Popover>
+        {usage ? <ContextMeter usage={usage} /> : null}
         <span
           title={connected ? 'connected' : 'disconnected'}
           className={cn('h-2 w-2 shrink-0 rounded-full', connected ? 'bg-success' : 'bg-muted')}
@@ -713,6 +850,7 @@ export function AgentPanel({
       </header>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {plan.length > 0 ? <PlanWidget items={plan} /> : null}
         <div
           className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3"
           ref={scrollRef}
@@ -771,6 +909,16 @@ export function AgentPanel({
               Approve &amp; run
             </Button>
           </div>
+        </div>
+      ) : null}
+
+      {/* #3: trwały wskaźnik pracy — widoczny przez całą turę, z licznikiem czasu, by
+          było jasne, że agent pracuje (a nie zaciął się), także między narzędziami. */}
+      {busy ? (
+        <div className="flex shrink-0 items-center gap-2 border-t border-border bg-surface-2/60 px-3 py-1.5 text-[11.5px] text-muted">
+          <Loader2 size={13} className="shrink-0 animate-spin text-accent" />
+          <span className="min-w-0 truncate">{workLabel}</span>
+          <span className="ml-auto shrink-0 tabular-nums">{elapsed}s</span>
         </div>
       ) : null}
 
@@ -850,6 +998,27 @@ export function AgentPanel({
             }}
             onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
             onKeyDown={onKeyDown}
+            onPaste={(e) => {
+              // Wklej zrzut/obraz ze schowka jako załącznik (Ctrl+V) — parytet z czatem.
+              // Obrazy ze schowka nie mają nazwy pliku → nadajemy domyślną.
+              if (!connected) return
+              const items = e.clipboardData?.items
+              if (!items) return
+              const imgs: File[] = []
+              for (const it of Array.from(items)) {
+                if (it.kind === 'file' && it.type.startsWith('image/')) {
+                  const f = it.getAsFile()
+                  if (f)
+                    imgs.push(
+                      f.name ? f : new File([f], 'pasted-image.png', { type: f.type || 'image/png' })
+                    )
+                }
+              }
+              if (imgs.length) {
+                e.preventDefault()
+                void att.addFiles(imgs)
+              }
+            }}
             placeholder={
               workspacePath
                 ? mode === 'plan'
@@ -1207,16 +1376,17 @@ export function EntryView({
   streaming?: boolean
 }) {
   if (entry.kind === 'user') {
+    // #4: wiadomości użytkownika wyrównane w PRAWO + wyraźny dymek (akcent), żeby
+    // odróżniały się od odpowiedzi/narzędzi agenta (lewa strona, pełna szerokość).
     return (
-      <div>
-        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">You</div>
+      <div className="flex flex-col items-end">
         {entry.text ? (
-          <div className="whitespace-pre-wrap break-words rounded-lg bg-surface-2 px-3 py-2 text-[13px]">
+          <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-sm border border-accent/30 bg-accent/15 px-3 py-2 text-[13px] text-fg">
             {entry.text}
           </div>
         ) : null}
         {entry.attachments?.length ? (
-          <AttachmentChips items={entry.attachments} className="mt-1.5" />
+          <AttachmentChips items={entry.attachments} className="mt-1.5 justify-end" />
         ) : null}
       </div>
     )
@@ -1281,6 +1451,7 @@ function toolIcon(name: string, size = 13): ReactNode {
     case 'run_command':
       return <Terminal size={size} />
     case 'web_fetch':
+    case 'web_search':
       return <Globe size={size} />
     default:
       return <FileText size={size} />

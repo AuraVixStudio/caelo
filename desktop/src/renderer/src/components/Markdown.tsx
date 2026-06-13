@@ -1,7 +1,19 @@
-import { memo, useState, type ReactNode } from 'react'
+import { isValidElement, memo, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import { ArtifactFrame } from './ArtifactFrame'
+import { isArtifactLang } from '../lib/artifacts'
+
+// TOP5: rehype-highlight tokenizuje treść bloku na zagnieżdżone <span> — by zbudować artefakt
+// potrzebujemy SUROWEGO kodu, więc rekonstruujemy go z liści tekstowych drzewa React.
+function nodeText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).join('')
+  if (isValidElement(node)) return nodeText((node.props as { children?: ReactNode }).children)
+  return ''
+}
 
 function CodeBlock({ className, children }: { className?: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
@@ -64,7 +76,18 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
               inline?: boolean
             }
             const isBlock = typeof className === 'string' && className.includes('language-')
-            if (isBlock) return <CodeBlock className={className}>{children}</CodeBlock>
+            if (isBlock) {
+              // TOP5: bloki ```html / ```svg renderuj jako artefakt w sandboxowanym iframe
+              // (Preview/Code). Pozostałe języki → podświetlony kod jak dotąd.
+              const lang = (className || '')
+                .replace('hljs language-', '')
+                .replace('language-', '')
+                .trim()
+              if (isArtifactLang(lang)) {
+                return <ArtifactFrame lang={lang} code={nodeText(children).replace(/\n$/, '')} />
+              }
+              return <CodeBlock className={className}>{children}</CodeBlock>
+            }
             return (
               <code className="inline-code" {...rest}>
                 {children}

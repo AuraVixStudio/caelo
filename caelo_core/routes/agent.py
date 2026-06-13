@@ -16,7 +16,10 @@ Protokół (JSON):
     {"type":"checkpoint","id","label","created_at"}  # M13-B3: powstał checkpoint
     {"type":"output","id","chunk"}                # wyjście run_command
     {"type":"tool_result","id","ok","summary"}
+    {"type":"plan","items":[{"content","status":"pending|in_progress|completed"}]}  # TOP3: live checklist (update_plan)
     {"type":"assistant_done","content"} / {"type":"stopped"} / {"type":"error","error"}
+    {"type":"info","text","level":"info|warn"}    # miękka notka (np. limit kroków)
+    {"type":"usage","input_tokens","output_tokens","context_tokens","max_context"}  # licznik + miernik kontekstu
     {"type":"done"}                               # koniec tury
     # M17 — zespół subagentów (multipleks po agent_id na tym samym WsStream):
     {"type":"subagent","agent_id","role","task","event":{<zagnieżdżona ramka subagenta>}}
@@ -115,6 +118,12 @@ async def agent_stream(ws: WebSocket) -> None:
                                 reasoning_effort=reasoning_effort)
             finally:
                 state["busy"] = False
+                # Licznik tokenów + miernik okna kontekstowego po turze.
+                u = runner.usage
+                emit({"type": "usage", "input_tokens": u["input_tokens"],
+                      "output_tokens": u["output_tokens"],
+                      "context_tokens": u["context_tokens"],
+                      "max_context": u["max_context"]})
                 emit({"type": "done"})
 
         # M21: powiadom klienta o aktywnym id sesji (UI śledzi je do listy/wznawiania).

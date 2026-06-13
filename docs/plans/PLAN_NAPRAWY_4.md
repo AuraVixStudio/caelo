@@ -381,16 +381,56 @@ Zaczynać od pozycji `S` (gotowa infrastruktura). Każda z **definicją „done"
 
 | # | Funkcja | Eff | Reuse / DoD | Zależności |
 |---|---|---|---|---|
-| ⬜ **TOP1** | `web_search` jako narzędzie agenta | S | live-search z `responses_client` istnieje; eksponować w `tools.py` (READONLY, bez bramki) → agent dostaje cytowane wyniki | — |
-| ⬜ **TOP3** | Widżet planu/TODO agenta | S | ramki `WsStream` + render `AgentPanel`; live checklist mid-run | — |
-| ⬜ **TOP2** | Auto-update + code signing | S/M+M | = Faza B krok 6 (publikacja) | ROAD-3.6-a |
-| ⬜ **TOP4** | Katalog MCP one-click | S/M | maszyneria M16 (inspect/install+consent) + `McpManager`; install ≠ autostart | M16/M14 |
-| ⬜ **TOP5** | Artefakty HTML/mermaid/SVG (sandbox iframe) | M | CSP już jest; `Markdown.tsx` fenced→`ArtifactFrame`; pairuje z P1-F | — |
+| ✅ **TOP1** | `web_search` jako narzędzie agenta — **ZROBIONE** | S | reuse live-search z `responses_client` (`tools.web_search` + `WEB_SEARCH_TOOL`); READONLY, własna wczesna ścieżka jak `lsp`/`delegate` (świadomie **nie** w `permissions.READONLY`, by nie pompować `ALL_FILE_TOOLS`/`PARENT_FILE_TOOLS`); flaga `WEB_SEARCH_ENABLED` (domyślnie ON), reklamowane tylko orkiestratorowi; zwraca syntezę + listę „Sources" (cytowania). Test: `agent_selfcheck` `test_web_search` (13 asercji) | — |
+| ✅ **TOP3** | Widżet planu/TODO agenta — **ZROBIONE** | S | narzędzie `update_plan` (META/READONLY, własna ścieżka jak `delegate`, advertowane orkiestratorowi) → ramka `plan` (WsStream) → live `PlanWidget` w `AgentPanel` (przypięty u góry; pending/in_progress/completed; auto-reset na nową turę/sesję; wiersz narzędzia stłumiony). `tools.normalize_plan`/`plan_summary` (pure). Testy: `agent_selfcheck` `test_plan_widget` (11) + `agentPlan.test.ts` (4) | — |
+| 🟡 **TOP2** | Auto-update + code signing — **🤖-część zrobiona** | S/M+M | auto-update (electron-updater + feed GitHub Releases) wpięty już w M15-8; 2026-06-13 dodano: guard `release.yml` (`--publish never`+artifact — CI nie wypchnie niepodpisanego), szablon podpisu SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w `build_sidecar.ps1` (+BOM). **👤-reszta** (cert SimplySign CN/Thumbprint, remote, lokalny podpisany release) → [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md) Krok 6 | ROAD-3.6-a |
+| ✅ **TOP4** | Katalog MCP one-click — **ZROBIONE** | S/M | kurowany `mcp/catalog.py` (7 serwerów: filesystem/memory/sequential-thinking/everything/github/playwright/brave-search) → `GET /mcp/catalog`; UI „Catalog" w `McpServers.tsx` (one-click + inputy ścieżka/token, podgląd komendy = consent). „Install" reużywa `POST /mcp` z `enabled=False` (**install ≠ autostart**); start = osobna, potwierdzana akcja. Testy: `mcp_check` `test_catalog` (5) + `api_smoke` (route, niezasłonięty przez `/{sid}`) + `mcpCatalog.test.ts` (5) | M16/M14 |
+| ✅ **TOP5** | Artefakty HTML/SVG (sandbox iframe) — **ZROBIONE** (mermaid odłożony) | M | `lib/artifacts.ts` (`buildArtifactSrcDoc`: wstrzyknięty CSP + auto-resize + wrap SVG) + `ArtifactFrame.tsx` (iframe `sandbox="allow-scripts"` BEZ `same-origin` → opaque origin; toggle Preview/Code); `Markdown.tsx` routuje bloki ```html```/```svg``` → artefakt. Bezpieczeństwo: brak dostępu do rodzica/tokenu, CSP blokuje sieć/skrypty zewn./formularze. **Mermaid odłożony** (CSP blokuje skrypt z CDN, a bundlowanie = `npm install mermaid`). Testy: `artifacts.test.ts` (5) + `Markdown.test.tsx` (+4 integ.) | — |
 | ⬜ **TOP6** | Recenzja PR przez `gh` | M | `/review` + `run_command` + skill `pr-babysit`; mutacje przez bramkę | `gh` u usera |
 | ⬜ **TOP7** | Rewind/edycja wiadomości czatu | M | lokalny `useConversations`; **po P1-H i P1-I** | P1-H, P1-I |
 | ⬜ **TOP8** | Inline Ctrl-K w CodeMirror | M | CM6 decoration API; przy okazji `langFor` useMemo (S35-k) | — |
 | ⬜ **TOP9** | Auto-pamięć użytkownika | M | M19-B8 embeddings/`memory.py` istnieją; brak ekstrakcji+UI (opt-in!) | M19-B8 |
 | ⬜ **TOP10** | Lokalne background-agents + powiadomienia | M+S | headless B1 + kolejka genjobs + worktree M17 + Notification API; powiadomienia to szybki sub-win | B1/M17 |
+
+**Postęp Fazy G (2026-06-13):** ✅ **TOP1** wdrożone i zielone — `config.WEB_SEARCH_ENABLED`
+(domyślnie ON, `CAELO_WEB_SEARCH=0` wyłącza), `tools.web_search` (reuse `responses_client`
+live-search, synteza + „Sources"), `session.WEB_SEARCH_TOOL` + `_handle_web_search` (READONLY,
+bez bramki, tylko orkiestrator), ikona w `AgentPanel.tsx`. Weryfikacja: `agent_selfcheck`
+(`test_web_search`, 13 asercji) · `headless_check` · `lsp_check` · `api_smoke` **OK** · front
+`typecheck` czysty, `lint` bez nowych ostrzeżeń. ⚠️ Realny live-search xAI potwierdza user
+(sandbox blokuje `api.x.ai`).
+
+🟡 **TOP2** (= Faza B Krok 6) — **część asystenta zrobiona** (2026-06-13): auto-update był już
+wpięty (M15-8), doszły guard `release.yml` (`--publish never` — CI nie wypchnie niepodpisanego
+buildu), szablon podpisu SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w
+`build_sidecar.ps1` (+UTF-8 BOM dla PS 5.1). YAML/PS zwalidowane. **👤-reszta** (cert SimplySign,
+remote ROAD-3.6-a, lokalny podpisany release) wg [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md)
+Krok 6.
+
+✅ **TOP3** — **ZROBIONE** (2026-06-13): narzędzie `update_plan` (live checklist jak TodoWrite,
+META/READONLY, bez bramki) emituje ramkę `plan` renderowaną jako przypięty `PlanWidget` w
+`AgentPanel` (status pending/in_progress/completed, auto-reset na nową turę/sesję). Walidacja:
+`agent_selfcheck` `test_plan_widget` (11) · front `agentPlan.test.ts` (4) · typecheck/lint czyste ·
+`api_smoke`/`headless_check` OK. ⚠️ Wizualny render w trakcie realnego przebiegu agenta potwierdza
+user (sandbox blokuje xAI/Electron).
+
+✅ **TOP4** — **ZROBIONE** (2026-06-13): kurowany katalog MCP (`caelo_core/mcp/catalog.py`, 7 serwerów)
+serwowany przez `GET /mcp/catalog`; sekcja „Catalog" w `McpServers.tsx` dodaje serwer jednym
+kliknięciem (z inputami ścieżki/klucza + podglądem komendy = consent), reużywając `POST /mcp` z
+`enabled=False` — **install ≠ autostart** (start to osobna, potwierdzana akcja). Walidacja: `mcp_check`
+`test_catalog` (5; install-disabled) · `api_smoke` (route niezasłonięty przez `/{sid}`) · front
+`mcpCatalog.test.ts` (5) · typecheck/lint czyste. ⚠️ Realna instalacja/start serwera npx potwierdza
+user (sandbox blokuje sieć/exec).
+
+✅ **TOP5** — **ZROBIONE (HTML+SVG)** (2026-06-13): bloki ```html```/```svg``` z modelu renderują
+się jako artefakt w SANDBOXOWANYM iframe (`ArtifactFrame` + `lib/artifacts.buildArtifactSrcDoc`),
+z toggle Preview/Code i auto-resize. Bezpieczeństwo: `sandbox="allow-scripts"` bez `same-origin`
+(opaque origin — brak dostępu do tokenu/rodzica) + wstrzyknięty CSP (blokuje sieć/skrypty zewn.).
+Walidacja: `artifacts.test.ts` (5) + `Markdown.test.tsx` (+4 integ.: iframe/sandbox/CSP/toggle) ·
+typecheck/lint czyste. ⚠️ **Mermaid odłożony** (CSP blokuje CDN; bundlowanie wymaga `npm install
+mermaid` — psułoby `npm ci`/typecheck bez instalacji). ⚠️ Wizualny render potwierdza user (devMock
+nie mockuje strumienia czatu → artefakt nieobserwowalny w `preview:web`). Pozostałe TOP-6…10 +
+ROAD-4.2-a do zrobienia.
 
 **Strategicznie #1 długoterminowo (poza TOP-10):** ⬜ **ROAD-4.2-a** `[M/L]` — inni dostawcy
 LLM / modele lokalne przez `base_url`-override w cienkim `responses_client` (mitygacja ryzyka

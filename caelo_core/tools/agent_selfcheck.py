@@ -57,6 +57,22 @@ def test_tools() -> None:
         nf = T.edit_file(ws, "src/a.py", "NOPE", "z")
         check("edit_file missing -> error", nf.startswith("Error"))
 
+        # edit_file odporny na różnice wcięć/białych znaków (najczęstsza pętla agenta):
+        # plik z tabem, model podaje old_string ze spacjami → flexible match trafia.
+        T.write_file(ws, "src/ind.py", "def f():\n\treturn 1\n")  # wcięcie tabem
+        flex = T.edit_file(ws, "src/ind.py", "    return 1", "    return 2")  # model dał spacje
+        check("edit_file tolerates indent (tab vs spaces)", "Edited" in flex)
+        check("edit_file flexible applied", "return 2" in (ws.root / "src/ind.py").read_text(encoding="utf-8"))
+        # CRLF w old_string a plik znormalizowany do LF → też trafia.
+        T.write_file(ws, "src/crlf.py", "a = 1\nb = 2\n")
+        crlf = T.edit_file(ws, "src/crlf.py", "a = 1\r\nb = 2", "a = 9\nb = 2")
+        check("edit_file tolerates CRLF old_string", "Edited" in crlf)
+        # Flexible ambiguous: old_string nie pasuje dokładnie (trailing space), ale po strip
+        # zgadza się z 2 liniami → NIE zgaduj, zwróć błąd.
+        T.write_file(ws, "src/dup.py", "  foo\n    foo\n")
+        amb = T.edit_file(ws, "src/dup.py", "foo ", "bar")
+        check("edit_file ambiguous flexible still errors", amb.startswith("Error"))
+
         cmd = "echo hello-agent" if os.name == "nt" else "echo hello-agent"
         out = T.run_command(ws, cmd)
         check("run_command runs", "hello-agent" in out and "exit 0" in out)
@@ -2070,6 +2086,216 @@ def test_web_fetch() -> None:
             CFG.WEB_FETCH_ENABLED = prev_en
 
 
+def test_web_search() -> None:
+    """Faza-G/TOP1: web_search — READONLY live search reużywające responses_client.
+    Sprawdza format wyniku (synteza + Sources), pusty query→Error, generyczny błąd,
+    advertowanie warunkowe (off / orkiestrator / subagent), brak bramki w pętli oraz że
+    narzędzie NIE jest w MUTATING/READONLY (własna ścieżka, jak delegate)."""
+    import config as CFG
+    from caelo_core import responses_client as RC
+    from caelo_core.agent.permissions import MUTATING, READONLY, PermissionGate
+
+    # --- egzekutor: stub stream_response (bez sieci) ---
+    orig_stream = RC.stream_response
+    captured: dict = {}
+    try:
+        def _fake_stream(messages, *, model, api_key_provider, tools=None, **kw):
+            captured["model"] = model
+            captured["tools"] = tools
+            captured["key"] = api_key_provider()
+            return {"text": "Grok 4.3 shipped in 2026.",
+                    "citations": [{"url": "https://x.ai/blog", "title": "xAI Blog"},
+                                  {"url": "https://docs.x.ai", "title": ""}]}
+        RC.stream_response = _fake_stream
+        out = T.web_search("when did grok 4.3 ship", api_key_provider=lambda: "k",
+                           model="grok-4.3")
+        check("TOP1: web_search returns synthesized text",
+              "Grok 4.3 shipped in 2026." in out)
+        check("TOP1: web_search appends cited Sources",
+              "Sources:" in out and "https://x.ai/blog" in out and "xAI Blog" in out)
+        check("TOP1: web_search reuses live-search tools (web + x)",
+              {"type": "web_search"} in (captured.get("tools") or [])
+              and {"type": "x_search"} in (captured.get("tools") or []))
+        check("TOP1: web_search uses the given model + auth provider",
+              captured.get("model") == "grok-4.3" and captured.get("key") == "k")
+        check("TOP1: web_search rejects an empty query",
+              T.web_search("   ", api_key_provider=lambda: "k").startswith("Error"))
+
+        def _boom(*a, **k):
+            raise RuntimeError("api.x.ai 500 SECRET-DETAIL")
+        RC.stream_response = _boom
+        err = T.web_search("q", api_key_provider=lambda: "k")
+        check("TOP1: web_search error is generic (no leak)",
+              err.startswith("Error: web_search failed") and "SECRET-DETAIL" not in err)
+    finally:
+        RC.stream_response = orig_stream
+
+    # --- klasyfikacja: bez bramki, własna ścieżka (jak delegate; poza zbiorami plikowymi) ---
+    check("TOP1: web_search is not gated (not in MUTATING)", "web_search" not in MUTATING)
+    check("TOP1: web_search stays out of READONLY (no ALL_FILE_TOOLS bloat)",
+          "web_search" not in READONLY)
+
+    def mock_llm(api_key, base_url, messages, model, temperature, tools,
+                 on_text=None, stop_flag=None, **_):
+        return {"role": "assistant", "content": "ok"}
+
+    prev_en = CFG.WEB_SEARCH_ENABLED
+    try:
+        # --- advertowanie warunkowe ---
+        with tempfile.TemporaryDirectory() as d:
+            ws = Workspace(d)
+            g = PermissionGate()
+            CFG.WEB_SEARCH_ENABLED = False
+            off = AgentSession(ws, g, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda e: None, request_approval=lambda *a: "accept")
+            check("TOP1: web_search hidden when disabled",
+                  "web_search" not in {t["function"]["name"] for t in off._all_tools()})
+            CFG.WEB_SEARCH_ENABLED = True
+            on = AgentSession(ws, g, mock_llm, lambda: "k", "http://unused",
+                              emit=lambda e: None, request_approval=lambda *a: "accept")
+            check("TOP1: web_search advertised when enabled (main agent)",
+                  "web_search" in {t["function"]["name"] for t in on._all_tools()})
+            sub = AgentSession(ws, g, mock_llm, lambda: "k", "http://unused",
+                               emit=lambda e: None, request_approval=lambda *a: "accept",
+                               tool_names={"read_file"})
+            check("TOP1: web_search not advertised to a scoped subagent",
+                  "web_search" not in {t["function"]["name"] for t in sub._all_tools()})
+
+        # --- w pętli: READONLY (żadnego approval), cytowania wracają do modelu ---
+        with tempfile.TemporaryDirectory() as d:
+            ws = Workspace(d)
+            g = PermissionGate()
+            CFG.WEB_SEARCH_ENABLED = True
+            orig_stream2 = RC.stream_response
+            approvals: list = []
+            results: list = []
+            try:
+                RC.stream_response = lambda messages, **kw: {
+                    "text": "answer", "citations": [{"url": "https://a.b", "title": "T"}]}
+                calls = {"n": 0}
+
+                def llm(api_key, base_url, messages, model, temperature, tools,
+                        on_text=None, stop_flag=None, **_):
+                    calls["n"] += 1
+                    if calls["n"] == 1:
+                        return {"role": "assistant", "content": "",
+                                "tool_calls": [{"id": "c1", "type": "function",
+                                                "function": {"name": "web_search",
+                                                             "arguments": json.dumps({"query": "x"})}}]}
+                    return {"role": "assistant", "content": "done"}
+
+                def emit(ev):
+                    if ev.get("type") == "tool_result" and ev.get("id") == "c1":
+                        results.append(ev)
+
+                def request_approval(call_id, name, detail):
+                    approvals.append(name)
+                    return "accept"
+
+                sess = AgentSession(ws, g, llm, lambda: "k", "http://unused",
+                                    emit=emit, request_approval=request_approval)
+                sess.run_turn("search please", "grok-4.3")
+                check("TOP1: web_search runs READONLY in the loop (no approval asked)",
+                      not approvals and bool(results) and results[0]["ok"])
+                check("TOP1: web_search result carries citations back to the model",
+                      any("Sources:" in (r.get("summary") or "") for r in results))
+            finally:
+                RC.stream_response = orig_stream2
+    finally:
+        CFG.WEB_SEARCH_ENABLED = prev_en
+
+
+def test_plan_widget() -> None:
+    """Faza-G/TOP3: update_plan — live checklist (jak TodoWrite). Sprawdza normalize_plan
+    (warianty/cap/zły status), plan_summary, ramkę `plan` w pętli (READONLY, bez approval),
+    advertowanie orkiestratorowi / ukrycie przed subagentem, balans historii."""
+    from caelo_core.agent.permissions import MUTATING, READONLY, PermissionGate
+
+    # --- normalize_plan (pure) ---
+    norm = T.normalize_plan([
+        {"step": "Read code", "status": "completed"},
+        {"content": "Edit file", "status": "in_progress"},
+        "Run tests",                              # goły string -> pending
+        {"step": "   ", "status": "pending"},     # pusty -> pomiń
+        {"step": "Bad status", "status": "wat"},  # zły status -> pending
+        123,                                      # nie-obiekt -> pomiń
+    ])
+    check("TOP3: normalize_plan maps step/content + clamps statuses",
+          norm == [{"content": "Read code", "status": "completed"},
+                   {"content": "Edit file", "status": "in_progress"},
+                   {"content": "Run tests", "status": "pending"},
+                   {"content": "Bad status", "status": "pending"}])
+    check("TOP3: normalize_plan caps step count",
+          len(T.normalize_plan([{"step": f"s{i}"} for i in range(100)])) == T.PLAN_MAX_STEPS)
+    check("TOP3: normalize_plan tolerates non-list input", T.normalize_plan(None) == [])
+    check("TOP3: plan_summary counts done/active",
+          "2 step(s)" in T.plan_summary([{"content": "a", "status": "completed"},
+                                         {"content": "b", "status": "in_progress"}])
+          and "1 done" in T.plan_summary([{"content": "a", "status": "completed"}]))
+
+    # --- klasyfikacja: meta, bez bramki (poza MUTATING/READONLY, jak delegate) ---
+    check("TOP3: update_plan is not gated (not in MUTATING)", "update_plan" not in MUTATING)
+    check("TOP3: update_plan stays out of READONLY set", "update_plan" not in READONLY)
+
+    def mock_llm(api_key, base_url, messages, model, temperature, tools,
+                 on_text=None, stop_flag=None, **_):
+        return {"role": "assistant", "content": "ok"}
+
+    # --- advertowanie warunkowe ---
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        g = PermissionGate()
+        main = AgentSession(ws, g, mock_llm, lambda: "k", "http://unused",
+                            emit=lambda e: None, request_approval=lambda *a: "accept")
+        check("TOP3: update_plan advertised to the main agent",
+              "update_plan" in {t["function"]["name"] for t in main._all_tools()})
+        sub = AgentSession(ws, g, mock_llm, lambda: "k", "http://unused",
+                           emit=lambda e: None, request_approval=lambda *a: "accept",
+                           tool_names={"read_file"})
+        check("TOP3: update_plan not advertised to a scoped subagent",
+              "update_plan" not in {t["function"]["name"] for t in sub._all_tools()})
+
+    # --- w pętli: emituje ramkę `plan`, READONLY (bez approval), historia zbalansowana ---
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        g = PermissionGate()
+        approvals: list = []
+        plan_frames: list = []
+        calls = {"n": 0}
+
+        def llm(api_key, base_url, messages, model, temperature, tools,
+                on_text=None, stop_flag=None, **_):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"role": "assistant", "content": "",
+                        "tool_calls": [{"id": "p1", "type": "function",
+                                        "function": {"name": "update_plan",
+                                                     "arguments": json.dumps({"steps": [
+                                                         {"step": "Investigate", "status": "in_progress"},
+                                                         {"step": "Fix", "status": "pending"}]})}}]}
+            return {"role": "assistant", "content": "done"}
+
+        def emit(ev):
+            if ev.get("type") == "plan":
+                plan_frames.append(ev)
+
+        def request_approval(call_id, name, detail):
+            approvals.append(name)
+            return "accept"
+
+        sess = AgentSession(ws, g, llm, lambda: "k", "http://unused",
+                            emit=emit, request_approval=request_approval)
+        sess.run_turn("do a task", "grok-4.3")
+        check("TOP3: update_plan emits a `plan` frame with normalized items",
+              bool(plan_frames) and plan_frames[0]["items"] == [
+                  {"content": "Investigate", "status": "in_progress"},
+                  {"content": "Fix", "status": "pending"}])
+        check("TOP3: update_plan runs READONLY in the loop (no approval asked)", not approvals)
+        tool_msgs = [m for m in sess.history if m.get("role") == "tool"]
+        check("TOP3: update_plan tool result recorded (balanced history)",
+              any("Plan updated" in (m.get("content") or "") for m in tool_msgs))
+
+
 def test_project_config() -> None:
     """M19-B14: hierarchiczny config cwd→root — find_project_root (.git walk),
     project_dir_chain (deeper-wins), dziedziczenie CAELO.md i `.caelo/{permissions,lsp}.json`
@@ -2282,6 +2508,10 @@ def main() -> int:
     test_git_worktree()
     # M19 — B13: web_fetch w agencie (https-only/SSRF/allowlista/cap + gating + advertise)
     test_web_fetch()
+    # Faza-G / TOP1: web_search w agencie (live search READONLY, reuse responses_client)
+    test_web_search()
+    # Faza-G / TOP3: update_plan — live checklist/TODO agenta (ramka `plan` + advertise)
+    test_plan_widget()
     # M19 — B14: config projektowy hierarchiczny (find_project_root + walk cwd→root)
     test_project_config()
     ok = True
