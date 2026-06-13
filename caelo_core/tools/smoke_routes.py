@@ -51,6 +51,13 @@ def _unit_fs_routes(checks: list) -> None:
         names = [e["name"] for e in r["entries"]]
         checks.append(("/fs/tree lists workspace entry", "sub" in names))
 
+        # /fs/files (@-odwołania): płaski spis MUSI zawierać i plik, i katalog (z '/'),
+        # rekurencyjnie — by @ znajdowało własne pliki/foldery w całym projekcie.
+        rf = fs_route.files(ws=ws)
+        fl = rf.get("files", [])
+        checks.append(("/fs/files lists nested file", "sub/hello.txt" in fl))
+        checks.append(("/fs/files lists dir with trailing slash", "sub/" in fl))
+
         # sandbox: ucieczki poza workspace → 400 (nie wyciekają plików spoza root)
         checks.append(("/fs/read rejects '..' escape (400)",
                        rejects400(lambda: fs_route.read("../../etc/passwd", ws=ws))))

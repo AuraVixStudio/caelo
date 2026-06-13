@@ -304,6 +304,17 @@ export function AgentPanel({
   const refreshMergesRef = useRef(refreshMerges)
   refreshMergesRef.current = refreshMerges
 
+  // M19: płaski spis plików/katalogów workspace → @-odwołania w composerze. Odświeżany
+  // przy zmianie workspace ORAZ po każdej turze (pliki utworzone przez agenta muszą
+  // wejść do podpowiedzi @ — inaczej lista jest nieaktualna od momentu otwarcia folderu).
+  const refreshFiles = (): void => {
+    void fsFiles(conn)
+      .then((r) => setFileList(r.files))
+      .catch(() => setFileList([]))
+  }
+  const refreshFilesRef = useRef(refreshFiles)
+  refreshFilesRef.current = refreshFiles
+
   // Połączenie WS agenta (jedno na sesję modułu Code).
   useEffect(() => {
     const agent = new AgentConnection(
@@ -347,10 +358,7 @@ export function AgentPanel({
       refreshMergesRef.current()
       setTeamNodes({}) // nowy workspace → nowe drzewo zespołu
       setTeamReport(null)
-      // M19: płaski spis plików workspace → @-odwołania w composerze.
-      void fsFiles(conn)
-        .then((r) => setFileList(r.files))
-        .catch(() => setFileList([]))
+      refreshFilesRef.current() // M19: spis plików/katalogów → @-odwołania
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
@@ -492,6 +500,7 @@ export function AgentPanel({
         refreshCheckpointsRef.current()
         refreshMergesRef.current() // M17: subagenci mogli przygotować scalenia
         onFilesChangedRef.current()
+        refreshFilesRef.current() // odśwież @-listę: nowe pliki agenta są teraz na dysku
         break
       case 'error':
         setEntries((prev) => [...prev, { kind: 'error', id: nextId(), text: e.error }])

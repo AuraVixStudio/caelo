@@ -26,7 +26,7 @@
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
-| E | Agent kodowania | P1 | 🟡 | 2026-06-13 | **E1–E3 ✅** (pełny bieg, diff approval, plan mode). Naprawiono 12 bugów/UX z weryfikacji (rundy 1–6): izolacja CAELO.md, scroll/approve, max-iter+finalizacja, miernik kontekstu na żywo, wskaźnik pracy, dymki usera, wklejanie zrzutu, pisownia wg języka systemu, odświeżanie drzewa plików, reguła run_command, **odporne edit_file (taby/CRLF)**. Zostają E4–E10 (4 tryby/bypass, checkpointy, CAELO.md, sesje, komendy, glob, LSP) |
+| E | Agent kodowania | P1 | 🟡 | 2026-06-13 | **E1–E4 + E7–E8 ✅** (pełny bieg, diff approval, plan mode, 4 tryby+bypass, sesje, @-pliki). Naprawiono 13 bugów/UX z weryfikacji (rundy 1–7): izolacja CAELO.md, scroll/approve, max-iter+finalizacja, miernik kontekstu na żywo, wskaźnik pracy, dymki usera, wklejanie zrzutu, pisownia wg języka systemu, odświeżanie drzewa, reguła run_command, odporne edit_file (taby/CRLF), @-wyszukiwanie (limit/katalogi/odświeżanie). Zostają E5 (checkpointy), E6 (CAELO.md), E9 (glob), E10 (LSP) |
 | F | Subagenci / zespoły | P2 | ⬜ | | |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
@@ -284,6 +284,17 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > write_file; nie pętl). Nowe testy: indent/CRLF/ambiguous (+4, agent_selfcheck OK). UWAGA: backend →
 > wymaga restartu `npm run dev`.
 
+> **Postęp 2026-06-13 (runda 7):** ✅ **Bypass (E4)** i ✅ **sesje (E7)** potwierdzone na żywo.
+> `@`-wyszukiwanie nie znajdowało plików własnego projektu — 3 przyczyny naprawione:
+> (a) **limit** [fs.py](../../caelo_core/routes/fs.py) `MAX_FS_FILES` 5000→**30000**: `os.walk`
+> alfabetyczny wypełniał limit wielkim `DazSDK-main` ZANIM dotarł do `SCENE MANAGER` (sortowane po 'D'),
+> więc pliki usera nie wchodziły do listy; (b) `/fs/files` dołącza teraz **katalogi** (z trailing `/`) →
+> da się odwołać do folderu, a `fuzzyFiles` poprawnie dopasowuje nazwę katalogu mimo `/`; (c) lista `@`
+> była pobierana RAZ przy otwarciu — teraz **odświeżana po każdej turze** (pliki tworzone przez agenta
+> trafiają do podpowiedzi). Testy: composerSuggest (+1, dir), api_smoke `/fs/files` (+2: plik + katalog).
+> Typecheck/Vitest 245 OK. UWAGA: backend → restart `npm run dev`. ✅ **E8 potwierdzone po restarcie**
+> (`@Scene` → `SCENE MANAGER/` + pliki w całym projekcie).
+
 - [x] **E1 — Pełny bieg agenta.**  ✅ 2026-06-08. Agent czytał (read_file/grep/list_dir) i edytował pliki (edit_file App.tsx/icon-generator.ts) w accept-edits; pętla domknięta, analiza wyrenderowana.
   - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
 
@@ -293,7 +304,7 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [x] **E3 — Tryb planowania.**  ✅ 2026-06-13. Plan mode: READONLY działa, write_file „Blocked in plan mode", plan → faza review (Approve & run) — potwierdzone na żywo. (Sub-punkt „plan nie tworzy checkpointu" pokrywa selfcheck B2.)
   - *Oczekiwane:* READONLY działa, MUTATING „Blocked in plan mode", plan NIE tworzy checkpointu.
 
-- [ ] **E4 — 4 tryby.** Przejdź ask → accept-edits → plan → bypass; sprawdź baner per tryb (ostrzeżenie dla bypass).
+- [x] **E4 — 4 tryby.**  ✅ 2026-06-13. Ask (pyta), accept-edits/Edits (auto write/edit, baner), plan (READONLY) i **bypass** (baner „every change runs without asking", wszystko bez pytania) — potwierdzone na żywo.
   - *Oczekiwane:* accept-edits auto-akceptuje write/edit; bypass wszystko.
 
 - [ ] **E5 — Checkpointy + undo.** Po kilku turach → popover „Checkpoints & undo" → „Undo to here" / „Undo all".
@@ -303,10 +314,10 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [ ] **E6 — CAELO.md wpływa na zachowanie.** Utwórz `CAELO.md` z regułą (np. „zawsze dodawaj docstring") → zadanie.
   - *Oczekiwane:* agent stosuje regułę. (Też: edytor reguł w nagłówku Code.)
 
-- [ ] **E7 — Sesje kodu (M21).** Wykonaj turę → menu „Sessions" → wznów sesję; filtr po projekcie/folderze + szukaj tekstem.
+- [x] **E7 — Sesje kodu (M21).**  ✅ 2026-06-13. Sesje zapisują się automatycznie i są na liście „Sessions" (This project / All projects); potwierdzone na żywo.
   - *Oczekiwane:* historia wczytana, kontekst zachowany; ramka WS `session`.
 
-- [ ] **E8 — Komendy + @-pliki w composerze (M20).** Wpisz `/` (autocomplete komend, np. `/refactor`) i `@nazwa` (fuzzy po plikach).
+- [x] **E8 — Komendy + @-pliki w composerze (M20).**  ✅ 2026-06-13. `@nazwa` fuzzy po plikach I katalogach całego projektu — potwierdzone na żywo (`@Scene` → `SCENE MANAGER/` + pliki). Komendy `/` używają tej samej ścieżki autocomplete (`detectSuggest`).
   - *Oczekiwane:* podpowiedzi, wstawienie referencji pliku do promptu.
 
 - [ ] **E9 — Reguły glob (M19-B4).** Dodaj `--deny Bash(rm*)` / `--allow Edit(src/**)` (CLI lub `<ws>/.caelo/permissions.json` / `PUT /permissions/rules`).

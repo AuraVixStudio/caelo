@@ -18,7 +18,9 @@ from caelo_core.state import Backend, get_backend, require_workspace
 router = APIRouter(prefix="/fs", tags=["fs"])
 
 # Cap na płaski spis plików (@-odwołania w composerze agenta) — duże repo nie zaleją UI.
-MAX_FS_FILES = 5000
+# Wysoki, by realny projekt + dołączone SDK/referencje zmieściły się w całości (inaczej
+# walka alfabetyczna ucina katalogi sortowane później — np. własny kod po wielkim SDK).
+MAX_FS_FILES = 30000
 # P2-3.2-c: cap rozmiaru pliku otwieranego w edytorze (read_text całości → OOM).
 MAX_FS_READ_BYTES = 5 * 1024 * 1024
 
@@ -74,9 +76,10 @@ def tree(path: str = ".", ws=Depends(require_workspace)) -> dict:
 
 @router.get("/files")
 def files(ws=Depends(require_workspace)) -> dict:
-    """Płaski, rekurencyjny spis plików workspace (POSIX, względny) — do @-odwołań
-    w composerze agenta. Pomija IGNORE_DIRS i dowiązania (jak glob agenta), capped
-    do MAX_FS_FILES (`truncated=True`, gdy ucięto). Sortowany dla stabilnego UI."""
+    """Płaski, rekurencyjny spis workspace (POSIX, względny) — do @-odwołań w composerze
+    agenta. Zawiera PLIKI oraz KATALOGI (z trailing '/', by dało się odwołać do folderu).
+    Pomija IGNORE_DIRS i dowiązania (jak glob agenta), capped do MAX_FS_FILES
+    (`truncated=True`, gdy ucięto). Sortowany dla stabilnego UI."""
     root = str(ws.root)
     out: list[str] = []
     truncated = False
@@ -85,6 +88,14 @@ def files(ws=Depends(require_workspace)) -> dict:
             d for d in dirnames
             if d not in IGNORE_DIRS and not os.path.islink(os.path.join(dirpath, d))
         )
+        # Katalogi (z '/') — by @ mógł odwołać się do folderu (agent zrobi list_dir).
+        for dn in dirnames:
+            out.append(os.path.relpath(os.path.join(dirpath, dn), root).replace(os.sep, "/") + "/")
+            if len(out) >= MAX_FS_FILES:
+                truncated = True
+                break
+        if truncated:
+            break
         for fn in sorted(filenames):
             p = os.path.join(dirpath, fn)
             if os.path.islink(p):

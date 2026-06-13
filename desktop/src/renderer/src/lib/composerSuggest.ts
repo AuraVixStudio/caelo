@@ -28,11 +28,16 @@ export function detectSuggest(text: string, caret: number): SuggestToken | null 
   return null
 }
 
-/** Fuzzy-rank workspace files for an "@" query (basename match beats path match). */
+/** Fuzzy-rank workspace files/dirs for an "@" query (basename match beats path match).
+ *  Dirs come with a trailing "/" — strip it before taking the basename so e.g. a query
+ *  "scene" matches the folder "SCENE MANAGER/" by its name, not by an empty basename. */
 export function fuzzyFiles(files: string[], query: string, limit = 8): string[] {
   const q = query.trim().toLowerCase()
   if (!q) return files.slice(0, limit)
-  const base = (p: string): string => p.slice(p.lastIndexOf('/') + 1).toLowerCase()
+  const base = (p: string): string => {
+    const noSlash = p.endsWith('/') ? p.slice(0, -1) : p
+    return noSlash.slice(noSlash.lastIndexOf('/') + 1).toLowerCase()
+  }
   return files
     .map((p, i) => {
       const lp = p.toLowerCase()

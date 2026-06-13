@@ -45,6 +45,15 @@ describe('fuzzyFiles', () => {
   it('matches on the full path', () => {
     expect(fuzzyFiles(files, 'lib/')).toEqual(['src/lib/api.ts'])
   })
+  it('matches a directory by its name despite the trailing slash', () => {
+    // Katalogi przychodzą z trailing '/': "scene" musi trafić folder po nazwie,
+    // a nie po pustym basename (regresja z @-wyszukiwania folderów).
+    const withDirs = ['SCENE MANAGER/', 'SCENE MANAGER/scenemanagerpane.cpp', 'DazSDK/docs/x.html']
+    const r = fuzzyFiles(withDirs, 'scene', 8)
+    expect(r).toContain('SCENE MANAGER/')
+    expect(r).toContain('SCENE MANAGER/scenemanagerpane.cpp')
+    expect(r.indexOf('SCENE MANAGER/')).toBeLessThan(r.length)
+  })
 })
 
 describe('applyFileSuggest', () => {
