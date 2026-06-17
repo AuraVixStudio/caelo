@@ -29,7 +29,7 @@
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
-| E | Agent kodowania | P1 | 🟡 | 2026-06-13 | **E1–E4 + E7–E8 ✅** (pełny bieg, diff approval, plan mode, 4 tryby+bypass, sesje, @-pliki). Naprawiono 13 bugów/UX z weryfikacji (rundy 1–7): izolacja CAELO.md, scroll/approve, max-iter+finalizacja, miernik kontekstu na żywo, wskaźnik pracy, dymki usera, wklejanie zrzutu, pisownia wg języka systemu, odświeżanie drzewa, reguła run_command, odporne edit_file (taby/CRLF), @-wyszukiwanie (limit/katalogi/odświeżanie). Zostają E5 (checkpointy), E6 (CAELO.md), E9 (glob), E10 (LSP) |
+| E | Agent kodowania | P1 | 🟡 | 2026-06-17 | **E1–E9 ✅** (pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow). Naprawiono 14 bugów/UX (rundy 1–8): m.in. izolacja CAELO.md, scroll/approve, max-iter+finalizacja, miernik kontekstu, edit_file taby/CRLF, @-wyszukiwanie, **+ runda 8: bezpiecznik pętli (loop guard) — model zapętlał się na identycznym edit_file (25× ta sama linia → „old_string not unique")**. Zostaje **E10 (LSP)** |
 | F | Subagenci / zespoły | P2 | ⬜ | | |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
@@ -298,6 +298,16 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > Typecheck/Vitest 245 OK. UWAGA: backend → restart `npm run dev`. ✅ **E8 potwierdzone po restarcie**
 > (`@Scene` → `SCENE MANAGER/` + pliki w całym projekcie).
 
+> **Postęp 2026-06-17 (runda 8 — z weryfikacji E5/E6/E9):** ✅ **E5 (checkpointy/undo)** i ✅ **E6
+> (CAELO.md)** potwierdzone na żywo (m.in. „Undo all — removed 3" + „partial undo" po `run_command`;
+> docstring/f-string wymuszony przez CAELO.md). ✅ **E9 (reguły glob)** — odrzucenie deny działa. **BUG
+> LIVE złapany i naprawiony:** po serii reject/accept model **zapętlił się na identycznym `edit_file`**
+> (dodał ~25× tę samą linię, aż `old_string is not unique (10 matches)`) — prompt „Never loop on a failing
+> edit" był ignorowany. **Fix (deterministyczny):** [session.py](../../caelo_core/agent/session.py)
+> `LOOP_GUARD_LIMIT=3` — IDENTYCZNE wywołanie (name+args) powtórzone > próg w jednej turze kończy turę
+> czysto (ramka `info` + `stopped`, zbalansowana historia, „send another message"), nie wykonując wywołania
+> (chroni plik). Test: `agent_selfcheck` `test_loop_guard` (6 asercji), RESULT OK. ⚠️ backend → restart `npm run dev`.
+
 - [x] **E1 — Pełny bieg agenta.**  ✅ 2026-06-08. Agent czytał (read_file/grep/list_dir) i edytował pliki (edit_file App.tsx/icon-generator.ts) w accept-edits; pętla domknięta, analiza wyrenderowana.
   - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
 
@@ -310,11 +320,10 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [x] **E4 — 4 tryby.**  ✅ 2026-06-13. Ask (pyta), accept-edits/Edits (auto write/edit, baner), plan (READONLY) i **bypass** (baner „every change runs without asking", wszystko bez pytania) — potwierdzone na żywo.
   - *Oczekiwane:* accept-edits auto-akceptuje write/edit; bypass wszystko.
 
-- [ ] **E5 — Checkpointy + undo.** Po kilku turach → popover „Checkpoints & undo" → „Undo to here" / „Undo all".
+- [x] **E5 — Checkpointy + undo.**  ✅ 2026-06-17. „Undo all — removed 3" + baner „partial undo" po `run_command` (potwierdzone na żywo).
   - *Oczekiwane:* pliki wracają (odwrotna kolejność), utworzone usunięte; `run_command` → baner „partial undo".
-  - *Test wielu plików:* zmień ≥3 pliki w 1 turze, cofnij — wszystkie wracają.
 
-- [ ] **E6 — CAELO.md wpływa na zachowanie.** Utwórz `CAELO.md` z regułą (np. „zawsze dodawaj docstring") → zadanie.
+- [x] **E6 — CAELO.md wpływa na zachowanie.**  ✅ 2026-06-17. Reguły z CAELO.md zastosowane (docstring + f-string w wygenerowanej funkcji).
   - *Oczekiwane:* agent stosuje regułę. (Też: edytor reguł w nagłówku Code.)
 
 - [x] **E7 — Sesje kodu (M21).**  ✅ 2026-06-13. Sesje zapisują się automatycznie i są na liście „Sessions" (This project / All projects); potwierdzone na żywo.
@@ -323,7 +332,7 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [x] **E8 — Komendy + @-pliki w composerze (M20).**  ✅ 2026-06-13. `@nazwa` fuzzy po plikach I katalogach całego projektu — potwierdzone na żywo (`@Scene` → `SCENE MANAGER/` + pliki). Komendy `/` używają tej samej ścieżki autocomplete (`detectSuggest`).
   - *Oczekiwane:* podpowiedzi, wstawienie referencji pliku do promptu.
 
-- [ ] **E9 — Reguły glob (M19-B4).** Dodaj `--deny Bash(rm*)` / `--allow Edit(src/**)` (CLI lub `<ws>/.caelo/permissions.json` / `PUT /permissions/rules`).
+- [x] **E9 — Reguły glob (M19-B4).**  ✅ 2026-06-17. Odrzucenie deny działa; przy okazji złapany i naprawiony bug pętli agenta (loop guard, patrz runda 8 wyżej).
   - *Oczekiwane:* **deny > allow**; deny = twarda odmowa nawet w bypass; allow auto-akceptuje. **P0-1 zachowane:** `Bash(...)` allow NIE omija metaznaków (`git && rm` dalej blokowane).
 
 - [ ] **E10 — LSP diagnostyka (M19-B3).** Skonfiguruj realny serwer (np. pyright/tsserver) w `lsp.json` (global) lub `<ws>/.caelo/lsp.json` → Extensions → Language Servers.

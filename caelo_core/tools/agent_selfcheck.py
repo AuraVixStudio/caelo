@@ -135,6 +135,51 @@ def test_agent_loop() -> None:
         check("mock called twice", calls["n"] == 2)
 
 
+def test_loop_guard() -> None:
+    """LIVE 2026-06-17: bezpiecznik pętli — IDENTYCZNY tool_call powtórzony ponad próg
+    w jednej turze kończy turę czysto (info + stopped, zbalansowana historia), zamiast
+    wykonywać go w nieskończoność (korupcja pliku)."""
+    from caelo_core.agent.session import LOOP_GUARD_LIMIT
+
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        gate = PermissionGate()
+        events: list[dict] = []
+        approvals = {"n": 0}
+
+        def mock_llm(api_key, base_url, messages, model, temperature, tools, on_text=None, stop_flag=None, **_):
+            # ZAWSZE ten sam tool_call (identyczne args) — symuluje zapętlonego modela
+            return {
+                "role": "assistant", "content": None,
+                "tool_calls": [{
+                    "id": "loop", "type": "function",
+                    "function": {"name": "write_file",
+                                 "arguments": '{"path": "x.txt", "content": "same"}'},
+                }],
+            }
+
+        def request_approval(call_id, name, detail):
+            approvals["n"] += 1
+            return "accept"
+
+        session = AgentSession(ws, gate, mock_llm, lambda: "k", "http://unused",
+                               emit=events.append, request_approval=request_approval)
+        session.run_turn("loop forever", model="mock", mode="ask")
+
+        types = [e.get("type") for e in events]
+        check("loop guard: stopped emitted", "stopped" in types)
+        info = [e for e in events if e.get("type") == "info" and "loop guard" in (e.get("message") or "")]
+        check("loop guard: info message about loop", bool(info))
+        check("loop guard: executed exactly LOOP_GUARD_LIMIT times (not infinite)",
+              approvals["n"] == LOOP_GUARD_LIMIT)
+        check("loop guard: did NOT exhaust max_iters", session.turns <= LOOP_GUARD_LIMIT + 1)
+        # historia zbalansowana: każdy tool_call ma odpowiedź tool (kontrakt xAI)
+        want = {tc["id"] for m in session.history
+                if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])}
+        got = {m.get("tool_call_id") for m in session.history if m.get("role") == "tool"}
+        check("loop guard: history balanced", bool(want) and want <= got)
+
+
 def test_interrupted_tool_calls() -> None:
     """P0-5: Stop w środku batcha nie zostawia tool_call bez odpowiedzi `tool`."""
     with tempfile.TemporaryDirectory() as d:
@@ -2502,6 +2547,7 @@ def main() -> int:
     test_tools()
     test_sandbox()
     test_agent_loop()
+    test_loop_guard()
     test_interrupted_tool_calls()
     test_history_balanced_after_tools()
     test_permission_path_norm()

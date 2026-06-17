@@ -149,6 +149,11 @@ PLAN_MODE_PROMPT = (
 AGENT_MODES = ("ask", "accept-edits", "plan", "bypass")
 DEFAULT_MODE = "ask"
 
+# Bezpiecznik pętli (LIVE 2026-06-17): ile razy IDENTYCZNE wywołanie (name+args) może
+# wystąpić w jednej turze, zanim uznamy to za pętlę i przerwiemy. Próg z zapasem na
+# legalne ponowienia (np. read_file po nieudanej edycji), ale daleko od korupcji pliku.
+LOOP_GUARD_LIMIT = 3
+
 # M19-B10: auto-compact — zwijanie najstarszych ZAMKNIĘTYCH tur, gdy historia rośnie.
 COMPACT_SUMMARY_HEADER = "[Earlier conversation summarized to save context]"
 
@@ -497,6 +502,12 @@ class AgentSession:
         # M14-B2: narzędzia plikowe agenta + odkryte narzędzia MCP (namespaced). Liczone
         # raz na turę (serwer MCP może wystartować/zatrzymać się między turami).
         all_tools = self._all_tools()
+        # Bezpiecznik pętli (LIVE 2026-06-17): model bywa, że w kółko powtarza TEN SAM
+        # tool_call (np. edit_file z identycznym old/new_string) ignorując instrukcję
+        # „Never loop on a failing edit" — co korumpuje plik (N× ta sama linia) i pali
+        # iteracje. Liczymy sygnatury wywołań w obrębie TURY; po przekroczeniu progu
+        # kończymy turę czysto (zbalansowana historia + komunikat), zamiast pętlić.
+        self._repeat_counts: dict[str, int] = {}
         for _ in range(self.max_iters):
             if stop():
                 self.emit({"type": "stopped"})
@@ -548,6 +559,22 @@ class AgentSession:
                     # P0-5: Stop w środku batcha — dopisz syntetyczne wyniki dla
                     # nieobsłużonych tool_calls, by historia była zbalansowana.
                     self._finalize_interrupted(tool_calls[idx:])
+                    self.emit({"type": "stopped"})
+                    return
+                # Bezpiecznik pętli: ten sam (name+args) powtórzony > LOOP_GUARD_LIMIT razy
+                # w tej turze = pętla. Dopisz zbalansowane wyniki dla tego i pozostałych
+                # wywołań, zgłoś użytkownikowi i zakończ turę (kontekst zostaje spójny —
+                # „send another message" wznawia). NIE wykonuj wywołania (chroni plik).
+                sig = self._call_signature(tc)
+                self._repeat_counts[sig] = self._repeat_counts.get(sig, 0) + 1
+                if self._repeat_counts[sig] > LOOP_GUARD_LIMIT:
+                    self._finalize_interrupted(
+                        tool_calls[idx:], reason="loop guard: identical tool call repeated")
+                    fn = tc.get("function", {}) or {}
+                    self.emit({"type": "info", "message": (
+                        f"Stopped: the agent repeated the same action "
+                        f"('{fn.get('name', '?')}') {self._repeat_counts[sig]} times "
+                        "(loop guard). Send another message to continue or rephrase the task.")})
                     self.emit({"type": "stopped"})
                     return
                 try:
@@ -618,6 +645,20 @@ class AgentSession:
             call_id = tc.get("id") or fn.get("name", "")
             self.emit({"type": "tool_result", "id": call_id, "ok": False, "summary": reason})
             self.history.append({"role": "tool", "tool_call_id": call_id, "content": reason})
+
+    @staticmethod
+    def _call_signature(tc: dict) -> str:
+        """Stabilna sygnatura wywołania narzędzia (name + znormalizowane args) dla
+        bezpiecznika pętli. Args parsowane i re-serializowane z `sort_keys`, by drobne
+        różnice formatowania nie myliły licznika; fallback do surowego stringa."""
+        fn = tc.get("function", {}) or {}
+        name = fn.get("name", "")
+        raw = fn.get("arguments") or ""
+        try:
+            norm = json.dumps(json.loads(raw), sort_keys=True, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            norm = raw
+        return name + "\x00" + norm
 
     def _handle_tool_call(self, tc: dict, stop: Optional[Callable[[], bool]] = None) -> None:
         fn = tc.get("function", {}) or {}
