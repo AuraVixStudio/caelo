@@ -1726,6 +1726,48 @@ def test_reasoning_effort() -> None:
     check("B9: llm payload carries valid reasoning_effort", with_eff == "high")
     check("B9: llm payload omits invalid reasoning_effort", omitted)
 
+    # M19-B9 fix: reasoning_effort jest ZALEŻNY OD MODELU — grok-4 / grok-build-0.1 zwracają 4xx,
+    # gdy pole jest obecne. Agent PONAWIA wtedy raz BEZ niego (best-effort: tura nie pada).
+    fb_calls: list = []
+
+    class _RespFb:
+        def __init__(self, status, lines=()):
+            self.status_code = status
+            self._lines = list(lines)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise orig.HTTPError(str(self.status_code))
+
+        def iter_lines(self, decode_unicode=False):
+            return iter(self._lines)
+
+        def close(self):
+            pass
+
+    def _post_fb(url, **kw):
+        has_eff = "reasoning_effort" in (kw.get("json") or {})
+        fb_calls.append(has_eff)
+        if has_eff:
+            return _RespFb(400)  # model (np. grok-build-0.1) odrzuca reasoning_effort
+        return _RespFb(200, [b'data: {"choices":[{"delta":{"content":"hi"}}]}', b"data: [DONE]"])
+
+    _llm.requests = _types.SimpleNamespace(post=_post_fb, get=getattr(orig, "get", None),
+                                           HTTPError=orig.HTTPError)
+    try:
+        msg = _llm.stream_chat_with_tools("k", "http://x", [{"role": "user", "content": "hi"}],
+                                          "grok-build-0.1", 0.2, [], reasoning_effort="high")
+    finally:
+        _llm.requests = orig
+    check("B9: reasoning_effort 4xx -> retry WITHOUT it (turn survives unsupported model)",
+          msg.get("content") == "hi" and fb_calls == [True, False])
+
 
 def test_persona_io() -> None:
     """M19-B11: persona (instructions) + kontrakt I/O (inputs/outputs) — walidacja,

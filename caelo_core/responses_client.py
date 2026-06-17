@@ -312,20 +312,31 @@ def stream_response(
         payload: dict = {"model": model, "input": turn_input, "stream": True}
         if temperature is not None:
             payload["temperature"] = temperature
-        # M19-B9: reasoning_effort → `reasoning.effort` (tylko gdy poprawny — modele
-        # nie-rozumujące dostałyby 4xx; pole xAI weryfikowane live na maszynie usera).
+        # M19-B9: reasoning_effort → `reasoning.effort`, ale jest ZALEŻNY OD MODELU
+        # (grok-4.3 wspiera none/low/medium/high; grok-4 / grok-build-0.1 zwracają 4xx, gdy
+        # pole jest obecne — docs.x.ai). Wyślij tylko gdy poprawny i — gdy serwer odrzuci
+        # (400/422) — PONÓW raz bez niego (best-effort: tura nie pada na modelu bez wsparcia).
         eff = V.normalize_effort(reasoning_effort)
-        if eff:
-            payload["reasoning"] = {"effort": eff}
         if all_tools:
             payload["tools"] = all_tools
             if tool_choice and with_tool_choice:
                 payload["tool_choice"] = tool_choice
         output_items: List[dict] = []
-        with requests.post(
-            f"{base}/responses", headers=_headers(api_key), json=payload,
-            stream=True, timeout=TIMEOUT_RESPONSES,
-        ) as r:
+
+        def _open(send_effort: bool):
+            body = dict(payload)
+            if send_effort and eff:
+                body["reasoning"] = {"effort": eff}
+            return requests.post(f"{base}/responses", headers=_headers(api_key), json=body,
+                                 stream=True, timeout=TIMEOUT_RESPONSES)
+
+        r = _open(bool(eff))
+        if eff and getattr(r, "status_code", 200) in (400, 422):
+            log.info("model %s rejected reasoning.effort=%s (HTTP %s) — retrying without it",
+                     model, eff, getattr(r, "status_code", "?"))
+            r.close()
+            r = _open(False)
+        with r:
             r.raise_for_status()
             for raw in r.iter_lines(decode_unicode=False):
                 if stop_flag and stop_flag():

@@ -556,6 +556,10 @@ def _unit_commands_skills(checks: list) -> None:
         names = {c["name"] for c in reg.list_commands()}
         checks.append(("B4: builtins present",
                        {"plan", "review", "commit", "test", "mcp"} <= names))
+        checks.append(("TOP6: /pr command reviews a GitHub PR via gh (agent, posting gated)",
+                       "pr" in names and reg.get("pr")["target"] == "agent"
+                       and "gh pr diff" in reg.get("pr")["template"]
+                       and "123" in reg.expand("pr", "123")))
         plan = reg.get("plan")
         checks.append(("B4: /plan carries plan mode (drives gate)",
                        plan and plan.get("mode") == "plan" and plan.get("target") == "agent"))
@@ -590,6 +594,11 @@ def _unit_commands_skills(checks: list) -> None:
         checks.append(("B6: orchestration builtin skills discovered",
                        {"implement", "review", "design", "best-of-n",
                         "check-work", "pr-babysit"} <= ids))
+        prsk = sm.get_skill("pr-review")
+        checks.append(("TOP6: pr-review builtin skill discovered + uses gh/delegate (gated post)",
+                       "pr-review" in ids and prsk and prsk["builtin"] is True
+                       and "gh pr" in prsk["body"] and "delegate" in prsk["body"].lower()
+                       and "gh pr review" in prsk["body"]))
         sk = sm.get_skill("commit")
         checks.append(("B6: get_skill returns body + builtin flag",
                        sk and "commit" in sk["body"].lower() and sk["builtin"] is True))

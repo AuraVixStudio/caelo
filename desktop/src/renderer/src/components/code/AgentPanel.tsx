@@ -360,7 +360,6 @@ export function AgentPanel({
       setTeamReport(null)
       refreshFilesRef.current() // M19: spis plików/katalogów → @-odwołania
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, connected])
 
   // #3: tykający licznik czasu tury — żywy znak, że agent pracuje (nie zaciął się).
@@ -995,7 +994,7 @@ export function AgentPanel({
         <AttachmentChips items={att.attachments} onRemove={att.removeAttachment} className="mb-2" />
         <div className="flex items-center gap-2">
           <ModeSelector mode={mode} disabled={false} onSelect={setMode} />
-          <EffortSelect effort={effort} onSelect={setEffort} align="end" />
+          <EffortSelect effort={effort} onSelect={setEffort} align="end" model={model} />
           <AttachButton onPick={att.addFiles} disabled={!connected} className="h-8 w-8 rounded-lg" />
           <Textarea
             ref={taRef}

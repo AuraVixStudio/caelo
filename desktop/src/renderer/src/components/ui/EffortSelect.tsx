@@ -1,9 +1,10 @@
 // M19-B9: reasoning_effort selector (Auto / Low / Medium / High) shared by the chat
 // composer and the coding-agent composer. '' = Auto (the backend falls back to the
 // saved chat_effort / code_effort setting). Mirrors the ModeSelector dropdown style.
-import { Check, ChevronDown, Gauge } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, Gauge } from 'lucide-react'
 import type { ReasoningEffort } from '../../lib/api'
 import { cn } from '../../lib/cn'
+import { modelSupportsEffort } from '../../lib/modelCaps'
 import { Popover } from './Popover'
 
 interface EffortOption {
@@ -32,15 +33,23 @@ export function EffortSelect({
   onSelect,
   disabled = false,
   side = 'top',
-  align = 'start'
+  align = 'start',
+  model
 }: {
   effort: ReasoningEffort
   onSelect: (e: ReasoningEffort) => void
   disabled?: boolean
   side?: 'top' | 'bottom'
   align?: 'start' | 'end'
+  // Wybrany model — wskazówka, czy wspiera reasoning_effort (ostrzeżenie, gdy nie).
+  model?: string
 }) {
   const cur = optionFor(effort)
+  // Faza-G: model nie wspiera reasoning_effort → effort będzie zignorowany (backend
+  // gracefully ponawia bez niego). `warnIgnored` = na triggerze pokaż, że bieżący (≠Auto)
+  // wybór nic nie da; `unsupported` = w dropdownie wyjaśnij, że tryby Low/Med/High są no-op.
+  const unsupported = !!model && !modelSupportsEffort(model)
+  const warnIgnored = unsupported && !!effort
   return (
     <Popover
       label="Reasoning effort"
@@ -50,7 +59,9 @@ export function EffortSelect({
         <button
           type="button"
           disabled={disabled}
-          aria-label={`Reasoning effort: ${cur.label}`}
+          aria-label={`Reasoning effort: ${cur.label}${
+            warnIgnored ? ' — not supported by the selected model (ignored)' : ''
+          }`}
           onClick={toggle}
           className={cn(
             'inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-xs text-fg transition-colors',
@@ -59,8 +70,9 @@ export function EffortSelect({
           )}
           {...triggerProps}
         >
-          <Gauge size={14} />
-          <span className="max-w-[56px] truncate">{cur.short}</span>
+          <Gauge size={14} className={cn(warnIgnored && 'text-warn')} />
+          <span className={cn('max-w-[56px] truncate', warnIgnored && 'text-warn')}>{cur.short}</span>
+          {warnIgnored ? <AlertTriangle size={12} className="shrink-0 text-warn" /> : null}
           <ChevronDown size={12} className="opacity-60" />
         </button>
       )}
@@ -91,6 +103,12 @@ export function EffortSelect({
               </div>
             </button>
           ))}
+          {unsupported ? (
+            <div className="mt-1 flex items-start gap-1.5 border-t border-border px-2.5 pb-1 pt-2 text-[11px] text-warn">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{model} ignores reasoning effort — it uses the model default.</span>
+            </div>
+          ) : null}
         </div>
       )}
     </Popover>

@@ -296,7 +296,11 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   ([`caelo_core/memory.py`](caelo_core/memory.py) + [`embeddings.py`](caelo_core/embeddings.py): `/v1/embeddings`
   + an `event_embeddings` table with kNN/`hybrid_search` in `history_store`, injected via `session._maybe_inject_memory`).
 - **Tier-3 DONE** ([`docs/plans/PLAN_M19_TIER3.md`](docs/plans/PLAN_M19_TIER3.md), quick-wins): **B9 effort** (`reasoning.effort`
-  in `responses_client`/`llm`, per-role + `EffortSelect.tsx`), **B10 export-md + auto-compact** (`lib/exportMarkdown.ts`,
+  in `responses_client`/`llm`, per-role + `EffortSelect.tsx`; **reasoning_effort is MODEL-DEPENDENT** —
+  grok-4.3 / grok-4.20-*reasoning support `none/low/medium/high`, but grok-4 / grok-build-* / grok-3 (non-mini)
+  return 4xx if it's sent, so **both clients retry ONCE without it on 400/422** — effort is best-effort and a turn
+  never breaks on an unsupporting model; the UI warns via `lib/modelCaps.modelSupportsEffort` in `EffortSelect`),
+  **B10 export-md + auto-compact** (`lib/exportMarkdown.ts`,
   `/history/export`, `--export-md`; deterministic `compact_history`, off by default), **B11 personas + I/O contract**
   (`roles.py` instructions/inputs/outputs → subagent `extra_system`), **B12 real git worktree** (`worktree.py`
   `use_git` branch, used by `team.py`), **B13 web_fetch** (`tools.web_fetch`, https-only + SSRF guard; `web_search`

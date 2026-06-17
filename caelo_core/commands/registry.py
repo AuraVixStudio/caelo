@@ -68,6 +68,21 @@ BUILTIN_COMMANDS: list[dict] = [
      "description": "Improve the performance of the given code/area, keeping behavior identical.",
      "template": ("Improve the performance of the following code/area. Measure or reason about the "
                   "hot path first, keep behavior identical, and verify nothing regressed:\n\n{input}")},
+    # Faza-G/TOP6: recenzja PR z GitHuba przez `gh`. Odczyt (`gh pr view/diff`) i ewentualna
+    # publikacja recenzji (`gh pr review`) idą przez `run_command` → bramkę zatwierdzania.
+    {"name": "pr", "target": "agent",
+     "description": "Review a GitHub pull request via the gh CLI (findings only; posting is gated).",
+     "template": ("Review a GitHub pull request using the `gh` CLI. The PR (number or URL) and any "
+                  "focus areas: {input}\n\n"
+                  "1. Read the PR: run `gh pr view <number> --json "
+                  "title,body,headRefName,baseRefName,files` and `gh pr diff <number>` via "
+                  "run_command. 2. Review the diff for correctness bugs, security issues, edge cases "
+                  "and quality — each finding with a `file:line` reference and a short rationale. "
+                  "3. Reply with one prioritized list (most severe first). Do NOT post anything to "
+                  "GitHub unless I explicitly ask; if I do, use `gh pr review` "
+                  "(--comment / --request-changes / --approve), which goes through approval. "
+                  "Requires the `gh` CLI installed and authenticated with `gh auth login` (env "
+                  "tokens like GH_TOKEN are stripped from the command environment for safety).")},
 ]
 
 

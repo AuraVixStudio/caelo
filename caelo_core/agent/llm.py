@@ -7,11 +7,14 @@ Dekoduje SSE jawnie jako UTF-8 (zasada z legacy — inaczej mojibake polskich zn
 from __future__ import annotations
 
 import json
+import logging
 from typing import Callable, List, Optional
 
 import requests  # type: ignore
 
 from caelo_core import validation as V
+
+log = logging.getLogger(__name__)
 
 
 def stream_chat_with_tools(
@@ -33,24 +36,37 @@ def stream_chat_with_tools(
         "tools": tools,
         "tool_choice": "auto",
     }
-    # M19-B9: reasoning_effort dla modeli rozumujących. Pole DOKŁADANE tylko gdy
-    # poprawne (low/medium/high) — na krytycznej ścieżce agenta złe pole = 4xx co tura,
-    # a wariant pola (chat/completions) potwierdza user na żywo (jak `include_usage`).
+    # M19-B9: reasoning_effort jest ZALEŻNY OD MODELU — grok-4.3 wspiera (none/low/medium/
+    # high), ale grok-4 / grok-build-0.1 zwracają 4xx, gdy pole jest obecne (docs.x.ai). Dlatego
+    # wysyłamy je tylko gdy poprawne i — gdy serwer odrzuci żądanie (400/422) — PONAWIAMY raz
+    # bez niego: effort jest „best-effort", nie wywraca tury na modelu, który go nie wspiera.
+    # 4xx przychodzi przed streamingiem (treść jeszcze pusta), więc ponowienie jest czyste.
     eff = V.normalize_effort(reasoning_effort)
-    if eff:
-        payload["reasoning_effort"] = eff
     # M17-B6: NIE dokładamy `stream_options.include_usage` do payloadu — to nowy parametr
     # na krytycznej ścieżce agenta, której nie da się zweryfikować w sandboxie (TLS),
     # a 400 zepsułby każdą turę. Jeśli serwer i tak wyśle `usage` w strumieniu — zbierzemy
     # je niżej (telemetria tokenów); telemetria tur/narzędzi (B6) działa niezależnie.
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+    def _open(send_effort: bool):
+        body = dict(payload)
+        if send_effort and eff:
+            body["reasoning_effort"] = eff
+        return requests.post(f"{base_url}/chat/completions", headers=headers, json=body,
+                             stream=True, timeout=600)
+
     content = ""
     tool_calls: dict[int, dict] = {}
     usage: Optional[dict] = None
 
-    with requests.post(f"{base_url}/chat/completions", headers=headers, json=payload,
-                       stream=True, timeout=600) as r:
+    r = _open(bool(eff))
+    if eff and getattr(r, "status_code", 200) in (400, 422):
+        log.info("model %s rejected reasoning_effort=%s (HTTP %s) — retrying without it",
+                 model, eff, getattr(r, "status_code", "?"))
+        r.close()
+        r = _open(False)
+
+    with r:
         r.raise_for_status()
         for raw in r.iter_lines(decode_unicode=False):
             if stop_flag and stop_flag():

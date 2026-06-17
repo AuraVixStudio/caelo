@@ -386,7 +386,7 @@ Zaczynać od pozycji `S` (gotowa infrastruktura). Każda z **definicją „done"
 | 🟡 **TOP2** | Auto-update + code signing — **🤖-część zrobiona** | S/M+M | auto-update (electron-updater + feed GitHub Releases) wpięty już w M15-8; 2026-06-13 dodano: guard `release.yml` (`--publish never`+artifact — CI nie wypchnie niepodpisanego), szablon podpisu SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w `build_sidecar.ps1` (+BOM). **👤-reszta** (cert SimplySign CN/Thumbprint, remote, lokalny podpisany release) → [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md) Krok 6 | ROAD-3.6-a |
 | ✅ **TOP4** | Katalog MCP one-click — **ZROBIONE** | S/M | kurowany `mcp/catalog.py` (7 serwerów: filesystem/memory/sequential-thinking/everything/github/playwright/brave-search) → `GET /mcp/catalog`; UI „Catalog" w `McpServers.tsx` (one-click + inputy ścieżka/token, podgląd komendy = consent). „Install" reużywa `POST /mcp` z `enabled=False` (**install ≠ autostart**); start = osobna, potwierdzana akcja. Testy: `mcp_check` `test_catalog` (5) + `api_smoke` (route, niezasłonięty przez `/{sid}`) + `mcpCatalog.test.ts` (5) | M16/M14 |
 | ✅ **TOP5** | Artefakty HTML/SVG (sandbox iframe) — **ZROBIONE** (mermaid odłożony) | M | `lib/artifacts.ts` (`buildArtifactSrcDoc`: wstrzyknięty CSP + auto-resize + wrap SVG) + `ArtifactFrame.tsx` (iframe `sandbox="allow-scripts"` BEZ `same-origin` → opaque origin; toggle Preview/Code); `Markdown.tsx` routuje bloki ```html```/```svg``` → artefakt. Bezpieczeństwo: brak dostępu do rodzica/tokenu, CSP blokuje sieć/skrypty zewn./formularze. **Mermaid odłożony** (CSP blokuje skrypt z CDN, a bundlowanie = `npm install mermaid`). Testy: `artifacts.test.ts` (5) + `Markdown.test.tsx` (+4 integ.) | — |
-| ⬜ **TOP6** | Recenzja PR przez `gh` | M | `/review` + `run_command` + skill `pr-babysit`; mutacje przez bramkę | `gh` u usera |
+| ✅ **TOP6** | Recenzja PR przez `gh` — **ZROBIONE** | M | wbudowana komenda `/pr` (review PR przez `gh pr view`/`gh pr diff`; findings z `file:line`) + skill `pr-review` (multi-agent: `delegate` reviewerów po obszarach → konsolidacja → opcjonalny post). Odczyt i publikacja (`gh pr review`) idą przez `run_command` → **bramka zatwierdzania** (mutacje gated). Pułapka udokumentowana: scrubbed env (P0-6) strippuje `GH_TOKEN` → wymaga `gh auth login`. Testy: `api_smoke` `_unit_commands_skills` (2). ⚠️ realny `gh` u usera | `gh` u usera |
 | ⬜ **TOP7** | Rewind/edycja wiadomości czatu | M | lokalny `useConversations`; **po P1-H i P1-I** | P1-H, P1-I |
 | ⬜ **TOP8** | Inline Ctrl-K w CodeMirror | M | CM6 decoration API; przy okazji `langFor` useMemo (S35-k) | — |
 | ⬜ **TOP9** | Auto-pamięć użytkownika | M | M19-B8 embeddings/`memory.py` istnieją; brak ekstrakcji+UI (opt-in!) | M19-B8 |
@@ -429,8 +429,26 @@ z toggle Preview/Code i auto-resize. Bezpieczeństwo: `sandbox="allow-scripts"` 
 Walidacja: `artifacts.test.ts` (5) + `Markdown.test.tsx` (+4 integ.: iframe/sandbox/CSP/toggle) ·
 typecheck/lint czyste. ⚠️ **Mermaid odłożony** (CSP blokuje CDN; bundlowanie wymaga `npm install
 mermaid` — psułoby `npm ci`/typecheck bez instalacji). ⚠️ Wizualny render potwierdza user (devMock
-nie mockuje strumienia czatu → artefakt nieobserwowalny w `preview:web`). Pozostałe TOP-6…10 +
-ROAD-4.2-a do zrobienia.
+nie mockuje strumienia czatu → artefakt nieobserwowalny w `preview:web`).
+
+✅ **TOP6** — **ZROBIONE** (2026-06-13): wbudowana komenda `/pr` (recenzja PR z GitHuba przez
+`gh pr view`/`gh pr diff` → findings z `file:line`) + skill `pr-review` (multi-agent: `delegate`
+reviewerów → konsolidacja → opcjonalny `gh pr review`). Wszystkie wywołania `gh` (odczyt i
+publikacja recenzji) idą przez `run_command` → bramkę zatwierdzania (mutacje gated). Komenda
+auto-pojawia się w composerze (fetch `/commands`), skill auto-podchwycony (glob `skills/builtin/`).
+Udokumentowana pułapka: scrubbed env (P0-6) strippuje `GH_TOKEN`/`GITHUB_TOKEN` → `gh` musi być
+uwierzytelniony przez `gh auth login` (config/keyring), nie zmienną env. Walidacja: `api_smoke`
+`_unit_commands_skills` (2 asercje: komenda + skill) · RESULT OK. ⚠️ Realny przebieg `gh` potwierdza
+user (sandbox blokuje sieć/exec; `gh` u usera).
+
+🔧 **Fix LIVE — reasoning_effort zależny od modelu** (2026-06-13, z testów usera): tryby Low/Med/High
+dawały „Agent error" na `grok-build-0.1` (tylko Auto działał). Diagnoza (docs.x.ai): `reasoning_effort`
+wspierają tylko niektóre modele (grok-4.3, grok-4.20-*reasoning); grok-4/grok-build/grok-3 zwracają 4xx.
+Naprawa: oba klienty (`agent/llm.py` chat/completions + `responses_client.py` /responses) **ponawiają raz
+BEZ pola na 400/422** — effort jest best-effort, tura nie pada na modelu bez wsparcia. UI: `lib/modelCaps.
+modelSupportsEffort` + ostrzeżenie w `EffortSelect` (trigger warn + nota „ignores reasoning effort"), żeby
+user wiedział przy wyborze modelu. Testy: `agent_selfcheck` (fallback 4xx) · front `modelCaps.test.ts` (4) +
+`EffortSelect.test.tsx` (3). Pozostałe TOP-7…10 + ROAD-4.2-a do zrobienia.
 
 **Strategicznie #1 długoterminowo (poza TOP-10):** ⬜ **ROAD-4.2-a** `[M/L]` — inni dostawcy
 LLM / modele lokalne przez `base_url`-override w cienkim `responses_client` (mitygacja ryzyka
