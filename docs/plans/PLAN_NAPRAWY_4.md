@@ -216,26 +216,25 @@ Kolejność dowolna (pozycje niezależne); P1-D i P1-E są warunkiem zielonego `
 
 Kolejność jest **własnością bezpieczeństwa** (scan-before-public nieprzekraczalny).
 
-1. ⬜ **ROAD-3.6-a** `[S]` — utworzyć **remote** (prywatny) na GitHub, wypchnąć
-   `m15-oss-crossplatform` + `main`. **Sama obecność remote zdejmuje ryzyko jedynej kopii na
-   jednym dysku.** Pierwszy realny bieg `ci.yml` (3×OS), naprawić środowiskowe zgrzyty.
-2. ⬜ **ROAD-3.6-d** `[S]` — zacommitować niezacommitowane stawki per-model w
-   [`genjobs.py`](../../caelo_core/genjobs.py) **razem z fixem** kosztu `video/edit|extend`
-   (`:74` używa `duration=6` bezwarunkowo; dla edit/extend wynik zachowuje długość źródła).
-   Test: `genjobs_check` — `estimate_cost('video','edit',{źródło>6s})` ≠ `rate*6`.
-   Zostawić `estimate_cost` czyste (bez importu `api_manager`/`state`).
-3. ⬜ **ROAD-3.6-e** `[S]` — zdecydować los `files/` (→ `assets/brand/` zgodnie z
-   `caelo-brand-assets`, lub `.gitignore`); zacommitować `docs/guides/USER_GUIDE.md` +
-   `docs/README.md`.
-4. ⬜ **ROAD-3.6-b** `[S]` — **gitleaks na PEŁNEJ historii** (wszystkie commity/gałęzie) PRZED
-   upublicznieniem. Znaleziska → `filter-repo` + rotacja sekretu. Public dopiero po czystym wyniku.
-5. ⬜ **ROAD-3.6-f** `[S]` — `pip install -r requirements-dev.txt` w venv (na maszynie usera /
-   z zaufanym CA korpo — pułapka TLS) → `pytest caelo_core/tests -v` zielone; wpiąć krok pytest
-   w CI. Domyka `0.4` z `PLAN_WERYFIKACJI_LIVE`.
+> **Stan 2026-06-17: Faza B w większości DOMKNIĘTA** — kroki 1–5 ✅; zostaje tylko krok 6
+> (podpis SimplySign, wymaga certu). Pełny runbook + notki sesji:
+> [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md).
+
+1. ✅ **ROAD-3.6-a** `[S]` — **ZROBIONE 2026-06-17:** remote `AuraVixStudio/caelo` (prywatny),
+   wypchnięto `m15-oss-crossplatform` + `main`, **CI na `main` zielone**. + przepisanie historii git
+   (`git-filter-repo`, 74 commity → autor `AuraVix Studio`, usunięte `Co-authored-by:`).
+2. ✅ **ROAD-3.6-d** `[S]` — **ZROBIONE** (commit `664e713`, Krok 0): fix kosztu `video/edit|extend`
+   + stawki per-model w [`genjobs.py`](../../caelo_core/genjobs.py); `estimate_cost` czyste.
+3. ✅ **ROAD-3.6-e** `[S]` — **ZROBIONE** (commit `664e713`, Krok 0): `files/` → `.gitignore`,
+   `docs/guides/USER_GUIDE.md` + `docs/README.md` zacommitowane.
+4. ✅ **ROAD-3.6-b** `[S]` — **SKAN CZYSTY 2026-06-17:** gitleaks 8.30.1 → `74 commits, 0 leaks`.
+   ⏸️ **Public ODŁOŻONE** (decyzja usera — repo pozostaje prywatne; bramka „scan-before-public" spełniona).
+5. ✅ **ROAD-3.6-f** `[S]` — **ZROBIONE 2026-06-17:** `pytest caelo_core/tests` → `13 passed`
+   (krok już w CI). ⚠️ pułapka: `Scripts\pip.exe` `Fatal error in launcher` → `python.exe -m pip`.
 6. ⬜ **ROAD-TOP2 / ROAD-3.6-c** `[S/M + M]` — `electron-updater` + GitHub Releases jako kanał
-   aktualizacji; **podpisywanie** powłoki Electron i exe sidecara (kandydat: Azure Trusted
-   Signing); sekrety w `release.yml`. DoD: podpisany instalator oferuje auto-update, SmartScreen
-   nie ostrzega. **Zależność:** po ROAD-3.6-a.
+   aktualizacji; **podpisywanie** powłoki Electron i exe sidecara (SimplySign — cert chmurowy, podpis
+   lokalny); sekrety w `release.yml`. DoD: podpisany instalator oferuje auto-update, SmartScreen
+   nie ostrzega. **Jedyny otwarty krok Fazy B — wymaga certu SimplySign.**
 
 ---
 

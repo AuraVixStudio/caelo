@@ -22,7 +22,7 @@
 
 | # | Blok | Priorytet | Kto | Skrót |
 |---|---|---|---|---|
-| 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | remote → CI → gitleaks pełnej historii → public → podpisany release + auto-update |
+| 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | 🟡 remote+CI+gitleaks+pytest ✅ (2026-06-17, repo prywatne); **zostaje B-4** podpisany release + auto-update (cert SimplySign) |
 | 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | sekcje D (głos), E-reszta, F (subagenci), G (MCP/headless/ACP/LSP), H (funkcje-widma — decyzja), I (pakiety), J (cross-platform), K (terminal) |
 | 3 | **Nowe funkcje TOP-10** | P2/P3 | 🤖 | TOP7 rewind czatu, TOP8 inline Ctrl-K, TOP9 auto-pamięć usera, TOP10 background-agents |
 | 4 | **Motywy inżynierskie 4.1** | P2/P3 | 🤖 | odporność (4.1-c), wydajność (4.1-b), API total/cost (4.1-e), /genjobs WS-push (4.1-f) |
@@ -31,27 +31,28 @@
 
 ---
 
-## 1. Publikacja — Faza B  🔴 P1 (największe ryzyko wg SWOT)
+## 1. Publikacja — Faza B  🟡 P1 (w większości DOMKNIĘTA 2026-06-17)
 
 > **Pełny runbook:** [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md). Kolejność jest
 > **własnością bezpieczeństwa** — `scan-before-public` nieprzekraczalny.
 > **Decyzje (2026-06-12):** repo `AuraVixStudio/caelo` (organizacja); code signing = Asseco
 > **SimplySign** (cert w chmurze → podpis **lokalny**, nie w CI).
+>
+> **Stan 2026-06-17:** B-1/B-2/B-3 ✅ — **remote istnieje, CI zielone, gitleaks czysty, pytest zielony**
+> (ryzyko „jedyna kopia / OSS bez repo" zdjęte). Repo **prywatne** (public świadomie odłożone).
+> Zostaje **tylko B-4** (podpisany release — wymaga certu SimplySign).
 
-- [ ] **B-1 · ROAD-3.6-a — remote + push + 1. bieg CI** `[S]` 👤
-  - `gh repo create AuraVixStudio/caelo --private --source=. --remote=origin --push`; push `main` +
-    `m15-oss-crossplatform`. Sama obecność remote zdejmuje ryzyko jedynej kopii.
-  - **Gitleaks dla organizacji:** `gitleaks-action@v2` jest płatny dla org → albo dodaj darmowy
-    `GITLEAKS_LICENSE` (sekret repo), albo poproś o patch `ci.yml` na bezpośrednią binarkę gitleaks.
-  - **DoD:** obie gałęzie wypchnięte; CI na `main` zielone (joby: secrets/backend 3×OS/frontend/e2e).
-- [ ] **B-2 · ROAD-3.6-b — gitleaks na PEŁNEJ historii → public** `[S]` 👤
-  - `gitleaks detect --source . --config .gitleaks.toml --log-opts="--all" --redact -v`. Czysto →
-    `gh repo edit … --visibility public`. Znaleziska → `git filter-repo` + **rotacja** sekretu, skan ponownie.
-  - **DoD:** gitleaks czysty na całej historii; repo publiczne.
-- [ ] **B-3 · ROAD-3.6-f — dev-deps + pytest lokalnie** `[S]` 👤
-  - `pip install -r caelo_core\requirements-dev.txt` (TLS: dołóż trusted CA) → `pytest caelo_core\tests -v`.
-    Krok pytest jest już w `ci.yml`; chodzi o potwierdzenie zielonego lokalnie. Domyka `0.4` z `PLAN_WERYFIKACJI_LIVE`.
-- [ ] **B-4 · ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release** `[S/M]` 🟡 👤+🤖
+- [x] **B-1 · ROAD-3.6-a — remote + push + 1. bieg CI** `[S]` 👤 — **✅ ZROBIONE 2026-06-17**
+  - Remote `AuraVixStudio/caelo` (prywatne); wypchnięto `m15-oss-crossplatform` (1743 obiekty, 1.82 MiB) + `main`;
+    **CI na `main` zielone** (job „CI" 1m 29s + Dependency Graph). Gitleaks org-license nie był potrzebny.
+  - **+ przepisanie historii git:** `git-filter-repo` 2.47.0 — 74 commity, autor → `AuraVix Studio <auravix@auravixstudio.com>`, usunięte trailery `Co-authored-by:`, force-push. (Szczegóły: `PLAN_FAZA_B_RUNBOOK.md`.)
+- [x] **B-2 · ROAD-3.6-b — gitleaks na PEŁNEJ historii** `[S]` 👤 — **✅ SKAN CZYSTY 2026-06-17** · ⏸️ public odłożone
+  - gitleaks 8.30.1: `74 commits scanned, no leaks found`. **Repo pozostaje PRYWATNE** (decyzja usera —
+    upublicznienie to osobna, świadoma decyzja na później; bramka „scan-before-public" spełniona).
+- [x] **B-3 · ROAD-3.6-f — dev-deps + pytest lokalnie** `[S]` 👤 — **✅ ZROBIONE 2026-06-17**
+  - pytest 9.1.0 → `13 passed in 17.16s`. Domyka `0.4` z `PLAN_WERYFIKACJI_LIVE`. ⚠️ pułapka: `Scripts\pip.exe`
+    rzucał `Fatal error in launcher` → użyć `python.exe -m pip` (zepsuty shim po odtworzeniu venv).
+- [ ] **B-4 · ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release** `[S/M]` 🟡 👤+🤖 — **jedyny otwarty krok Fazy B (wymaga certu SimplySign)**
   - 🤖 zrobione (2026-06-13): guard `release.yml` (`--publish never` + artifact), szablon podpisu
     SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w `build_sidecar.ps1`.
   - 👤 zostaje: `npm install electron-updater` (utrwalenie w locku), setup SimplySign Desktop,

@@ -49,8 +49,8 @@ Legenda statusu: ⬜ nie zaczęte · 🟡 częściowe · ✅ działa · ❌ nie 
   - **OAuth (testuje pełny przepływ logowania):** zaloguj się w apce (sekcja A1).
 - [ ] **0.2 — Backend venv gotowy:** `caelo_core\.venv\Scripts\python.exe -c "import fastapi, uvicorn; print('ok')"`.
 - [ ] **0.3 — Frontend deps:** `cd desktop; npm install` (jeśli jeszcze nie). Powrót: `cd ..`.
-- [ ] **0.4 — (opcjonalnie) pełny pytest:** `caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt`
-      → potem `caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v` (powinno być zielone offline).
+- [x] **0.4 — pełny pytest:** ✅ 2026-06-17 — `13 passed in 17.16s` (pytest 9.1.0). ⚠️ `Scripts\pip.exe`
+      `Fatal error in launcher` → instaluj przez `.venv\Scripts\python.exe -m pip install …`.
 - [ ] **0.5 — (opcjonalnie) E2E + Terminal:** `cd desktop; npx playwright install chromium` ·
       `caelo_core\.venv\Scripts\pip install pywinpty` (Terminal — sekcja K).
 - [ ] **0.6 — Baseline offline (sanity przed live):** uruchom self-checki — muszą być zielone PRZED testami live, by odróżnić regresję od problemu z API:

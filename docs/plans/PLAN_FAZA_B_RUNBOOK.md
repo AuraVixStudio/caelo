@@ -29,17 +29,32 @@
 
 ---
 
-## Status na 2026-06-12
+## Status na 2026-06-17
+
+> **Sesja publikacji 2026-06-17 (👤):** wykonano Kroki **1, 4, 5** + przepisanie historii git.
+> Pozostaje tylko **Krok 6** (SimplySign — wymaga certu). Repo **pozostaje prywatne** (decyzja
+> użytkownika — nie upubliczniać na tym etapie, mimo czystego gitleaks).
 
 | Krok | Pozycja | Status |
 |---|---|---|
 | 0 | Prep w kodzie (genjobs cost, files gitignore, repo wiring, bump) | ✅ **ZROBIONE** — commit `664e713` |
-| 1 | ROAD-3.6-a — remote + push + 1. CI | ⬜ |
+| 1 | ROAD-3.6-a — remote + push + 1. CI | ✅ **ZROBIONE 2026-06-17** (remote + obie gałęzie + CI zielone) |
 | 2 | ROAD-3.6-d — koszt video/edit\|extend | ✅ (wchłonięte w Krok 0) |
 | 3 | ROAD-3.6-e — los `files/` + docs | ✅ (wchłonięte w Krok 0) |
-| 4 | ROAD-3.6-b — gitleaks pełnej historii → public | ⬜ |
-| 5 | ROAD-3.6-f — dev-deps + pytest | ⬜ |
-| 6 | ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release | 🟡 🤖-część zrobiona (2026-06-13: guard `release.yml` + szablon podpisu + hook sidecara); 👤-reszta ⬜ |
+| 4 | ROAD-3.6-b — gitleaks pełnej historii → public | ✅ **skan czysty 2026-06-17** (74 commity, 0 leaks); ⏸️ **public ODŁOŻONE** (repo prywatne — decyzja usera) |
+| 5 | ROAD-3.6-f — dev-deps + pytest | ✅ **ZROBIONE 2026-06-17** (pytest 13 passed) |
+| 6 | ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release | 🟡 🤖-część zrobiona (2026-06-13: guard `release.yml` + szablon podpisu + hook sidecara); 👤-reszta ⬜ (wymaga certu SimplySign) |
+
+### Przepisanie historii git (dodatkowe, 2026-06-17) ✅
+
+Poza runbookiem, w tej samej sesji ujednolicono autorstwo repozytorium:
+- `git-filter-repo` 2.47.0 — przepisano autorów **wszystkich 74 commitów**:
+  `grooverpty <grooverpty@gmail.com>` → **`AuraVix Studio <auravix@auravixstudio.com>`**.
+- Usunięto trailery `Co-authored-by:` z wiadomości commitów.
+- Force-push obu gałęzi po przepisaniu; lokalny `git config` ustawiony na
+  `user.name = AuraVix Studio`, `user.email = auravix@auravixstudio.com`.
+- ⚠️ GitHub nadal pokazuje „and claude" przy ostatnim commicie — to **wizualny element GitHuba**
+  (powiązanie konta z trailerem w cache UI), niezależny od przepisanej historii git. Zaakceptowane (Opcja A).
 
 ---
 
@@ -72,7 +87,12 @@ a `npm ci` wymaga zgodności lockfile↔package.json (regeneracja wymaga sieci/T
 
 ---
 
-## Krok 1 — Remote + push + pierwszy bieg CI (👤) · ROAD-3.6-a
+## Krok 1 — Remote + push + pierwszy bieg CI (👤) · ROAD-3.6-a · ✅ ZROBIONE 2026-06-17
+
+> **✅ Wykonano 2026-06-17:** `gh` v2.94.0 (winget), zalogowany jako **AuraVixStudio**; remote
+> `https://github.com/AuraVixStudio/caelo.git`; wypchnięto **`m15-oss-crossplatform`** (1743 obiekty,
+> 1.82 MiB) i **`main`**; **CI na `main` zielone** (job „CI" 1m 29s ✅ + Dependency Graph ✅).
+> Repo **prywatne**. (Gitleaks org-license nie był potrzebny — CI przeszło.)
 
 > **Cel:** sama obecność remote zdejmuje ryzyko „jedyna kopia na jednym dysku" (SWOT #1). Repo zostaje
 > **PRYWATNE** do czasu czystego gitleaks (Krok 4).
@@ -113,7 +133,11 @@ Fix kosztu `video/edit|extend` + test jadą w commicie `664e713`. Nic dodatkoweg
 
 ---
 
-## Krok 4 — gitleaks na PEŁNEJ historii PRZED public (👤) · ROAD-3.6-b
+## Krok 4 — gitleaks na PEŁNEJ historii PRZED public (👤) · ROAD-3.6-b · ✅ SKAN CZYSTY 2026-06-17
+
+> **✅ Wykonano 2026-06-17:** gitleaks **8.30.1** (scoop) → `74 commits scanned, no leaks found`.
+> ⏸️ **Upublicznienie ODŁOŻONE** — decyzja użytkownika: repo **pozostaje prywatne** na tym etapie
+> (bramka „scan-before-public" spełniona, ale public to osobna, świadoma decyzja na później).
 
 > **Nieprzekraczalna bramka „scan-before-public".** Repo zostaje **prywatne**, dopóki wynik nie jest czysty.
 > To skan LOKALNY binarką (pełna kontrola), niezależny od joba CI.
@@ -140,7 +164,16 @@ Config skanu: [`.gitleaks.toml`](../../.gitleaks.toml) (already-allowlisted: `.e
 
 ---
 
-## Krok 5 — dev-deps + pytest lokalnie (👤) · ROAD-3.6-f
+## Krok 5 — dev-deps + pytest lokalnie (👤) · ROAD-3.6-f · ✅ ZROBIONE 2026-06-17
+
+> **✅ Wykonano 2026-06-17:** pytest **9.1.0** zainstalowany do venv → **`13 passed in 17.16s`**
+> (wszystkie suity przez `caelo_core/tests/test_selfchecks.py`). Domyka `0.4` z
+> [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md).
+>
+> ⚠️ **Pułapka (workaround):** launcher `.venv\Scripts\pip.exe` rzucał `Fatal error in launcher`
+> (typowe po przeniesieniu/odtworzeniu venv — zaszyta ścieżka w shim `.exe`). Obejście: instaluj
+> przez **`.venv\Scripts\python.exe -m pip install …`** (omija zepsuty shim). Dotyczy też innych
+> `Scripts\*.exe` launcherów — używaj `python -m <moduł>`.
 
 ```powershell
 # TLS-interception: dołóż --trusted-host pypi.org --trusted-host files.pythonhosted.org
@@ -257,10 +290,10 @@ npx --no-install electron-builder --win --publish always
 | # | Krok | Kto | Bramka (DoD) |
 |---|------|-----|--------------|
 | 0 | Prep w kodzie | 🤖 ✅ | suity zielone (commit `664e713`) |
-| 1 | Remote + push + 1. CI (+ gitleaks org-license) | 👤 | CI zielone |
-| 4 | gitleaks pełnej historii → **public** | 👤 | wynik czysty, repo public |
-| 5 | pip dev-deps + pytest lokalnie | 👤 | pytest zielony |
-| 6 | electron-updater + podpis SimplySign + tag + release | 👤+🤖 | podpisany release + auto-update |
+| 1 | Remote + push + 1. CI | 👤 ✅ | CI zielone (2026-06-17) |
+| 4 | gitleaks pełnej historii | 👤 ✅ | skan czysty (74 commity, 0 leaks); ⏸️ public odłożone (repo prywatne) |
+| 5 | pip dev-deps + pytest lokalnie | 👤 ✅ | pytest zielony (13 passed, 2026-06-17) |
+| 6 | electron-updater + podpis SimplySign + tag + release | 👤+🤖 ⬜ | podpisany release + auto-update (wymaga certu SimplySign) |
 
 (Kroki 2 i 3 wchłonięte przez Krok 0.)
 
