@@ -8,7 +8,7 @@
 > Pierwotnie PROPOZYCJA (2026-06-03) — wynik gruntownej analizy kodu (backend, silnik agenta,
 > frontend Electron/React, pakowanie/dokumentacja). Realne ścieżki sieciowe xAI (czat/media/głos/OAuth/
 > przebieg agenta) weryfikuje użytkownik z ważnymi poświadczeniami — sandbox blokuje TLS do `api.x.ai`.
-> **Powiązane:** [`REBUILD_PLAN.md`](REBUILD_PLAN.md) (Fazy 0–8), [`MODYFIKACJE.md`](MODYFIKACJE.md) (Voice/Image/Video/załączniki).
+> **Powiązane:** [`REBUILD_PLAN.md`](../REBUILD_PLAN.md) (Fazy 0–8), [`MODYFIKACJE.md`](MODYFIKACJE.md) (Voice/Image/Video/załączniki).
 > **Cel:** doprowadzić działający prototyp (8 faz + nadbudowa) do jakości produkcyjnej, zaczynając
 > od bezpieczeństwa silnika agenta kodowania.
 
@@ -493,7 +493,7 @@ To serce aplikacji (LLM ma dostęp do plików i powłoki) — tu naprawiamy najp
   stubem `requests.Response`; rozszerzyć `api_smoke.py` o trasy voice/media (shape+auth); test-strażnik,
   że zapis ustawień nie rusza `grok_config.json`. Naprawić `api_smoke._ws_check` (fałszywy „pass" przy
   braku `websockets`).
-- **✅ Zrobione (2026-06-04):** (1) **GitHub Actions** — nowy [`.github/workflows/ci.yml`](../.github/workflows/ci.yml):
+- **✅ Zrobione (2026-06-04):** (1) **GitHub Actions** — nowy [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml):
   job **backend** (`windows-latest`, Python 3.11 — środowisko docelowe: `cmd.exe`/`pywinpty`/tree-kill)
   uruchamia `handshake_check.py` + `api_smoke.py` + `agent_selfcheck.py`; job **frontend**
   (`ubuntu-latest`, Node 22) `npm ci` + `npm run typecheck`. `concurrency: cancel-in-progress`,
@@ -524,10 +524,10 @@ To serce aplikacji (LLM ma dostęp do plików i powłoki) — tu naprawiamy najp
 - **✅ Zrobione (2026-06-04):** Zakotwiczono w `.gitignore` `build/`→`/build/`, `dist/`→`/dist/`,
   `Output/`→`/Output/` (do KORZENIA repo) — wcześniej nieanchored `build/` łapał też `desktop/build/`
   i ignorował **ikonę instalatora** (`desktop/build/icon.ico`, czyli electron-builder `buildResources`
-  z [`desktop/electron-builder.yml`](../desktop/electron-builder.yml)), więc świeży klon budował NSIS
+  z [`desktop/electron-builder.yml`](../../../desktop/electron-builder.yml)), więc świeży klon budował NSIS
   bez ikony. Dodano jawny `!desktop/build/icon.ico` (źródło buildu — wymuszone do repo; redundantne po
   zakotwiczeniu, ale chroni przed ponownym dodaniem szerokiego `build/`). `appicon.ico` **świadomie
-  zostaje ignorowany** — jest generowany przez [`make_icon.py`](../make_icon.py) (artefakt, „uruchom raz
+  zostaje ignorowany** — jest generowany przez [`make_icon.py`](../../../make_icon.py) (artefakt, „uruchom raz
   przed budową"), a nie źródło. Korzeniowe `/build/` i `/dist/` (working/output PyInstallera) oraz
   `desktop/out`/`desktop/dist` (electron-vite/-builder) nadal ignorowane. **Weryfikacja
   (`git check-ignore`):** przed — `desktop/build/icon.ico` IGNORED; po — `not ignored` + `git add

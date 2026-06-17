@@ -9,7 +9,7 @@
 > rdzeń xAI, frontend Electron/React, self-checki, dokumentacja) przeprowadzonego **po** domknięciu
 > [`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md) (P0–P3, M1–M4). Realne ścieżki sieciowe xAI weryfikuje
 > użytkownik z ważnymi poświadczeniami — sandbox blokuje TLS do `api.x.ai`.
-> **Powiązane:** [`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md) (runda 1 — zrealizowana), [`REBUILD_PLAN.md`](REBUILD_PLAN.md) (Fazy 0–8), [`MODYFIKACJE.md`](MODYFIKACJE.md) (Image/Video/Voice/załączniki).
+> **Powiązane:** [`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md) (runda 1 — zrealizowana), [`REBUILD_PLAN.md`](../REBUILD_PLAN.md) (Fazy 0–8), [`MODYFIKACJE.md`](MODYFIKACJE.md) (Image/Video/Voice/załączniki).
 > **Numeracja:** kontynuuje rundę 1 bez kolizji ID (P0 od `P0-9`, P1 od `P1-10`, P2 od `P2-8`,
 > P3 od `P3-7`); kamienie milowe **M5–M8**.
 

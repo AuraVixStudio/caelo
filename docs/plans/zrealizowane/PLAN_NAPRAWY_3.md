@@ -14,7 +14,7 @@
 > obserwowalność błędów i hartowanie defense-in-depth. Realne ścieżki sieciowe xAI weryfikuje
 > użytkownik z ważnymi poświadczeniami — sandbox blokuje TLS do `api.x.ai`.
 > **Powiązane:** [`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md) (runda 1 — ✅), [`PLAN_NAPRAWY_2.md`](PLAN_NAPRAWY_2.md)
-> (runda 2 — ✅), [`REBUILD_PLAN.md`](REBUILD_PLAN.md) (Fazy 0–8).
+> (runda 2 — ✅), [`REBUILD_PLAN.md`](../REBUILD_PLAN.md) (Fazy 0–8).
 > **Numeracja:** kontynuuje rundy 1–2 bez kolizji ID (P1 od `P1-15`, P2 od `P2-13`, P3 od `P3-10`);
 > **brak P0** (świadomie). Kamień milowy: **M18 (jakość i utrzymywalność)**.
 
@@ -91,7 +91,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   (`close()` przy wyłączaniu → `_log.debug`), `state.py` `_ws_origin_ok` (zniekształcony Origin → fail-closed,
   bez logu by drive-by nie spamował). Pozostałe benign-z-`noqa` (`manager.py` 55/77/183 — fallbacki
   importu/wersji/builtin-dir) zostawiono — `noqa: BLE001` jest tam świadomym markerem.
-  **Weryfikacja:** nowa asercja w [`packages_check.py`](../caelo_core/tools/packages_check.py) `test_templates`
+  **Weryfikacja:** nowa asercja w [`packages_check.py`](../../../caelo_core/tools/packages_check.py) `test_templates`
   (przechwyt logu: korupcja meta → `{}` **i** rekord ≥ WARNING) → **packages_check 48/48** (było 47);
   bez regresji: `agent_selfcheck` OK, `history_check` OK, `api_smoke` OK.
 
@@ -117,15 +117,15 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 - **Szac. koszt:** 1–1.5 dnia.
 - **✅ Zrobione (2026-06-06):** `state.py` **691 → 378 linii** (poniżej ~400). Wydzielone trzy moduły,
   `Backend` je dziedziczy/re-eksportuje (publiczne API importów BEZ zmian):
-  - [`caelo_core/auth_tokens.py`](../caelo_core/auth_tokens.py) — `require_token`/`ws_authorized`/
+  - [`caelo_core/auth_tokens.py`](../../../caelo_core/auth_tokens.py) — `require_token`/`ws_authorized`/
     `_ws_origin_ok`/`_warn_no_token` (czysta warstwa, **testowalna bez Backendu**). `state.py`
     **re-eksportuje** je, więc `from caelo_core.state import require_token/ws_authorized` (server.py,
     routes, self-checki) działa bez zmian. Istniejące `_unit_ws_auth`/`_unit_rest_token_auth`
     (atrapy `SimpleNamespace`, bez `Backend`) **są** tym mini-testem tokenów (DoD).
-  - [`caelo_core/backend_media.py`](../caelo_core/backend_media.py) `MediaMixin` — egzekutory generacji
+  - [`caelo_core/backend_media.py`](../../../caelo_core/backend_media.py) `MediaMixin` — egzekutory generacji
     (`_run_image_job`/`_run_video_job`/`_gen_executor`) + zapis mediów (`save_media_urls`/`save_media_bytes`/
     `_download_media`, P1-14) + artefakty M9; stałe `MAX_MEDIA_BYTES`/`VIDEO_*` i `requests` żyją tu.
-  - [`caelo_core/backend_collections.py`](../caelo_core/backend_collections.py) `CollectionsMixin` —
+  - [`caelo_core/backend_collections.py`](../../../caelo_core/backend_collections.py) `CollectionsMixin` —
     wiedza projektu (M10-B5, anty-traversal).
   - `class Backend(MediaMixin, CollectionsMixin)` — MRO `[Backend, MediaMixin, CollectionsMixin, object]`.
   **Uczciwie nt. „bez zmian w testach":** publiczne API (importy) niezmienione przez re-eksport, ale
@@ -152,16 +152,16 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   zachowanie (fail-closed) bez zmian.
 - **Szac. koszt:** 0.5–1 dzień (zależnie od weryfikacji `sandbox` w paczce).
 - **✅ Zrobione (2026-06-06):**
-  1. **`sandbox: true`** w [`desktop/src/main/index.ts`](../desktop/src/main/index.ts) `createWindow`
-     (`webPreferences`). Bezpieczne, bo preload ([`desktop/src/preload/index.ts`](../desktop/src/preload/index.ts))
+  1. **`sandbox: true`** w [`desktop/src/main/index.ts`](../../../desktop/src/main/index.ts) `createWindow`
+     (`webPreferences`). Bezpieczne, bo preload ([`desktop/src/preload/index.ts`](../../../desktop/src/preload/index.ts))
      używa **wyłącznie** `contextBridge` + `ipcRenderer` (+ `import type`, znika przy kompilacji) — cała
      praca Node (spawn sidecara, dialog folderu, `shell.openPath`) jest w procesie main za IPC, nie w
      preloadzie. Razem z `contextIsolation:true` + `nodeIntegration:false` = pełna izolacja renderera.
-  2. **Log per-request furtki** w [`state.py`](../caelo_core/state.py): helper `_warn_no_token(channel)`
+  2. **Log per-request furtki** w [`state.py`](../../../caelo_core/state.py): helper `_warn_no_token(channel)`
      (rate-limited, 1×/60 s, `time.monotonic`) wołany w `require_token` (REST) i `ws_authorized` (WS), gdy
      aktywny `CAELO_CORE_ALLOW_NO_TOKEN=1` → WARNING „served WITHOUT authentication" przy ruchu, nie tylko
      raz na starcie (`server.py`). Świadomy tryb dev zostawia ślad audytowy.
-  **Weryfikacja:** dwie nowe asercje w [`api_smoke.py`](../caelo_core/tools/api_smoke.py)
+  **Weryfikacja:** dwie nowe asercje w [`api_smoke.py`](../../../caelo_core/tools/api_smoke.py)
   (`_capture_no_token_warn` + `ws_auth`/`rest_auth: no-token serves WARNING log (P2-14)`) → **api_smoke OK**;
   fail-closed bez zmian (`handshake_check` 401/403/200 OK; `ws_auth`/`rest_auth` no-token→DENIED nadal PASS);
   frontend `typecheck` czysty + `npm run build` zielony (preload bundluje się sandbox-zgodnie).
@@ -196,7 +196,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   `devDependencies`: `eslint ^9.39.4`, `typescript-eslint ^8.60.1`, `eslint-plugin-react-hooks ^5.2.0`,
   `globals ^16.5.0`, `vitest ^3.2.6`; `package-lock.json` zaktualizowany i **w synchronizacji** (zawiera
   `node_modules/eslint`, `node_modules/vitest`). Efemeryczny krok „Install lint/test toolchain (ephemeral)"
-  **usunięty** z [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — frontend job leci teraz
+  **usunięty** z [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) — frontend job leci teraz
   `npm ci` → typecheck → lint → test. Przy okazji usunięto **martwą dyrektywę** `eslint-disable-next-line
   jsx-a11y/media-has-caption` w `desktop/src/renderer/src/components/Voice.tsx:367` (reguła spoza wąskiej
   konfiguracji react-hooks → ESLint 9 zgłaszał ją jako **error**; jedyny taki przypadek w `src/`).
@@ -226,16 +226,16 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 - **🔄 CZĘŚCIOWO ZROBIONE (2026-06-06) — warstwa komponentów ✅ (≥20); E2E ⏳:**
   Wprowadzono infrastrukturę **React Testing Library + jsdom** (devDeps `@testing-library/react ^16`,
   `jest-dom ^6`, `user-event ^14`, `jsdom ^29` w `package.json`+lockfile) i config
-  ([`vitest.config.ts`](../desktop/vitest.config.ts)): `@vitejs/plugin-react` (auto-JSX), `include` `.tsx`,
+  ([`vitest.config.ts`](../../../desktop/vitest.config.ts)): `@vitejs/plugin-react` (auto-JSX), `include` `.tsx`,
   `globals: true` (auto-cleanup RTL). jsdom **tylko** w `test/components/` (docblock per-plik) → **122 testy
-  utili nietknięte**. **+33 testy komponentów** ([`desktop/test/components/`](../desktop/test/components/)):
+  utili nietknięte**. **+33 testy komponentów** ([`desktop/test/components/`](../../../desktop/test/components/)):
   prymitywy UI (Button 6, Input/Textarea 5, Badge 2, Select 2, IconButton 4, Slider 2, Card 2 —
   render+interakcja: klik/onChange/disabled/aria/warianty), **kontekst motywu** (ThemeProvider/useTheme 3
   — `setTheme` przełącza klasę `.dark` + persist localStorage; `_matchMedia` stub) i **paleta komend**
   (`CommandPalette` 7 — Ctrl-K: filtr/Enter/Escape/klik/empty-state). **Weryfikacja:** `npm test`
   **155/155** (122+33), `typecheck` czysty, `lint` exit 0; biegnie w CI przez `npm test`.
-  **E2E — scaffold DOSTARCZONY** ([`desktop/playwright.config.ts`](../desktop/playwright.config.ts) +
-  [`desktop/e2e/`](../desktop/e2e/): 3 specy — ładowanie/„Connected", nawigacja po rail (`aria-current`),
+  **E2E — scaffold DOSTARCZONY** ([`desktop/playwright.config.ts`](../../../desktop/playwright.config.ts) +
+  [`desktop/e2e/`](../../../desktop/e2e/): 3 specy — ładowanie/„Connected", nawigacja po rail (`aria-current`),
   paleta Ctrl-K — na `preview:web` z `devMock`, bez Electrona/sidecara; skrypt `npm run test:e2e`). Scaffold
   jest **inertny** dla CI (poza `tsconfig`/`eslint`/`vitest` — nie psuje `npm ci`/typecheck/lint/test).
   **✅ E2E AKTYWOWANE I ZWERYFIKOWANE (2026-06-06):** `@playwright/test ^1.56` + chromium zainstalowane
@@ -244,11 +244,11 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   sandboxie) → config czyta opcjonalny **`E2E_CHROMIUM_PATH`** (pre-zainstalowana przeglądarka; domyślnie
   standardowe dociąganie buildu w CI); (2) flaky `command-palette` (Ctrl-K wysłany przed podpięciem listenera)
   → czekamy aż powłoka gotowa; (3) kontencja przy 3 workerach → `workers: 1` (jeden współdzielony `preview:web`).
-  **CI:** dodany job **`e2e`** w [`ci.yml`](../.github/workflows/ci.yml) (`npm ci` → `npx playwright install
+  **CI:** dodany job **`e2e`** w [`ci.yml`](../../../.github/workflows/ci.yml) (`npm ci` → `npx playwright install
   --with-deps chromium` → `npm run test:e2e`) — DoD „≥3 E2E w CI" **spełniony**. **Dodano też E2E przepływu
   z danymi backendu** (poza DoD): switcher projektu listujący `GET /projects` i przełączający
-  `POST /projects/current`, backend zmockowany przez `page.route()` ([`e2e/_mock.ts`](../desktop/e2e/_mock.ts)
-  + [`project-switch.spec.ts`](../desktop/e2e/project-switch.spec.ts)) → **4 E2E**, lokalnie 4/4 (×2). Łącznie
+  `POST /projects/current`, backend zmockowany przez `page.route()` ([`e2e/_mock.ts`](../../../desktop/e2e/_mock.ts)
+  + [`project-switch.spec.ts`](../../../desktop/e2e/project-switch.spec.ts)) → **4 E2E**, lokalnie 4/4 (×2). Łącznie
   **33 testy komponentów + 4 E2E**. **Poza zakresem (opcjonalnie dalej):** testy **ciężkich komponentów**
   (ChatView/AgentPanel/TeamView — harness mockujący `window.caelo`+Hub+API) — nie w DoD.
 
@@ -267,7 +267,7 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
 - **Weryfikacja (DoD):** PR uruchamia self-checki na 3 OS; zielone na wszystkich (lub świadomy `skip`
   per-OS z komentarzem). README/CONTRIBUTING odnotowuje matrycę.
 - **Szac. koszt:** 0.5–1 dzień.
-- **✅ Zrobione (2026-06-06):** job `backend` w [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+- **✅ Zrobione (2026-06-06):** job `backend` w [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)
   przepisany na `strategy.matrix.os = [windows-latest, ubuntu-latest, macos-latest]` z `fail-fast: false`
   (`runs-on: ${{ matrix.os }}`, nazwa `Backend self-checks (${{ matrix.os }})`). Wszystkie 7 kroków
   self-checków biegnie teraz na każdym OS; `pywinpty` instaluje się tylko na Windows (marker w
@@ -292,11 +292,11 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   paczki — np. `sidecar_smoke`).
 - **Szac. koszt:** 2–3 dni (mechaniczne, ale obszerne).
 - **✅ ZROBIONE (2026-06-06) — framework pytest + CI + rozbiór `api_smoke`:**
-  Wprowadzono **runner pytest** ([`caelo_core/requirements-dev.txt`](../caelo_core/requirements-dev.txt)
-  = `pytest>=8`) + [`caelo_core/tests/`](../caelo_core/tests/): `conftest.py` (bootstrap `sys.path` →
+  Wprowadzono **runner pytest** ([`caelo_core/requirements-dev.txt`](../../../caelo_core/requirements-dev.txt)
+  = `pytest>=8`) + [`caelo_core/tests/`](../../../caelo_core/tests/): `conftest.py` (bootstrap `sys.path` →
   korzeń repo) i `test_selfchecks.py` — **adapter** uruchamiający każdą z **8 suit** (`crossplatform/
   mcp/genjobs/history/packages/agent_selfcheck/handshake/api_smoke`) jako osobny **test parametryczny**
-  (`main()` → 0/1). Daje discovery, `pytest -k <suita>`, jeden bieg. **CI** ([`ci.yml`](../.github/workflows/ci.yml)):
+  (`main()` → 0/1). Daje discovery, `pytest -k <suita>`, jeden bieg. **CI** ([`ci.yml`](../../../.github/workflows/ci.yml)):
   7 osobnych kroków self-checków zastąpione jednym `python -m pytest caelo_core/tests` (+ dochodzi
   `packages_check`, którego w CI nie było). Dokumentacja zaktualizowana (`README.md`, `caelo_core/README.md`,
   `CONTRIBUTING.md` — „no pytest" → pytest). **Weryfikacja mechanizmu BEZ pytest** (rejestr pip zablokowany
@@ -328,18 +328,18 @@ w regresję i dokumentację (a nie nowe funkcje) daje teraz największy zwrot.
   `routes/*`; oba zlinkowane z indeksu. Krótki „Getting Started" w README wskazuje na guide.
 - **Szac. koszt:** 1.5–2 dni.
 - **✅ Zrobione (2026-06-06):**
-  1. **[`docs/guides/USER_GUIDE.md`](../guides/USER_GUIDE.md)** (EN, zgodnie z regułą języka user-facing) — Getting Started
+  1. **[`docs/guides/USER_GUIDE.md`](../../guides/USER_GUIDE.md)** (EN, zgodnie z regułą języka user-facing) — Getting Started
      (instalacja/auth/precedence), **wszystkie 9 modułów** (Chat, Code/agent, Image, Video, Gallery, Voice,
      History, Extensions, Settings), kluczowe koncepcje (Projekty, Send-to, permission gate, prywatność/koszty)
      i Troubleshooting.
-  2. **[`docs/guides/API.md`](../guides/API.md)** (EN) — referencja **96 tras REST + 6 WS** pogrupowana po domenach (auth,
+  2. **[`docs/guides/API.md`](../../guides/API.md)** (EN) — referencja **96 tras REST + 6 WS** pogrupowana po domenach (auth,
      models/settings, media/genjobs, voice, fs/git, history/artifacts, projects/collections, agent/team,
      mcp/hooks/commands/skills, packages), model autoryzacji (Bearer/token w query, fail-closed, CORS),
      handshake, tabela protokołów ramek WS + snippet do **regeneracji** listy (introspekcja `app.routes`).
   **Osadzenie w faktach (nie zmyślone):** lista tras wygenerowana **introspekcją** `create_app().routes`
   (`APIRoute`/`APIWebSocketRoute`) — dokładnie **96 REST + 6 WS**; opisy spot-checkowane względem docstringów
   (np. `/auth/login` = OAuth PKCE, `/artifacts/{id}/input-block` = send-to bus). **Podlinkowane:**
-  `docs/README.md` (dwa nowe wiersze tabeli + „Jak czytać"), główny [`README.md`](../README.md) (wskaźnik po
+  `docs/README.md` (dwa nowe wiersze tabeli + „Jak czytać"), główny [`README.md`](../../../README.md) (wskaźnik po
   Quickstarcie „New to the app?" + sekcja Documentation). **Pozostaje opcjonalnie** (nie w DoD): hosting na
   GitHub Pages.
 

@@ -60,14 +60,14 @@ Każda luka potwierdzona w kodzie — punkty styku gotowe do rozpisu:
 
 | Funkcja | Stan w Caelo | Dowód / punkt styku |
 |---|---|---|
-| Tryb headless / CLI | **brak** — `__main__.py` to wyłącznie launcher uvicorn | [`__main__.py:41`](../caelo_core/__main__.py) |
+| Tryb headless / CLI | **brak** — `__main__.py` to wyłącznie launcher uvicorn | [`__main__.py:41`](../../../caelo_core/__main__.py) |
 | ACP (stdio JSON-RPC) | **brak** — „stdio" tylko w kliencie MCP | `caelo_core/mcp/client.py` |
 | LSP | **brak** — tylko wzmianki w komentarzach | `caelo_core/agent/caelomd.py:1` |
 | Reguły uprawnień (globy) | **brak** — allowlista per znormalizowana **pełna komenda** (`cmd:<...>` / `tool:<name>:<path>` / `mcp:<qname>`) | `agent/permissions.py` `_key`/`allow`/`allow_key`/`needs_approval` |
 | `--effort` / reasoning_effort | **brak** | `responses_client.py`, `agent/llm.py`, `session.py` — 0 trafień |
 | web tools w agencie | **brak** (czat ma `web_search`/`x_search` przez Responses; agent — nie) | `caelo_core/agent/` — 0 trafień |
 | Interop `AGENTS.md`/`.claude`/`.mcp.json` | **brak** — tylko własny `CAELO.md`/`caelo_*.json` | `agent/caelomd.py` |
-| Pamięć wektorowa | **brak** — tylko FTS5; `vector_store_id` to martwy relikt (xAI `/v1/vector_stores` → 404) | [`history_store.py:105`](../caelo_core/history_store.py) |
+| Pamięć wektorowa | **brak** — tylko FTS5; `vector_store_id` to martwy relikt (xAI `/v1/vector_stores` → 404) | [`history_store.py:105`](../../../caelo_core/history_store.py) |
 | Eksport sesji do markdown | **brak** | 0 trafień |
 | Skille-orkiestratory (`implement`/`design`/`review`/`best-of-n`) | **brak** — jest silnik `TeamManager`, brak gotowych pętli | `agent/team.py`, `agent/roles.py` |
 | Persony (instrukcje + I/O schema) | **częściowo** — role łączą capability+tools, brak warstwy persony + schematu I/O | `agent/roles.py` `RoleRegistry` |
@@ -120,7 +120,7 @@ nazwane sesje (`-s/--session-id`, `-c/--continue`), allow/deny narzędzi, limity
 Odblokowuje CI, pre-commit hooki, skrypty — i jest wymaganym fundamentem pod ACP (B2).
 
 **Punkty styku:**
-- [`caelo_core/__main__.py`](../caelo_core/__main__.py) — dziś tylko `main()` → uvicorn. Dodać **subkomendy**
+- [`caelo_core/__main__.py`](../../../caelo_core/__main__.py) — dziś tylko `main()` → uvicorn. Dodać **subkomendy**
   (np. `argparse`/`sys.argv[1]`): brak argumentów = serwer (zachowanie domyślne, NIE regresować handshake),
   `run` = headless. Logi nadal na **stderr**; stdout zarezerwowany — w headless stdout = strumień
   zdarzeń, nie handshake.
@@ -224,7 +224,7 @@ sam; dokumentować). Wydajność/stabilność długożyjących procesów. **Wysi
 `MCPTool(...)`; `*`=jeden poziom, `**`=rekursywnie; **deny > allow**; goły prefiks = wszystkie wywołania.
 
 **Punkty styku:**
-- [`agent/permissions.py`](../caelo_core/agent/permissions.py) — `PermissionGate`. Dziś: allowlista per
+- [`agent/permissions.py`](../../../caelo_core/agent/permissions.py) — `PermissionGate`. Dziś: allowlista per
   znormalizowana pełna komenda (`_key`). **Dodać warstwę reguł** (allow/deny listy wzorców) **obok**
   istniejącej allowlisty „Always allow" (kompatybilność wstecz: stare klucze nadal działają).
   - Mapowanie narzędzie→prefiks: `run_command`→`Bash`, `write_file`→`Write`+`Edit`, `read_file`→`Read`,

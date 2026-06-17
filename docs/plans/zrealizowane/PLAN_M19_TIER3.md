@@ -29,12 +29,12 @@ Każda luka potwierdzona w kodzie — punkty styku gotowe do rozpisu:
 
 | Element | Stan / plik | Wniosek dla Tier-3 |
 |---|---|---|
-| **B9** effort | **brak** — 0 trafień `reasoning_effort` w [`responses_client.py`](../caelo_core/responses_client.py:249)/[`agent/llm.py`](../caelo_core/agent/llm.py:15)/[`session.py`](../caelo_core/agent/session.py:271) | dodać param `reasoning_effort` w obu klientach + przeprowadzić przez `AgentSession`/`AgentRunner`/role; pole xAI = live-verify |
-| **B10** eksport sesji | **brak** — [`routes/history.py`](../caelo_core/routes/history.py) ma tylko list/get/content; headless sesje = `DATA_DIR/sessions/<id>.json` ([`headless.py:55`](../caelo_core/headless.py:55)); czaty w `localStorage` (`useConversations`) | `GET /history/export` (md) + serializer renderera + (osobno) auto-compact w `session.py` |
-| **B11** persony + I/O schema | **częściowo** — [`roles.py`](../caelo_core/agent/roles.py:37) łączy capability+tools+`prompt`; brak `instructions`/`inputs`/`outputs` (jak `bundled/personas/*.toml`: `instructions`+`reasoning_effort`) | rozszerzyć `_clean_role` o `instructions`/`inputs`/`outputs`; `team.py` wstrzykuje kontrakt I/O |
-| **B12** realne git worktree | **brak** — [`worktree.py`](../caelo_core/agent/worktree.py:41) = `copy_worktree` (kopia katalogu, bez gita); CLI ma `--worktree [NAME]` | wariant `git worktree add`/`remove` obok kopii, gdy workspace = repo (opcja, nie zamiennik) |
-| **B13** web tools w agencie | **brak** — [`tools.py:62`](../caelo_core/agent/tools.py:62) `TOOLS` nie ma web; czat ma `web_search`/`x_search` przez Responses (M10). `RuleSet` z B4 **już** ma matcher `WebFetch(domain:…)` | `web_fetch` (https-only + allowlista domen + cap) + opcjonalnie `web_search`; mapowanie `web_fetch`→`WebFetch` w `targets_for_tool` |
-| **B14** config hierarchiczny | **częściowo** — [`caelomd.py`](../caelo_core/agent/caelomd.py) czyta root+global (B5: +AGENTS/CLAUDE), `state.py` czyta `<ws>/.caelo/{lsp,permissions,sandbox}.json`; **brak walk cwd→root** + odkrycia korzenia repo (`.git`) | walk root↔cwd (deeper-wins) dla CAELO.md i `.caelo/*.json` + `find_project_root` dla headless `--cwd` |
+| **B9** effort | **brak** — 0 trafień `reasoning_effort` w [`responses_client.py`](../../../caelo_core/responses_client.py:249)/[`agent/llm.py`](../../../caelo_core/agent/llm.py:15)/[`session.py`](../../../caelo_core/agent/session.py:271) | dodać param `reasoning_effort` w obu klientach + przeprowadzić przez `AgentSession`/`AgentRunner`/role; pole xAI = live-verify |
+| **B10** eksport sesji | **brak** — [`routes/history.py`](../../../caelo_core/routes/history.py) ma tylko list/get/content; headless sesje = `DATA_DIR/sessions/<id>.json` ([`headless.py:55`](../../../caelo_core/headless.py:55)); czaty w `localStorage` (`useConversations`) | `GET /history/export` (md) + serializer renderera + (osobno) auto-compact w `session.py` |
+| **B11** persony + I/O schema | **częściowo** — [`roles.py`](../../../caelo_core/agent/roles.py:37) łączy capability+tools+`prompt`; brak `instructions`/`inputs`/`outputs` (jak `bundled/personas/*.toml`: `instructions`+`reasoning_effort`) | rozszerzyć `_clean_role` o `instructions`/`inputs`/`outputs`; `team.py` wstrzykuje kontrakt I/O |
+| **B12** realne git worktree | **brak** — [`worktree.py`](../../../caelo_core/agent/worktree.py:41) = `copy_worktree` (kopia katalogu, bez gita); CLI ma `--worktree [NAME]` | wariant `git worktree add`/`remove` obok kopii, gdy workspace = repo (opcja, nie zamiennik) |
+| **B13** web tools w agencie | **brak** — [`tools.py:62`](../../../caelo_core/agent/tools.py:62) `TOOLS` nie ma web; czat ma `web_search`/`x_search` przez Responses (M10). `RuleSet` z B4 **już** ma matcher `WebFetch(domain:…)` | `web_fetch` (https-only + allowlista domen + cap) + opcjonalnie `web_search`; mapowanie `web_fetch`→`WebFetch` w `targets_for_tool` |
+| **B14** config hierarchiczny | **częściowo** — [`caelomd.py`](../../../caelo_core/agent/caelomd.py) czyta root+global (B5: +AGENTS/CLAUDE), `state.py` czyta `<ws>/.caelo/{lsp,permissions,sandbox}.json`; **brak walk cwd→root** + odkrycia korzenia repo (`.git`) | walk root↔cwd (deeper-wins) dla CAELO.md i `.caelo/*.json` + `find_project_root` dla headless `--cwd` |
 
 **Już mamy (nie ruszać):** B4 `RuleSet` (deny>allow, matcher `*`/`**`, `WebFetch`/`MCPTool`), B5
 interop discovery + workspace-aware rebuild, M17 worktree-jako-kopia + `MergeStore` + `delegate`,
@@ -50,35 +50,35 @@ M10 `responses_client.stream_response` (pętla narzędzi, UTF-8 SSE), headless `
 (`--effort`). Tani, samodzielny; jedyna niepewność = nazwa pola na drucie xAI (live-verify).
 
 ### 1.1 Klienci (dwie ścieżki inferencji)
-- [`responses_client.py`](../caelo_core/responses_client.py:249) `stream_response`: dodaj param
-  `reasoning_effort: Optional[str] = None`. W `_run_turn` (budowa `payload`, [linia 309](../caelo_core/responses_client.py:309)):
+- [`responses_client.py`](../../../caelo_core/responses_client.py:249) `stream_response`: dodaj param
+  `reasoning_effort: Optional[str] = None`. W `_run_turn` (budowa `payload`, [linia 309](../../../caelo_core/responses_client.py:309)):
   `if reasoning_effort: payload["reasoning"] = {"effort": reasoning_effort}`. **Tylko gdy podane**
   — modele nie-rozumujące mogłyby dać 422 (zasada „minimalny payload", jak `build_search_tools`).
-- [`agent/llm.py`](../caelo_core/agent/llm.py:15) `stream_chat_with_tools`: dodaj
+- [`agent/llm.py`](../../../caelo_core/agent/llm.py:15) `stream_chat_with_tools`: dodaj
   `reasoning_effort: Optional[str] = None`; gdy podane → `payload["reasoning_effort"] = ...`
   (format chat/completions; **wariant pola = live-verify** — czat/Responses mogą różnić się
-  kształtem, jak komentarz o `include_usage` w [llm.py:33](../caelo_core/agent/llm.py:33)).
+  kształtem, jak komentarz o `include_usage` w [llm.py:33](../../../caelo_core/agent/llm.py:33)).
 
 ### 1.2 Przeprowadzenie przez agenta
-- [`session.py`](../caelo_core/agent/session.py): `AgentSession.__init__` dostaje
+- [`session.py`](../../../caelo_core/agent/session.py): `AgentSession.__init__` dostaje
   `reasoning_effort: Optional[str] = None` (pole `self._reasoning_effort`). `run_turn` przekazuje
-  je do `self.llm_fn(...)` ([linia 324](../caelo_core/agent/session.py:324)) jako kwarg
+  je do `self.llm_fn(...)` ([linia 324](../../../caelo_core/agent/session.py:324)) jako kwarg
   `reasoning_effort=self._reasoning_effort`. **Additywne** — mock LLM w selfcheckach łyka `**_`.
-- [`runner.py`](../caelo_core/agent/runner.py): `AgentRunner.__init__` dostaje `reasoning_effort`
-  (jak `max_iters`); `_ensure_session` ([linia 102](../caelo_core/agent/runner.py:102)) przekazuje do `AgentSession`.
-- **Per rola (B11-spójne):** [`roles.py`](../caelo_core/agent/roles.py): `_clean_role`
-  ([linia 203](../caelo_core/agent/roles.py:203)) waliduje pole `reasoning_effort` (∈
+- [`runner.py`](../../../caelo_core/agent/runner.py): `AgentRunner.__init__` dostaje `reasoning_effort`
+  (jak `max_iters`); `_ensure_session` ([linia 102](../../../caelo_core/agent/runner.py:102)) przekazuje do `AgentSession`.
+- **Per rola (B11-spójne):** [`roles.py`](../../../caelo_core/agent/roles.py): `_clean_role`
+  ([linia 203](../../../caelo_core/agent/roles.py:203)) waliduje pole `reasoning_effort` (∈
   `{"low","medium","high",""}`, inne → `""`); `BUILTIN_ROLES` dostają rozsądne wartości
-  (researcher/security-auditor = `high`, tester = `low`). [`team.py`](../caelo_core/agent/team.py:153)
+  (researcher/security-auditor = `high`, tester = `low`). [`team.py`](../../../caelo_core/agent/team.py:153)
   `SubAgent.run`: przekaż `reasoning_effort=self.role.get("reasoning_effort") or None` do
   `AgentSession` (rola nadpisuje globalny; brak → globalny/None).
 
 ### 1.3 Czat + wejścia + UI
-- [`routes/chat.py:142`](../caelo_core/routes/chat.py:142): dodaj `reasoning_effort=` do wywołania
+- [`routes/chat.py:142`](../../../caelo_core/routes/chat.py:142): dodaj `reasoning_effort=` do wywołania
   `stream_response` — z pola żądania (`chat.reasoning_effort`) z fallbackiem na `caelo_settings.json`.
-- [`headless.py`](../caelo_core/headless.py): `_build_parser` — flagi `--effort`/`--reasoning-effort`
+- [`headless.py`](../../../caelo_core/headless.py): `_build_parser` — flagi `--effort`/`--reasoning-effort`
   (`choices=["low","medium","high"]`); `_run` przekazuje do `AgentRunner(reasoning_effort=…)`.
-- [`config.py`](../config.py): domyślne w settings (`chat_effort`/`code_effort`); **nie nowy
+- [`config.py`](../../../config.py): domyślne w settings (`chat_effort`/`code_effort`); **nie nowy
   root-moduł** — tylko klucz w `caelo_settings.json` (czytany jak `code_model`).
 - **Frontend:** selektor Low/Med/High w `CodeView.tsx` (agent) i composerze czatu; `lib/api.ts`
   (`reasoning_effort` w typie żądania); panel **Subagents** (per-rola). **Tekst UI = EN.**
@@ -93,32 +93,32 @@ M10 `responses_client.stream_response` (pętla narzędzi, UTF-8 SSE), headless `
   jednej ścieżce.
 
 ### ✅ Realizacja (2026-06-07)
-- **Wspólny walidator:** [`validation.py`](../caelo_core/validation.py) — `REASONING_EFFORTS` +
+- **Wspólny walidator:** [`validation.py`](../../../caelo_core/validation.py) — `REASONING_EFFORTS` +
   `normalize_effort(v)` (→ `low`/`medium`/`high` albo `None`; leaf, bez cykli). Reużywany przez obie
   ścieżki inferencji, role i trasy — **pole dokładane TYLKO gdy poprawne** (modele nie-rozumujące →
   brak 4xx).
-- **Klienci:** [`responses_client.stream_response`](../caelo_core/responses_client.py) — param
-  `reasoning_effort` → `payload["reasoning"]={"effort":…}`; [`agent/llm.stream_chat_with_tools`](../caelo_core/agent/llm.py)
+- **Klienci:** [`responses_client.stream_response`](../../../caelo_core/responses_client.py) — param
+  `reasoning_effort` → `payload["reasoning"]={"effort":…}`; [`agent/llm.stream_chat_with_tools`](../../../caelo_core/agent/llm.py)
   — param `reasoning_effort` → `payload["reasoning_effort"]` (wariant pola czat vs Responses = live-verify).
-- **Agent:** [`session.py`](../caelo_core/agent/session.py) `AgentSession` — `reasoning_effort` w
+- **Agent:** [`session.py`](../../../caelo_core/agent/session.py) `AgentSession` — `reasoning_effort` w
   `__init__` (domyślny sesji) **+ override per-tura** w `run_turn`; kwarg do `llm_fn` przekazywany
-  **warunkowo** (mock bez parametru → zero regresji). [`runner.py`](../caelo_core/agent/runner.py)
+  **warunkowo** (mock bez parametru → zero regresji). [`runner.py`](../../../caelo_core/agent/runner.py)
   `AgentRunner` — domyślny w `__init__` + per-tura w `run_turn`, przepuszczany do sesji i delegacji.
-- **Role/subagenci:** [`roles.py`](../caelo_core/agent/roles.py) — `_clean_role` waliduje
+- **Role/subagenci:** [`roles.py`](../../../caelo_core/agent/roles.py) — `_clean_role` waliduje
   `reasoning_effort`; `BUILTIN_ROLES` mają wartości (researcher/reviewer/implementer/design-*/
-  security-auditor = `high`, test-writer = `medium`, tester = `low`). [`team.py`](../caelo_core/agent/team.py)
+  security-auditor = `high`, test-writer = `medium`, tester = `low`). [`team.py`](../../../caelo_core/agent/team.py)
   — `TeamManager.run(reasoning_effort=…)`; `SubAgent` używa **effortu roli > globalnego przebiegu**.
-- **Czat + headless + ustawienia:** [`routes/chat.py`](../caelo_core/routes/chat.py) czyta
-  `reasoning_effort` z ramki + fallback `chat_effort`; [`routes/agent.py`](../caelo_core/routes/agent.py)
-  — pole `effort` w ramce `message` + fallback `code_effort`; [`headless.py`](../caelo_core/headless.py)
-  — flaga `--effort`/`--reasoning-effort`; [`routes/settings.py`](../caelo_core/routes/settings.py) —
+- **Czat + headless + ustawienia:** [`routes/chat.py`](../../../caelo_core/routes/chat.py) czyta
+  `reasoning_effort` z ramki + fallback `chat_effort`; [`routes/agent.py`](../../../caelo_core/routes/agent.py)
+  — pole `effort` w ramce `message` + fallback `code_effort`; [`headless.py`](../../../caelo_core/headless.py)
+  — flaga `--effort`/`--reasoning-effort`; [`routes/settings.py`](../../../caelo_core/routes/settings.py) —
   `chat_effort`/`code_effort` w `SettingsPatch`+`GET /settings` (walidowane przy zapisie, śmieć → `""`).
-- **Frontend:** nowy [`ui/EffortSelect.tsx`](../desktop/src/renderer/src/components/ui/EffortSelect.tsx)
-  (Auto/Low/Medium/High, wzór `ModeSelector`) — w composerze **czatu** ([`ChatView.tsx`](../desktop/src/renderer/src/components/ChatView.tsx),
-  utrwala `chat_effort`) i **agenta** ([`AgentPanel.tsx`](../desktop/src/renderer/src/components/code/AgentPanel.tsx),
-  per-tura); per-rola w **Extensions → Subagents** ([`SubagentsPanel.tsx`](../desktop/src/renderer/src/components/extensions/SubagentsPanel.tsx)).
+- **Frontend:** nowy [`ui/EffortSelect.tsx`](../../../desktop/src/renderer/src/components/ui/EffortSelect.tsx)
+  (Auto/Low/Medium/High, wzór `ModeSelector`) — w composerze **czatu** ([`ChatView.tsx`](../../../desktop/src/renderer/src/components/ChatView.tsx),
+  utrwala `chat_effort`) i **agenta** ([`AgentPanel.tsx`](../../../desktop/src/renderer/src/components/code/AgentPanel.tsx),
+  per-tura); per-rola w **Extensions → Subagents** ([`SubagentsPanel.tsx`](../../../desktop/src/renderer/src/components/extensions/SubagentsPanel.tsx)).
   Typy `ReasoningEffort`/`SettingsResp`/`SettingsPatch`/`ChatStreamPayload`/`TeamRole` w
-  [`lib/api.ts`](../desktop/src/renderer/src/lib/api.ts); `effort` w `AgentConnection.sendMessage`.
+  [`lib/api.ts`](../../../desktop/src/renderer/src/lib/api.ts); `effort` w `AgentConnection.sendMessage`.
 - **Selfchecki:** `agent_selfcheck` `test_reasoning_effort` (+10: normalize, domyślny/override/None,
   brak kwargu bez effortu, role+walidacja, payload llm) — mocki team dostały `**_` (tolerują nowy kwarg,
   jak realny klient); `api_smoke` smoke_chat (+2: `reasoning.effort` w payloadzie Responses, effort z
@@ -138,12 +138,12 @@ M10 `responses_client.stream_response` (pętla narzędzi, UTF-8 SSE), headless `
 Dwie niezależne pod-funkcje; (a) tania i samodzielna, (b) nieco głębsza.
 
 ### 2.1 (a) Eksport historii/sesji do markdown
-- **Hub (agent + czat zapisane jako zdarzenia M9):** [`routes/history.py`](../caelo_core/routes/history.py):
+- **Hub (agent + czat zapisane jako zdarzenia M9):** [`routes/history.py`](../../../caelo_core/routes/history.py):
   nowy `GET /history/export` (te same filtry co `/history`: `q`/`mode`/`project_id`/`from`/`to`)
   → `text/markdown` (FastAPI `PlainTextResponse`/`Response(media_type="text/markdown")`). Buduje md
   z `b.history_store.list_events(...)` (nagłówek + per zdarzenie: data, tryb, prompt z `meta`, tekst).
   Czysta funkcja `events_to_markdown(events) -> str` (testowalna bez HTTP).
-- **Sesje headless (`DATA_DIR/sessions/<id>.json`):** [`headless.py`](../caelo_core/headless.py):
+- **Sesje headless (`DATA_DIR/sessions/<id>.json`):** [`headless.py`](../../../caelo_core/headless.py):
   subkomenda-flaga `--export-md <path>` (lub osobne `caelo run --export <id>`), serializująca
   `history` sesji do md (reużyj `events_to_markdown`-stylowy serializer wiadomości role→md). Import:
   `--import-md` odłożony (md→historia jest stratne; rekomendacja: tylko eksport, import przez `-r`/`-c`).
@@ -155,9 +155,9 @@ Dwie niezależne pod-funkcje; (a) tania i samodzielna, (b) nieco głębsza.
   Vitest dla `conversationToMarkdown`.
 
 ### 2.2 (b) Auto-compact progu kontekstu
-- **Problem:** [`session.py`](../caelo_core/agent/session.py:160) `self.history` rośnie bez ograniczeń
+- **Problem:** [`session.py`](../../../caelo_core/agent/session.py:160) `self.history` rośnie bez ograniczeń
   — długie sesje (headless `-c`, ACP, wielotura) puchną i drożeją.
-- **Rozwiązanie:** w `run_turn`, PRZED budową `messages` ([linia 323](../caelo_core/agent/session.py:323)),
+- **Rozwiązanie:** w `run_turn`, PRZED budową `messages` ([linia 323](../../../caelo_core/agent/session.py:323)),
   gdy szacowany rozmiar historii > próg → **compaction**: zwiń najstarsze pary user/assistant/tool
   w jeden blok `system`/`user` „[Summary of earlier conversation] …" (jedno tanie wywołanie LLM
   *albo* deterministyczne obcięcie+nota, by nie zależeć od sieci w selfchecku). Zachowaj balans
@@ -173,25 +173,25 @@ Dwie niezależne pod-funkcje; (a) tania i samodzielna, (b) nieco głębsza.
 
 ### ✅ Realizacja (2026-06-07)
 **(a) Eksport do Markdown** — trzy cele, wszystkie zrobione:
-- **Hub:** [`routes/history.py`](../caelo_core/routes/history.py) — czysta funkcja `events_to_markdown`
+- **Hub:** [`routes/history.py`](../../../caelo_core/routes/history.py) — czysta funkcja `events_to_markdown`
   (+`_iso`) i trasa `GET /history/export` (te same filtry co `/history`, `text/markdown` jako
   załącznik). Prompt/model dołączane z `meta` przez nową metodę
-  [`history_store.event_metas`](../caelo_core/history_store.py) (meta żyje w `history_fts`, nie w
-  `HistoryEvent`; jeden przebieg kursora z wczesnym zakończeniem). [`api.ts`](../desktop/src/renderer/src/lib/api.ts)
+  [`history_store.event_metas`](../../../caelo_core/history_store.py) (meta żyje w `history_fts`, nie w
+  `HistoryEvent`; jeden przebieg kursora z wczesnym zakończeniem). [`api.ts`](../../../desktop/src/renderer/src/lib/api.ts)
   `exportHistoryMarkdown` (surowy fetch tekstu z Bearer) + przycisk **Export .md** w
-  [`History.tsx`](../desktop/src/renderer/src/components/History.tsx) (eksportuje bieżący filtr).
-- **Sesje headless:** [`headless.py`](../caelo_core/headless.py) — flaga `--export-md <path>` (osobna,
+  [`History.tsx`](../../../desktop/src/renderer/src/components/History.tsx) (eksportuje bieżący filtr).
+- **Sesje headless:** [`headless.py`](../../../caelo_core/headless.py) — flaga `--export-md <path>` (osobna,
   czysta ścieżka bez Backendu/sieci; `-p` stał się opcjonalny — wymagany tylko dla biegu); czysty
   serializer `history_to_markdown` (user/assistant/tool + tool-calls); `_export_session` (wybór sesji
   `-s`/`-r`/`-c`).
-- **Czat (renderer):** nowy [`lib/exportMarkdown.ts`](../desktop/src/renderer/src/lib/exportMarkdown.ts)
+- **Czat (renderer):** nowy [`lib/exportMarkdown.ts`](../../../desktop/src/renderer/src/lib/exportMarkdown.ts)
   — `conversationToMarkdown` (czysta, z cytowaniami), `safeFilename`, `downloadText` (Blob → pobranie);
-  przycisk **Export chat as Markdown** w [`ChatView.tsx`](../desktop/src/renderer/src/components/ChatView.tsx)
+  przycisk **Export chat as Markdown** w [`ChatView.tsx`](../../../desktop/src/renderer/src/components/ChatView.tsx)
   (wyłączony gdy brak wiadomości). Import md → **świadomie odłożony** (md→historia stratne; wznawianie
   przez `-r`/`-c`/`session/load`, decyzja §11).
 
-**(b) Auto-compact** — [`config.py`](../config.py) `AGENT_AUTOCOMPACT` (env `CAELO_AUTOCOMPACT`,
-**domyślnie OFF**) + `AGENT_COMPACT_THRESHOLD_CHARS`. [`session.py`](../caelo_core/agent/session.py):
+**(b) Auto-compact** — [`config.py`](../../../config.py) `AGENT_AUTOCOMPACT` (env `CAELO_AUTOCOMPACT`,
+**domyślnie OFF**) + `AGENT_COMPACT_THRESHOLD_CHARS`. [`session.py`](../../../caelo_core/agent/session.py):
 czyste helpery + `compact_history` (zwija najstarsze tury, **cięcie NA GRANICY `user`** → balans
 tool_call↔tool zachowany; digest deterministyczny, bez sieci, capowany) + metoda `_maybe_compact`
 wołana w `run_turn` przed budową `messages` (bieżąca tura zawsze zachowana; błąd połknięty). Off =
@@ -218,8 +218,8 @@ realnej sesji (opt-in) — ewentualnie podłączyć LLM-summary za flagą, jeśl
 `reasoning_effort`) oraz **kontrakt I/O** (`inputs`/`outputs`), by delegacja była przewidywalna —
 orkiestrator wie, co podać i co dostanie z powrotem.
 
-### 3.1 Model danych ([`roles.py`](../caelo_core/agent/roles.py))
-- `_clean_role` ([linia 203](../caelo_core/agent/roles.py:203)) — dodaj pola:
+### 3.1 Model danych ([`roles.py`](../../../caelo_core/agent/roles.py))
+- `_clean_role` ([linia 203](../../../caelo_core/agent/roles.py:203)) — dodaj pola:
   - `instructions: str` — wielolinijkowa persona (rozszerzenie obecnego `prompt`; gdy brak, `prompt`
     pozostaje). Cap rozmiaru jak CAELO.md.
   - `inputs: list[{name, description, required:bool}]` — czego subagent oczekuje od orkiestratora.
@@ -230,7 +230,7 @@ orkiestrator wie, co podać i co dostanie z powrotem.
   {name:"verdict"}]`); persony wzorowane na `bundled/personas/*.toml`.
 - `RoleRegistry.upsert_role`/`_save` już persistują dowolne oczyszczone pola (atomowo) — bez zmian.
 
-### 3.2 Wstrzyknięcie kontraktu ([`team.py`](../caelo_core/agent/team.py:153))
+### 3.2 Wstrzyknięcie kontraktu ([`team.py`](../../../caelo_core/agent/team.py:153))
 - `SubAgent.run`: zbuduj `extra_system` = `role.instructions or role.prompt` + sekcja kontraktu I/O,
   gdy zdefiniowano (`"Inputs you were given: …\nProduce these outputs in your summary: …"`). Zadanie
   (`self.task`) pozostaje treścią użytkownika; kontrakt jest deterministyczną ramą promptu (EN).
@@ -246,7 +246,7 @@ orkiestrator wie, co podać i co dostanie z powrotem.
   brak regresji M17 (zakres ∩ rodzic). **Live:** jakość delegacji z kontraktem (maszyna usera).
 
 ### ✅ Realizacja (2026-06-07)
-- **Model danych:** [`roles.py`](../caelo_core/agent/roles.py) — `_clean_role` dostał `instructions`
+- **Model danych:** [`roles.py`](../../../caelo_core/agent/roles.py) — `_clean_role` dostał `instructions`
   (cap `MAX_INSTRUCTIONS`), `inputs`/`outputs` (czyszczone `_clean_io`: drop bez `name`, `io_type`∈
   {text,file} inaczej `text`, `required` bool, limit `MAX_IO_FIELDS`, cap opisu). Nowy
   `_normalize_role` (w `get()`/`list()`) gwarantuje pełny, spójny kształt też dla ról WBUDOWANYCH
@@ -256,14 +256,14 @@ orkiestrator wie, co podać i co dostanie z powrotem.
   → findings, researcher → findings, tester → results, …) + `inputs` tam, gdzie ma sens (implementer/
   design-doc-writer → opcjonalny `review_file`, design-doc-reviewer → `design_doc`). Persony wzorowane
   na `bundled/personas/*.toml` z Grok CLI.
-- **Wstrzyknięcie:** [`team.py`](../caelo_core/agent/team.py) `SubAgent.run` używa
+- **Wstrzyknięcie:** [`team.py`](../../../caelo_core/agent/team.py) `SubAgent.run` używa
   `role_system_prompt(self.role)` jako `extra_system` (zamiast samego `prompt`). Bez eskalacji
   (`effective_tools` = rola ∩ rodzic — niezmienione).
-- **Trasa (naprawa luki B9 przy okazji):** [`routes/team.py`](../caelo_core/routes/team.py) `RoleReq`
+- **Trasa (naprawa luki B9 przy okazji):** [`routes/team.py`](../../../caelo_core/routes/team.py) `RoleReq`
   **nie miał** `reasoning_effort` (per-rola effort z UI był dropowany przez Pydantic!) — dodano
   `reasoning_effort` + `instructions` + `inputs` + `outputs`; walidacja w `_clean_role`.
-- **Frontend:** [`api.ts`](../desktop/src/renderer/src/lib/api.ts) `TeamRoleIO` + pola w `TeamRole`;
-  [`SubagentsPanel.tsx`](../desktop/src/renderer/src/components/extensions/SubagentsPanel.tsx) — pole
+- **Frontend:** [`api.ts`](../../../desktop/src/renderer/src/lib/api.ts) `TeamRoleIO` + pola w `TeamRole`;
+  [`SubagentsPanel.tsx`](../../../desktop/src/renderer/src/components/extensions/SubagentsPanel.tsx) — pole
   **Instructions (role persona)** (edytuje `instructions`; init z `prompt` dla builtinów — fallback) +
   komponent `IoListEditor` (name / typ text|file / req / description + Add/Remove) dla **Inputs** i
   **Outputs**. `blankRole()` uzupełniony.
@@ -285,7 +285,7 @@ orkiestrator wie, co podać i co dostanie z powrotem.
 szybciej (brak kopiowania), naturalny diff, integracja z gitem. **Opcja, NIE zamiennik** — kopia
 zostaje domyślną (działa, gdy workspace nie jest repo / brak gita).
 
-### 4.1 Wariant git w [`worktree.py`](../caelo_core/agent/worktree.py)
+### 4.1 Wariant git w [`worktree.py`](../../../caelo_core/agent/worktree.py)
 - `is_git_repo(root) -> bool` (sprawdź `.git` lub `git -C root rev-parse`).
 - `create_worktree(src_root, dest_root, *, use_git: bool)`:
   - `use_git and is_git_repo` → `git -C <src> worktree add --detach <dest> HEAD` (scrubbed env +
@@ -300,7 +300,7 @@ zostaje domyślną (działa, gdy workspace nie jest repo / brak gita).
   snapshot do checkpointu M13; działa identycznie dla obu wariantów = scalenie cofalne).
 
 ### 4.2 Wpięcie + config
-- [`team.py`](../caelo_core/agent/team.py:193) `_workspace_for_role`/`new_worktree_path`: wybór
+- [`team.py`](../../../caelo_core/agent/team.py:193) `_workspace_for_role`/`new_worktree_path`: wybór
   wariantu z flagi zespołu/configu; `_finalize_worktree`/`_cleanup_worktree` wołają warianty
   `discard`. `worktrees_base` bez zmian (`config.WORKTREES_DIR`).
 - `config.py` `AGENT_GIT_WORKTREE` (env `CAELO_GIT_WORKTREE`, domyślnie OFF → kopia); headless flaga
@@ -317,7 +317,7 @@ zostaje domyślną (działa, gdy workspace nie jest repo / brak gita).
   **Live:** realne `git worktree add/remove` na repo usera.
 
 ### ✅ Realizacja (2026-06-07)
-- **Warstwa git** w [`worktree.py`](../caelo_core/agent/worktree.py): `is_git_repo` (top-level repo,
+- **Warstwa git** w [`worktree.py`](../../../caelo_core/agent/worktree.py): `is_git_repo` (top-level repo,
   nie podkatalog — przez `git rev-parse --show-toplevel`), `create_worktree(src, dest, *, use_git)`
   (`git worktree add --detach HEAD` gdy repo+flaga, inaczej `copy_worktree`; zwraca rodzaj
   `'git'|'copy'`), `_compute_changes_git` (`git add -A` + `git diff --cached --no-renames
@@ -329,14 +329,14 @@ zostaje domyślną (działa, gdy workspace nie jest repo / brak gita).
   wariant. `apply_changes` **bez zmian** (czyta pliki z worktree → zapis przez sandbox + snapshot M13
   = scalenie cofalne). `discard_worktree(wt, *, kind, src_root)`: git → `git worktree remove --force`
   + `prune`; inaczej `rmtree`.
-- **Wpięcie** [`team.py`](../caelo_core/agent/team.py): `SubAgent._workspace_for_role` woła
+- **Wpięcie** [`team.py`](../../../caelo_core/agent/team.py): `SubAgent._workspace_for_role` woła
   `create_worktree(..., use_git=self.team.use_git_worktree)` i zapamiętuje `_worktree_kind`;
   `_finalize_worktree`/`_cleanup_worktree` przekazują `kind`+`src_root`. `PendingMerge`/`MergeStore`
   niosą `kind`+`src_root`, więc apply/reject/clear sprzątają właściwym wariantem (brak osieroconych
   wpisów `.git/worktrees`). `TeamManager.use_git_worktree` z `config.AGENT_GIT_WORKTREE`, odświeżane
   w `run()`.
-- **Config + flaga:** [`config.py`](../config.py) `AGENT_GIT_WORKTREE` (env `CAELO_GIT_WORKTREE`,
-  **domyślnie OFF** → kopia); headless [`--worktree`](../caelo_core/headless.py) (parytet CLI
+- **Config + flaga:** [`config.py`](../../../config.py) `AGENT_GIT_WORKTREE` (env `CAELO_GIT_WORKTREE`,
+  **domyślnie OFF** → kopia); headless [`--worktree`](../../../caelo_core/headless.py) (parytet CLI
   `--worktree [NAME]`; ustawia flagę na bieg, jak `--sandbox`). **Bez UI** (plan: frontend opcjonalny).
 - **Różnica semantyczna (świadoma, opt-in):** git-worktree startuje z **HEAD** (stan zacommitowany),
   kopia z bieżącego drzewa roboczego — przy włączonej opcji subagent pracuje od HEAD; diff liczony vs
@@ -358,7 +358,7 @@ zostaje domyślną (działa, gdy workspace nie jest repo / brak gita).
 opcjonalnie — `web_search`. „Tylko Grok" + reżim bezpieczeństwa: https-only, allowlista domen,
 cap rozmiaru, **bramka z prefiksem `WebFetch(domain:…)` z B4** (matcher już istnieje).
 
-### 5.1 Narzędzia ([`tools.py`](../caelo_core/agent/tools.py:62))
+### 5.1 Narzędzia ([`tools.py`](../../../caelo_core/agent/tools.py:62))
 - `TOOLS` += schemat `web_fetch` (`{url, max_bytes?}`) i (opcjonalnie) `web_search` (`{query}`).
 - `web_fetch(ws, url, **_) -> str`: walidacja **https-only** + host w allowliście (reużyj wzorca
   pobrań mediów: `backend_media` `MAX_MEDIA_BYTES`/`requests` https-only + size-cap, P1-14) →
@@ -370,13 +370,13 @@ cap rozmiaru, **bramka z prefiksem `WebFetch(domain:…)` z B4** (matcher już i
 - `_EXECUTORS` += `web_fetch`/`web_search`.
 
 ### 5.2 Bramka + widoczność
-- [`permissions.py`](../caelo_core/agent/permissions.py): `web_fetch`/`web_search` **NIE** READONLY
+- [`permissions.py`](../../../caelo_core/agent/permissions.py): `web_fetch`/`web_search` **NIE** READONLY
   bez bramki — to egress sieciowy. Traktuj jako mutujące-pod-bramką (lub osobna klasa) z prefiksem
   reguł `WebFetch`.
-- [`permission_rules.py`](../caelo_core/agent/permission_rules.py): `targets_for_tool` mapuje
+- [`permission_rules.py`](../../../caelo_core/agent/permission_rules.py): `targets_for_tool` mapuje
   `web_fetch` → `WebFetch` (target = URL/host) — matcher `_match_webfetch` (domain:+globy) **gotowy**
   z B4. `web_search` → `WebFetch` (target = `domain:search`) lub własny prefiks (decyzja §9).
-- [`session.py`](../caelo_core/agent/session.py:228) `_all_tools`: **advertuj tylko gdy włączone**
+- [`session.py`](../../../caelo_core/agent/session.py:228) `_all_tools`: **advertuj tylko gdy włączone**
   (config/`--disable-web-search` off) — wzorzec `lsp` (ukryte gdy brak, by model nie planował wokół
   niedostępnej zdolności). Bramka/deny przez istniejące ścieżki `_gate_mutation`/`evaluate_rules`.
 - `config.py` `WEB_FETCH_ENABLED` + `WEB_FETCH_ALLOW_DOMAINS`; headless `--disable-web-search`
@@ -391,28 +391,28 @@ cap rozmiaru, **bramka z prefiksem `WebFetch(domain:…)` z B4** (matcher już i
 ### ✅ Realizacja (2026-06-07)
 - **Zakres:** zrobione `web_fetch` (prosty, gated); **`web_search` świadomie odłożone** (decyzja
   §11 — wymaga przepięcia `responses_client`+klucza do egzekutora narzędzia; follow-up).
-- **Egzekutor** [`tools.py`](../caelo_core/agent/tools.py) `web_fetch(ws, url, max_bytes=)`:
+- **Egzekutor** [`tools.py`](../../../caelo_core/agent/tools.py) `web_fetch(ws, url, max_bytes=)`:
   **https-only**, **SSRF-guard** (`_web_host_blocked`: localhost/loopback/sieci prywatne/link-local/
   reserved/multicast jako literał IP), opcjonalna **twarda allowlista hostów**
   (`WEB_FETCH_ALLOW_DOMAINS`, subdomeny), **cap** rozmiaru + **re-walidacja po redirectach**
   (allowed→blocked), HTML→tekst (`_html_to_text`, bez nowej zależności), błąd sieci → **generyczny**
   komunikat (`type(exc).__name__`, surowy log). `import requests`+`config` w tools; `_EXECUTORS` += web_fetch.
-- **Bramka** [`permissions.py`](../caelo_core/agent/permissions.py): `web_fetch` w **MUTATING** (egress,
+- **Bramka** [`permissions.py`](../../../caelo_core/agent/permissions.py): `web_fetch` w **MUTATING** (egress,
   NIE readonly); klucz „Always allow" **per-host** (`webfetch:<host>` — jedno zatwierdzenie nie
-  autoryzuje innych hostów). [`permission_rules.py`](../caelo_core/agent/permission_rules.py)
+  autoryzuje innych hostów). [`permission_rules.py`](../../../caelo_core/agent/permission_rules.py)
   `targets_for_tool`: `web_fetch` → `WebFetch(url)` (matcher `domain:`/glob z B4 — deny>allow).
-- **Widoczność** [`session.py`](../caelo_core/agent/session.py): `WEB_FETCH_TOOL` advertowany **tylko**
+- **Widoczność** [`session.py`](../../../caelo_core/agent/session.py): `WEB_FETCH_TOOL` advertowany **tylko**
   gdy `config.WEB_FETCH_ENABLED` **i** orkiestrator (`tool_names is None`) — ukryty gdy wyłączone i
   dla subagentów (wzorzec `lsp`). Egzekucja idzie zwykłą ścieżką mutującą (plan-mode blokuje, bypass
   auto-akceptuje, deny/allow przez istniejące checki).
-- **Config + flaga:** [`config.py`](../config.py) `WEB_FETCH_ENABLED` (env `CAELO_WEB_FETCH`,
+- **Config + flaga:** [`config.py`](../../../config.py) `WEB_FETCH_ENABLED` (env `CAELO_WEB_FETCH`,
   **domyślnie OFF**), `WEB_FETCH_ALLOW_DOMAINS` (`CAELO_WEB_FETCH_DOMAINS` CSV), `WEB_FETCH_MAX_BYTES`/
-  `WEB_FETCH_TIMEOUT_S`; headless [`--disable-web-search`](../caelo_core/headless.py) (parytet CLI —
+  `WEB_FETCH_TIMEOUT_S`; headless [`--disable-web-search`](../../../caelo_core/headless.py) (parytet CLI —
   wyłącza na bieg). W headless web_fetch działa tylko z `--allow "WebFetch(domain:…)"`/`--always-approve`
   (fail-closed).
-- **Frontend:** [`agentClient.ts`](../desktop/src/renderer/src/lib/agentClient.ts) `ApprovalDetail.url`
+- **Frontend:** [`agentClient.ts`](../../../desktop/src/renderer/src/lib/agentClient.ts) `ApprovalDetail.url`
   + parser; karta zatwierdzenia `web_fetch` (URL + „Web/network") w
-  [`AgentPanel.tsx`](../desktop/src/renderer/src/components/code/AgentPanel.tsx) (+ `preview_change`
+  [`AgentPanel.tsx`](../../../desktop/src/renderer/src/components/code/AgentPanel.tsx) (+ `preview_change`
   zwraca `{kind:"web_fetch",url}`).
 - **Selfchecki:** `agent_selfcheck` `test_web_fetch` (+19: https-only, SSRF loopback/localhost/private,
   allowlista+subdomeny, redirect re-walidacja, cap+truncation, generyczny błąd, MUTATING, default
@@ -437,11 +437,11 @@ jak CLI (`--project-root`, walk po `.git`). **Znaczna część już zrobiona w B
 - `config.py` (lub `caelo_core/agent/project.py`): `find_project_root(start) -> Path` — walk w górę
   za `.git` (cap głębokości; `GIT_CEILING_DIRECTORIES` opcjonalnie). Parytet CLI: `--project-root`/
   `--no-project-root`/`--cwd-only`.
-- [`headless.py`](../caelo_core/headless.py:198): gdy `--cwd` zagnieżdżone w repo, `set_workspace`
+- [`headless.py`](../../../caelo_core/headless.py:198): gdy `--cwd` zagnieżdżone w repo, `set_workspace`
   może użyć korzenia projektu (flaga; domyślnie zachowanie dziś = `--cwd` jako root, bez regresji).
 
 ### 6.2 Walk reguł root↔cwd
-- [`caelomd.py`](../caelo_core/agent/caelomd.py): obok `_read_dir_md(root)`+`_read_dir_md(global)`
+- [`caelomd.py`](../../../caelo_core/agent/caelomd.py): obok `_read_dir_md(root)`+`_read_dir_md(global)`
   dodaj **walk od korzenia projektu do workspace/cwd** (sklejanie, deeper-wins; cap per plik). B5
   §1.1 świadomie pominął walk — to jest jego dokończenie. Zachowaj dedup po `normcase` + adnotacje
   źródła. (W GUI workspace = projekt, więc realna wartość głównie w headless `--cwd`.)
@@ -456,19 +456,19 @@ jak CLI (`--project-root`, walk po `.git`). **Znaczna część już zrobiona w B
   zregresowane (single-root path nadal działa). **Uwaga:** to logika discovery, nie tekst UI (OK).
 
 ### ✅ Realizacja (2026-06-07)
-- **Nowy leaf** [`agent/project.py`](../caelo_core/agent/project.py): `find_project_root(start)` (walk
+- **Nowy leaf** [`agent/project.py`](../../../caelo_core/agent/project.py): `find_project_root(start)` (walk
   w górę za `.git` dir/plik; cap głębokości + `GIT_CEILING_DIRECTORIES`; brak repo → `start`) i
   `project_dir_chain(ws_root)` (katalogi od korzenia repo DO workspace, **najpłytszy pierwszy** =
   deeper-wins; korzeń-repo/brak-repo → `[ws_root]` = zachowanie sprzed B14). Tylko stdlib (bez cykli).
-- **CAELO.md** [`caelomd.py`](../caelo_core/agent/caelomd.py) `load_caelo_md`: zamiast tylko workspace
+- **CAELO.md** [`caelomd.py`](../../../caelo_core/agent/caelomd.py) `load_caelo_md`: zamiast tylko workspace
   czyta cały łańcuch (global → przodkowie → workspace); workspace = najgłębszy („Workspace project
   rules"), przodkowie oznaczeni („ancestor: …"). Monorepo-subdir dziedziczy reguły przodków.
-- **`.caelo/*.json` hierarchicznie** [`state.py`](../caelo_core/state.py): `reload_permission_rules`
+- **`.caelo/*.json` hierarchicznie** [`state.py`](../../../caelo_core/state.py): `reload_permission_rules`
   sumuje allow/deny z `permissions.json` całego łańcucha; `_discover_lsp_configs` scala `lsp.json`
-  (deeper wygrywa per serwer). [`sandbox/profiles.py`](../caelo_core/sandbox/profiles.py)
+  (deeper wygrywa per serwer). [`sandbox/profiles.py`](../../../caelo_core/sandbox/profiles.py)
   `_project_config` scala `sandbox.json` łańcucha (deeper per klucz). Wszystkie: pojedynczy root → jeden
   plik (bez regresji B5).
-- **Headless** [`headless.py`](../caelo_core/headless.py): flaga **`--project-root`** (opt-in) →
+- **Headless** [`headless.py`](../../../caelo_core/headless.py): flaga **`--project-root`** (opt-in) →
   workspace = `find_project_root(--cwd)` (korzeń repo); domyślnie `--cwd` jako root (bez zmiany
   granicy sandboxa). Parytet CLI.
 - **Zakres (świadomy):** walk po przodkach (korzeń-repo→workspace) DZIAŁA bez zmiany granicy workspace

@@ -68,7 +68,7 @@ rejects `..`/absolute escapes); `run_command` is NOT sandboxed in command conten
 The approval allowlist is persisted to `caelo_permissions.json` and shared by the agent WS and the
 REST `/permissions` routes.
 
-**Agent hardening (M1, see [`docs/plans/PLAN_NAPRAWY.md`](docs/plans/PLAN_NAPRAWY.md) P0-1…P0-8 — all done):**
+**Agent hardening (M1, see [`docs/plans/zrealizowane/PLAN_NAPRAWY.md`](docs/plans/zrealizowane/PLAN_NAPRAWY.md) P0-1…P0-8 — all done):**
 `run_command` **rejects shell metacharacters** (`command_metachars` in `permissions.py`) so the
 "Always allow" allowlist can't be bypassed by chaining (`git && rm`); the allowlist key is the full
 normalized command, not the exe name. It runs with a **scrubbed env** (no `CAELO_CORE_TOKEN`/
@@ -79,7 +79,7 @@ size/binary skips. Interrupted `tool_calls` get synthetic `tool` results so hist
 (xAI contract). Writes are atomic (`tools.atomic_write_text`). Don't regress these — `agent_selfcheck.py`
 asserts them (81 checks).
 
-**Round-2 hardening (M5–M6, see [`docs/plans/PLAN_NAPRAWY_2.md`](docs/plans/PLAN_NAPRAWY_2.md) — done):** the
+**Round-2 hardening (M5–M6, see [`docs/plans/zrealizowane/PLAN_NAPRAWY_2.md`](docs/plans/zrealizowane/PLAN_NAPRAWY_2.md) — done):** the
 agent WS now uses the shared **`WsStream`** (bounded queue + worker join on disconnect, so the agent
 can't write files / run commands after the socket is gone — P0-9); `command_metachars` is
 **POSIX-aware** and `run_command` runs `shell=False`+`shlex` off-Windows (P0-10); the **terminal pty
@@ -95,7 +95,7 @@ threadsafe `emit()` (backpressure) + `send()` (event-loop) + worker `track()`/jo
 A `{"type":"stop"}` frame sets a `threading.Event`. See the WS protocol docstrings at the top of
 [`routes/chat.py`](caelo_core/routes/chat.py) and [`routes/agent.py`](caelo_core/routes/agent.py).
 
-**Chat core = Responses API (M10, see [`docs/plans/PLAN_M10_CZAT.md`](docs/plans/PLAN_M10_CZAT.md)):** `/chat/stream`
+**Chat core = Responses API (M10, see [`docs/plans/zrealizowane/PLAN_M10_CZAT.md`](docs/plans/zrealizowane/PLAN_M10_CZAT.md)):** `/chat/stream`
 runs through **[`caelo_core/responses_client.py`](caelo_core/responses_client.py)** (`POST /v1/responses`,
 streaming) — live web/X search (`web_search`/`x_search`), vision (grok-4 family), document Q&A
 (`input_file`), citations + token/usage counter. Legacy `chat_completion_stream` stays only as a
@@ -106,7 +106,7 @@ is the thin endpoint/auth layer (CLAUDE.md rule). **Verified on the real API:** 
 knowledge" (B5) is **local** (`config.PROJECT_DOCS_DIR`) + attached on demand ("Attach all"), not
 `file_search`. Mirror the `responses_client` UTF-8 SSE decode if you touch streaming.
 
-**Creative = GenJob queue (M11, see [`docs/plans/PLAN_M11_TWORCZOSC.md`](docs/plans/PLAN_M11_TWORCZOSC.md)):** image
+**Creative = GenJob queue (M11, see [`docs/plans/zrealizowane/PLAN_M11_TWORCZOSC.md`](docs/plans/zrealizowane/PLAN_M11_TWORCZOSC.md)):** image
 and video generation share **one async job engine** — [`caelo_core/genjobs.py`](caelo_core/genjobs.py)
 `GenJobManager` (a `queue.Queue` + worker threads, statuses queued→running→done|failed|cancelled,
 cancel/retry/`max_active` limit, cost estimate). The **executor is injected** by `Backend` — `genjobs.py`
@@ -125,7 +125,7 @@ queue-limit asserts) + `/genjobs` guards in `api_smoke.py`. Renderer staged inpu
 frame/source) live in the **Hub context** (`lib/hub.tsx`) — panels are lazy and unmount on tab switch,
 so per-panel `useState` would lose them.
 
-**Voice = bridges + conversation pipeline (M12, see [`docs/plans/PLAN_M12_GLOS.md`](docs/plans/PLAN_M12_GLOS.md)):**
+**Voice = bridges + conversation pipeline (M12, see [`docs/plans/zrealizowane/PLAN_M12_GLOS.md`](docs/plans/zrealizowane/PLAN_M12_GLOS.md)):**
 all voice routes live in [`routes/voice.py`](caelo_core/routes/voice.py); audio flows
 **renderer → sidecar → xAI** and the key NEVER reaches the renderer (the sidecar injects
 `Authorization`). REST: `POST /voice/tts` (5 voices, language; returns audio + `chars`/`cost`) and
@@ -149,7 +149,7 @@ per-char is a **tunable estimate**) → response fields + M9 meta; renderer accu
 new routes. **xAI streaming-STT protocol/sample-rate is unconfirmed** — `parseStt` handles variants
 defensively; verify live.
 
-**Extensibility = MCP + commands + hooks + skills (M14, see [`docs/plans/PLAN_M14_ROZSZERZALNOSC.md`](docs/plans/PLAN_M14_ROZSZERZALNOSC.md)):**
+**Extensibility = MCP + commands + hooks + skills (M14, see [`docs/plans/zrealizowane/PLAN_M14_ROZSZERZALNOSC.md`](docs/plans/zrealizowane/PLAN_M14_ROZSZERZALNOSC.md)):**
 the hub became a **programmable platform** — tools serve chat AND the agent. The **MCP client** is a
 **custom thin SYNCHRONOUS layer** (`caelo_core/mcp/`), NOT the official SDK (deliberate hybrid, like
 `responses_client` vs the OpenAI SDK — zero new deps, fits the worker-thread model; `client.py` does
@@ -184,7 +184,7 @@ CAELO.md). New state files (all via `load_json_or_backup` + atomic writes, gitig
 `_unit_mcp_routes`, `_unit_commands_skills`). **Real MCP servers / live chat verified on the user's
 machine** (sandbox blocks them); don't regress P0-1…P0-8 / M5–M6.
 
-**Agent teams = subagents (M17, see [`docs/plans/PLAN_M17_SUBAGENCI.md`](docs/plans/PLAN_M17_SUBAGENCI.md)):** the
+**Agent teams = subagents (M17, see [`docs/plans/zrealizowane/PLAN_M17_SUBAGENCI.md`](docs/plans/zrealizowane/PLAN_M17_SUBAGENCI.md)):** the
 orchestrator (top-level `AgentSession`) gets a **`delegate`** tool that fans out subtasks to specialized
 **subagents**, each an **isolated sub-session on the same `session.py`** with its own history, a **role**
 persona, a **narrowed tool set**, and (for mutating roles) an **isolated worktree** — the parent's
@@ -216,7 +216,7 @@ isolation/roles/no-escalation/worktree/cascade/budget/merge/cost), `api_smoke.py
 `_unit_team_routes`). **Live delegation verified on the user's machine** (sandbox blocks xAI); don't
 regress P0-1…P0-8 / M5–M6 / M13 / M14.
 
-**Community packages = marketplace (M16, see [`docs/plans/PLAN_M16_SPOLECZNOSC.md`](docs/plans/PLAN_M16_SPOLECZNOSC.md)
+**Community packages = marketplace (M16, see [`docs/plans/zrealizowane/PLAN_M16_SPOLECZNOSC.md`](docs/plans/zrealizowane/PLAN_M16_SPOLECZNOSC.md)
 + [`docs/guides/PACKAGES.md`](docs/guides/PACKAGES.md)):** the M14 artifacts (skills/commands/MCP-configs/templates)
 become **shareable, versioned packages** — distribution over M14, **zero hosted infrastructure** (git/
 GitHub registry). A package is **`.caelopkg` = a ZIP** (`zipfile`, no new deps) with `manifest.json`
@@ -243,7 +243,7 @@ tamper, Zip-Slip/limits, registry, updates, templates) + `api_smoke.py` `_unit_p
 registry/install verified on the user's machine** (sandbox blocks the net); don't regress P0-1…P0-8 / M5–M6 /
 M13 / M14.
 
-**Quality round (M18, SWOT remediation — see [`docs/plans/PLAN_NAPRAWY_3.md`](docs/plans/PLAN_NAPRAWY_3.md), 8/8 done):**
+**Quality round (M18, SWOT remediation — see [`docs/plans/zrealizowane/PLAN_NAPRAWY_3.md`](docs/plans/zrealizowane/PLAN_NAPRAWY_3.md), 8/8 done):**
 a maintenance round (no P0) hardening testability/maintainability after M9–M17. **Structural fact:** `state.py`
 was **decomposed** (691→378 lines) — the **auth layer** moved to [`caelo_core/auth_tokens.py`](caelo_core/auth_tokens.py)
 (`require_token`/`ws_authorized`/`_ws_origin_ok`/`_warn_no_token`, testable without `Backend`; **re-exported**
@@ -258,9 +258,9 @@ E2E** (`desktop/e2e/`, over `preview:web`+`devMock`). Electron now runs with **`
 no-token dev escape logs per-request. Don't regress these; the `state`/`auth_tokens`/`backend_media` re-export
 boundary keeps the public import API stable.
 
-**Grok-CLI parity (M19, Tier-1/2/3 DONE — see [`docs/plans/PLAN_M19_TIER1.md`](docs/plans/PLAN_M19_TIER1.md) ·
-[`docs/plans/PLAN_M19_TIER2.md`](docs/plans/PLAN_M19_TIER2.md) · [`docs/plans/PLAN_M19_TIER3.md`](docs/plans/PLAN_M19_TIER3.md);
-analysis [`docs/plans/PLAN_M19_PARYTET_GROK_CLI.md`](docs/plans/PLAN_M19_PARYTET_GROK_CLI.md)):** adopts the strongest
+**Grok-CLI parity (M19, Tier-1/2/3 DONE — see [`docs/plans/zrealizowane/PLAN_M19_TIER1.md`](docs/plans/zrealizowane/PLAN_M19_TIER1.md) ·
+[`docs/plans/zrealizowane/PLAN_M19_TIER2.md`](docs/plans/zrealizowane/PLAN_M19_TIER2.md) · [`docs/plans/zrealizowane/PLAN_M19_TIER3.md`](docs/plans/zrealizowane/PLAN_M19_TIER3.md);
+analysis [`docs/plans/zrealizowane/PLAN_M19_PARYTET_GROK_CLI.md`](docs/plans/zrealizowane/PLAN_M19_PARYTET_GROK_CLI.md)):** adopts the strongest
 bits of xAI's official Grok CLI (a Claude-Code fork). **Structural fact:** the agent's session wiring (lazy
 `AgentSession` + `TeamManager` + `delegate` + M9 history record) was extracted from the WS handler into a
 **transport-neutral [`AgentRunner`](caelo_core/agent/runner.py)** (§0) — `routes/agent.py` (WS), headless and
@@ -287,7 +287,7 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   **allow** auto-accepts in `_gate_mutation` — **P0-1 preserved** (a `Bash(...)` allow never bypasses
   metachars). Rules from `caelo_settings.json` + `<ws>/.caelo/permissions.json` + CLI `--allow/--deny` +
   `PUT /permissions/rules`; `backend.reload_permission_rules()`.
-- **Tier-2 DONE** ([`docs/plans/PLAN_M19_TIER2.md`](docs/plans/PLAN_M19_TIER2.md)): **B5 ecosystem interop** — the agent
+- **Tier-2 DONE** ([`docs/plans/zrealizowane/PLAN_M19_TIER2.md`](docs/plans/zrealizowane/PLAN_M19_TIER2.md)): **B5 ecosystem interop** — the agent
   reads `AGENTS.md`/`CLAUDE.md` next to `CAELO.md` (`agent/caelomd.py`), `McpManager` merges `~/.claude.json`+
   `.mcp.json` servers (imported `enabled=False`), skills are discovered from `~/.claude/skills`. **B6
   orchestration-skills** — new roles + `skills/builtin/` packages that drive `delegate` (implement/review/design/
@@ -295,7 +295,7 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   `wrap.py` — macOS seatbelt / Linux bwrap, wired into `run_command` + MCP + LSP spawns). **B8 hybrid-memory**
   ([`caelo_core/memory.py`](caelo_core/memory.py) + [`embeddings.py`](caelo_core/embeddings.py): `/v1/embeddings`
   + an `event_embeddings` table with kNN/`hybrid_search` in `history_store`, injected via `session._maybe_inject_memory`).
-- **Tier-3 DONE** ([`docs/plans/PLAN_M19_TIER3.md`](docs/plans/PLAN_M19_TIER3.md), quick-wins): **B9 effort** (`reasoning.effort`
+- **Tier-3 DONE** ([`docs/plans/zrealizowane/PLAN_M19_TIER3.md`](docs/plans/zrealizowane/PLAN_M19_TIER3.md), quick-wins): **B9 effort** (`reasoning.effort`
   in `responses_client`/`llm`, per-role + `EffortSelect.tsx`; **reasoning_effort is MODEL-DEPENDENT** —
   grok-4.3 / grok-4.20-*reasoning support `none/low/medium/high`, but grok-4 / grok-build-* / grok-3 (non-mini)
   return 4xx if it's sent, so **both clients retry ONCE without it on 400/422** — effort is best-effort and a turn

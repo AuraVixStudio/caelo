@@ -1,6 +1,6 @@
 # Modyfikacje i rozszerzenia — Media, Voice, Załączniki, UI
 
-> **Status:** WYKONANE (2026-06-03). Nadbudowa na Fazach 0–8 z [`REBUILD_PLAN.md`](REBUILD_PLAN.md).
+> **Status:** WYKONANE (2026-06-03). Nadbudowa na Fazach 0–8 z [`REBUILD_PLAN.md`](../REBUILD_PLAN.md).
 > **Zakres:** dostosowanie paneli Image/Video do możliwości API Grok, dodanie modułu Voice
 > (TTS/STT/realtime), załączanie plików w Czacie i Code, drobne poprawki UI.
 > **Weryfikacja:** `npm run typecheck` (czysty) + import backendu + podgląd web. Realne wywołania

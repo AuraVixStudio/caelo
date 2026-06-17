@@ -11,8 +11,8 @@
 > Wszystkie zadania zrobione. **Rebranding → „Caelo"** (pełny, też wewnętrzny: `grok_core`→`caelo_core`,
 > `grok_*`→`caelo_*`, `GROK_CORE_*`→`CAELO_CORE_*`, `window.grok`→`window.caelo`, `GROK.md`→`CAELO.md`)
 > z **migracją bez utraty danych** (config + localStorage). **Fundament cross-platform:** abstrakcja PTY
-> ([`pty_compat.py`](../caelo_core/pty_compat.py)), tree-kill SIGTERM→SIGKILL na POSIX, `DATA_DIR` per-OS,
-> audyt Windows-only czysty — nowy selfcheck [`crossplatform_check.py`](../caelo_core/tools/crossplatform_check.py)
+> ([`pty_compat.py`](../../../caelo_core/pty_compat.py)), tree-kill SIGTERM→SIGKILL na POSIX, `DATA_DIR` per-OS,
+> audyt Windows-only czysty — nowy selfcheck [`crossplatform_check.py`](../../../caelo_core/tools/crossplatform_check.py)
 > (23/23). **OSS:** Apache-2.0 + NOTICE + CLA(+bot) + CONTRIBUTING + CODE_OF_CONDUCT + SECURITY +
 > przepisany README (BYO-key). **Bezpieczeństwo:** `.gitleaks.toml` + pre-commit + job CI; historia
 > czysta z sekretów; **telemetrii BRAK**. **CI** rozszerzone (7 self-checków + lint + vitest + gitleaks).
@@ -55,15 +55,15 @@
 - **DoD:** repo ma komplet plików; CLA blokuje merge bez podpisu; README prowadzi nowego użytkownika
   od zera do działania z własnym kluczem xAI.
 - **Weryfikacja:** świeży clone + kroki z README → aplikacja startuje; PR bez CLA nie przechodzi.
-- **Status (2026-06-05): DONE.** Dodane (po angielsku, pod publiczne OSS): [`LICENSE`](../LICENSE)
-  (pełny Apache-2.0, copyright „Caelo contributors"), [`NOTICE`](../NOTICE) (atrybucja + nota o
-  znaku towarowym/nominatywnym użyciu xAI/Grok + komponenty 3rd-party), [`CLA.md`](../CLA.md)
+- **Status (2026-06-05): DONE.** Dodane (po angielsku, pod publiczne OSS): [`LICENSE`](../../../LICENSE)
+  (pełny Apache-2.0, copyright „Caelo contributors"), [`NOTICE`](../../../NOTICE) (atrybucja + nota o
+  znaku towarowym/nominatywnym użyciu xAI/Grok + komponenty 3rd-party), [`CLA.md`](../../../CLA.md)
   (grant copyright+patent + **klauzula relicencjonowania** pod przejęcie; dyskl. „do weryfikacji
-  prawnej") + workflow [`cla.yml`](../.github/workflows/cla.yml) (contributor-assistant — blokuje
+  prawnej") + workflow [`cla.yml`](../../../.github/workflows/cla.yml) (contributor-assistant — blokuje
   merge bez podpisu; URL dokumentu rozwiązuje się po publikacji; wymaga sekretu
-  `CLA_SIGNATURES_TOKEN`), [`CONTRIBUTING.md`](../CONTRIBUTING.md) (setup, lista self-checków,
-  konwencje, proces PR), [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) (Contributor Covenant 2.1 przez
-  odwołanie — wersja odporna na filtr treści), [`SECURITY.md`](../SECURITY.md) (zgłaszanie, BYO-key,
+  `CLA_SIGNATURES_TOKEN`), [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) (setup, lista self-checków,
+  konwencje, proces PR), [`CODE_OF_CONDUCT.md`](../../../CODE_OF_CONDUCT.md) (Contributor Covenant 2.1 przez
+  odwołanie — wersja odporna na filtr treści), [`SECURITY.md`](../../../SECURITY.md) (zgłaszanie, BYO-key,
   „nigdy nie commituj `caelo_auth.json`", model bezpieczeństwa, telemetria=brak).
   **README** przepisany na markę Caelo z **BYO-key quickstart** (klucz/OAuth → Settings/.env →
   precedencja). **Uwaga:** placeholder kontaktu CoC i sekret CLA bota do uzupełnienia przy publikacji.
@@ -97,9 +97,9 @@
 - **Weryfikacja:** gitleaks na pełnej historii przechodzi.
 - **Status (2026-06-05): DONE.** `.gitignore` rozszerzony o siatkę `caelo_*` (json/db/log) +
   zachowana siatka `grok_*` (legacy) — potwierdzone `git check-ignore`, że `caelo_auth.json` i
-  reszta danych są ignorowane (po migracji nazw nie było wycieku). Dodane: [`.gitleaks.toml`](../.gitleaks.toml)
+  reszta danych są ignorowane (po migracji nazw nie było wycieku). Dodane: [`.gitleaks.toml`](../../../.gitleaks.toml)
   (reguły domyślne + allowlist: publiczny PKCE client_id, lockfile'y, pliki danych),
-  [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) (gitleaks + detect-private-key + sanity),
+  [`.pre-commit-config.yaml`](../../../.pre-commit-config.yaml) (gitleaks + detect-private-key + sanity),
   oraz **job „Secret scan (gitleaks)" w CI** (pełna historia, `fetch-depth: 0`).
   **Audyt historii (ręczny, narzędzia offline):** żaden plik `auth.json`/`.env`/`.pem`/`.key`
   nigdy nie dodany; skan treści CAŁEJ historii pod `xai-…`/`sk-…`/`BEGIN … PRIVATE KEY` — pusty.
@@ -148,13 +148,13 @@
 - **DoD:** abstrakcja ładuje się na obu; na Windows działa jak dziś; ścieżka Unix zaimplementowana
   (testowana, gdy powstanie build mac/Linux).
 - **Weryfikacja/Selfcheck:** selftest interfejsu PTY (oznacz platform-specyficzne jako skip poza danym OS).
-- **Status (2026-06-05): DONE.** Nowy moduł [`caelo_core/pty_compat.py`](../caelo_core/pty_compat.py)
+- **Status (2026-06-05): DONE.** Nowy moduł [`caelo_core/pty_compat.py`](../../../caelo_core/pty_compat.py)
   — `open_pty()` zwraca obiekt o API zgodnym z `winpty.PtyProcess`
   (`read/write/setwinsize/isalive/terminate`). Windows: pywinpty **ładowane leniwie** (brak →
   `PtyUnavailable` z instrukcją). Unix: `UnixPtyProcess` na **stdlib** (`pty`+`os`+`termios`+`fcntl`,
   zero nowych zależności) z własną grupą procesów (`start_new_session`). `routes/terminal.py` używa
   `open_pty` (nie zna platformy); scrubbed env zachowany. Selfcheck:
-  [`crossplatform_check.py`](../caelo_core/tools/crossplatform_check.py) — interfejs + echo round-trip
+  [`crossplatform_check.py`](../../../caelo_core/tools/crossplatform_check.py) — interfejs + echo round-trip
   na bieżącym OS (PASS na Windows), Unix-path importuje się czysto (brak top-level `import winpty`).
 
 ### ✅ M15-6 [P0] Abstrakcja tree-kill / sygnałów  — S/M  — **DONE**
@@ -218,9 +218,9 @@
 - **Status (2026-06-05): DONE (config + scaffolding; faktyczne buildy mac/Linux na żądanie).**
   `electron-builder.yml` → cele **mac** (`dmg`, x64+arm64, kategoria developer-tools) i **linux**
   (`AppImage` + `deb`, maintainer/synopsis) obok NSIS. Sidecar cross-platform:
-  [`build_sidecar.sh`](../build_sidecar.sh) (odpowiednik `.ps1` dla mac/Linux; spec pomija winpty,
+  [`build_sidecar.sh`](../../../build_sidecar.sh) (odpowiednik `.ps1` dla mac/Linux; spec pomija winpty,
   terminal na stdlib `pty`). Skrypty `npm`: `pack:sidecar:unix`, `dist:mac`, `dist:linux`.
-  **Matryca CI per-OS:** [`release.yml`](../.github/workflows/release.yml) — tag `v*` → buduje sidecar
+  **Matryca CI per-OS:** [`release.yml`](../../../.github/workflows/release.yml) — tag `v*` → buduje sidecar
   na runnerze danego OS + `electron-builder --publish always` (Win/mac/Linux, `fail-fast:false`).
   **Podpisywanie:** zostawione jako opcjonalne (zakomentowane env: `CSC_LINK`/`CSC_KEY_PASSWORD` dla
   Authenticode, `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` dla notaryzacji) — decyzja

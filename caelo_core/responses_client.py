@@ -6,7 +6,7 @@ Nowoczesny, jeden kanał czatu gotowy na **narzędzia serwerowe** (live search:
 searcha: stare Live Search przez `search_parameters` zwraca od 12.01.2026
 **410 Gone**, a samo `chat/completions` jest legacy.
 
-ZASADY (CLAUDE.md / docs/PLAN_M10_CZAT.md — przeczytaj przed zmianą):
+ZASADY (CLAUDE.md / docs/zrealizowane/PLAN_M10_CZAT.md — przeczytaj przed zmianą):
 - Klient ŻYJE TU, NIE w root `api_manager.py` (nie restrukturyzujemy rdzenia repo).
   To jedyna „cienka warstwa endpoint/auth" — hedge na zmiany xAI, nie multi-provider.
 - **SSE dekodowane JAWNIE jako UTF-8** (jak `chat_completion_stream`):

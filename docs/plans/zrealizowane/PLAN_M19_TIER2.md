@@ -22,13 +22,13 @@
 
 | Obszar | Stan / plik | Wniosek dla Tier-2 |
 |---|---|---|
-| Reguły projektu | [`agent/caelomd.py`](../caelo_core/agent/caelomd.py) — czyta `CAELO.md`/`GROK.md` z root+global | **B5**: dodać AGENTS.md/CLAUDE.md (alternatywne nazwy) |
-| MCP config | [`mcp/manager.py`](../caelo_core/mcp/manager.py) `_load` ← `config.MCP_FILE` (`load_json_or_backup`) | **B5**: scalić `~/.claude.json` + `<ws>/.mcp.json` |
-| Skille | [`skills/manager.py`](../caelo_core/skills/manager.py) `_scan(BUILTIN_DIR)`+`_scan(SKILLS_DIR)`; format SKILL.md (frontmatter name/description/triggers + body); `injected_text()` | **B5**: scan `~/.claude/skills`+`.claude/skills`; **B6**: nowe builtiny |
-| Role subagentów | [`agent/roles.py`](../caelo_core/agent/roles.py) `BUILTIN_ROLES` (researcher/reviewer/implementer/tester) | **B6**: dodać design-doc-writer/reviewer, security-auditor, test-writer |
+| Reguły projektu | [`agent/caelomd.py`](../../../caelo_core/agent/caelomd.py) — czyta `CAELO.md`/`GROK.md` z root+global | **B5**: dodać AGENTS.md/CLAUDE.md (alternatywne nazwy) |
+| MCP config | [`mcp/manager.py`](../../../caelo_core/mcp/manager.py) `_load` ← `config.MCP_FILE` (`load_json_or_backup`) | **B5**: scalić `~/.claude.json` + `<ws>/.mcp.json` |
+| Skille | [`skills/manager.py`](../../../caelo_core/skills/manager.py) `_scan(BUILTIN_DIR)`+`_scan(SKILLS_DIR)`; format SKILL.md (frontmatter name/description/triggers + body); `injected_text()` | **B5**: scan `~/.claude/skills`+`.claude/skills`; **B6**: nowe builtiny |
+| Role subagentów | [`agent/roles.py`](../../../caelo_core/agent/roles.py) `BUILTIN_ROLES` (researcher/reviewer/implementer/tester) | **B6**: dodać design-doc-writer/reviewer, security-auditor, test-writer |
 | Delegacja | `delegate` tool + `TeamManager` (M17) — orkiestrator w pętli `delegate` | **B6**: skille = prompty sterujące `delegate` |
 | Podprocesy | `tools.run_command` (Popen: shell na Win / argv POSIX, `scrubbed_env`+`_tree_kill`+`start_new_session`); MCP/LSP analogicznie | **B7**: owinąć spawn sandboxem OS |
-| Pamięć/historia | [`history_store.py`](../caelo_core/history_store.py): FTS5 `history_fts` (MATCH), `record_event`; `vector_store_id` = martwy relikt | **B8**: dodać embeddingi + KNN + 1. tura |
+| Pamięć/historia | [`history_store.py`](../../../caelo_core/history_store.py): FTS5 `history_fts` (MATCH), `record_event`; `vector_store_id` = martwy relikt | **B8**: dodać embeddingi + KNN + 1. tura |
 | Klient embeddings | **brak** (0 trafień w `responses_client`/`api_manager`) | **B8**: nowy klient xAI **lub** lokalny (spike) |
 | Ścieżki | `config.py`: `DATA_DIR`, `MCP_FILE`, `SKILLS_DIR`, …; **brak** `~/.claude` | B5: dodać `CLAUDE_HOME`/`CLAUDE_JSON` (`Path.home()`) |
 
@@ -44,7 +44,7 @@ menedżera przy zmianie korzenia + `reload_lsp()`. **B5** stosuje go do `backend
 Trzy niezależne rozszerzenia discovery; każde osobno wartościowe.
 
 ### 1.1 Reguły projektu: AGENTS.md / CLAUDE.md (S) — ✅ DONE (2026-06-06)
-- [x] [`agent/caelomd.py`](../caelo_core/agent/caelomd.py): rozszerzono `_read_dir_md` o alternatywne nazwy
+- [x] [`agent/caelomd.py`](../../../caelo_core/agent/caelomd.py): rozszerzono `_read_dir_md` o alternatywne nazwy
   (kolejność pierwszeństwa): natywny `CAELO.md` (a gdy brak — legacy `GROK.md`) → `AGENTS.md`/`AGENT.md`/
   `Agents.md` → `CLAUDE.md`/`Claude.md` (`INTEROP_MD_NAMES`). Czyta **wszystkie istniejące** i skleja
   (cap per plik = `MAX_CAELO_MD_BYTES`), z adnotacją źródła `### From <name>`. Dedup po `os.path.normcase`
@@ -62,7 +62,7 @@ Trzy niezależne rozszerzenia discovery; każde osobno wartościowe.
 
 ### 1.2 MCP z `~/.claude.json` + `<ws>/.mcp.json` (M) — ✅ DONE (2026-06-06)
 - [x] `config.py`: dodano `CLAUDE_JSON = Path.home() / ".claude.json"` (M19-B5 §1.2).
-- [x] [`mcp/manager.py`](../caelo_core/mcp/manager.py): konstruktor dostał jawne źródła interop
+- [x] [`mcp/manager.py`](../../../caelo_core/mcp/manager.py): konstruktor dostał jawne źródła interop
   (`workspace_root`/`claude_json`, domyślnie `None` = brak discovery — czyste zachowanie testów; Backend
   wstrzykuje realne ścieżki). `_load` po natywnym `caelo_mcp.json` **scala** `mcpServers` z `<ws>/.mcp.json`
   (projekt) i `~/.claude.json` (global). Mapper `_claude_server_to_cfg`: stdio (`command`+`args`→argv, `env`/
@@ -85,7 +85,7 @@ Trzy niezależne rozszerzenia discovery; każde osobno wartościowe.
 
 ### 1.3 Skille z `~/.claude/skills` + `<ws>/.claude/skills` (S–M) — ✅ DONE (2026-06-06)
 - [x] `config.py`: dodano `CLAUDE_HOME = Path.home() / ".claude"` (M19-B5 §1.3).
-- [x] [`skills/manager.py`](../caelo_core/skills/manager.py): `SkillManager` dostał jawne `workspace_root`/
+- [x] [`skills/manager.py`](../../../caelo_core/skills/manager.py): `SkillManager` dostał jawne `workspace_root`/
   `claude_home` (domyślnie `None` = brak interopu — czyste testy; Backend wstrzykuje realne). `_all` skanuje w
   rosnącej kolejności pierwszeństwa: **builtin < user(`SKILLS_DIR`) < `~/.claude/skills` < `<ws>/.claude/skills`
   < `<ws>/.grok/skills`** (każdy `update` nadpisuje po id). `_read_skill`/`_scan`/`_public` dostały pole
@@ -119,13 +119,13 @@ mapowanie kształtu Claude→nasz (tolerancyjny parser). **Akceptacja:** AGENTS.
 CLI). Skill = prompt wstrzykiwany w system prompt orkiestratora, który steruje narzędziem `delegate`
 (M17) i rolami. Działa w JEDNEJ sesji orkiestratora wołającej `delegate` wielokrotnie.
 
-### 2.1 Nowe role ([`agent/roles.py`](../caelo_core/agent/roles.py) `BUILTIN_ROLES`) — ✅
+### 2.1 Nowe role ([`agent/roles.py`](../../../caelo_core/agent/roles.py) `BUILTIN_ROLES`) — ✅
 - [x] Dodano 4 role do `BUILTIN_ROLES` (`effective_tools` = rola ∩ rodzic — bez eskalacji, niezmienione):
   `design-doc-writer` (mutujące-w-worktree: write_file/edit_file), `design-doc-reviewer` (READONLY: krytyka,
   `VERDICT: APPROVE/REVISE`), `security-auditor` (READONLY: audyt podatności), `test-writer`
   (mutujące-w-worktree: write+run_command). Persony wzorowane na `bundled/personas/*.toml` z Grok CLI.
 
-### 2.2 Wbudowane skille ([`skills/builtin/<id>/SKILL.md`](../caelo_core/skills/builtin/)) — ✅
+### 2.2 Wbudowane skille ([`skills/builtin/<id>/SKILL.md`](../../../caelo_core/skills/builtin/)) — ✅
 - [x] Dodano 6 builtinów (spec **już** pakuje `skills/builtin/**/*.md` — bez zmian pakowania). Każdy =
   frontmatter (`name`/`description`/`triggers`) + body-orkiestracja sterujące `delegate`:
   **`implement`** (pętla implement->review->fix, rundy = „effort"), **`review`** (reviewerzy na lokalny
@@ -159,7 +159,7 @@ izolację **procesów potomnych** `run_command`/MCP/LSP na poziomie jądra. **Of
 zmienia zachowania. Wybrano **per-komenda** (§3.3 rekomendacja), nie in-process.
 
 ### 3.1 Model profili + config — ✅
-- [x] [`sandbox/profiles.py`](../caelo_core/sandbox/profiles.py): `Profile` + `build_profile` dla
+- [x] [`sandbox/profiles.py`](../../../caelo_core/sandbox/profiles.py): `Profile` + `build_profile` dla
   `off`/`workspace` (read-all, write root+/tmp+DATA_DIR)/`read-only` (write tylko DATA_DIR)/`strict`
   (read/write tylko root + `restrict_network`); nieznana nazwa → `off` (fail-safe). `sensitive_paths()`
   (`~/.ssh`/`~/.aws`/`~/.gnupg`/`DATA_DIR/caelo_auth.json`) ZAWSZE na deny-liście.
@@ -168,15 +168,15 @@ zmienia zachowania. Wybrano **per-komenda** (§3.3 rekomendacja), nie in-process
   `permissions.json`), bez ryzyka wersji `tomllib`. Klucze: `default_profile`/`read_only`/`read_write`/
   `deny`/`restrict_network`. Nazwa profilu: projekt > globalny plik > env `config.SANDBOX_PROFILE`.
 
-### 3.2 Egzekucja per-komenda ([`caelo_core/sandbox/`](../caelo_core/sandbox/)) — ✅
+### 3.2 Egzekucja per-komenda ([`caelo_core/sandbox/`](../../../caelo_core/sandbox/)) — ✅
 - [x] `wrap(argv, profile, root, platform=, which=)` (PURE, testowalne): **macOS** → `sandbox-exec -p
   <seatbelt>` (`seatbelt_profile()` generuje politykę .sb: deny network/write + allow root, deny sekretów na
   końcu); **Linux** → `bwrap` jeśli na PATH (`linux_bwrap_argv`: ro-bind `/` lub minimalny system w strict,
   bind zapisywalnych korzeni, maska sekretów tmpfs/`/dev/null`, `--unshare-net` w strict) — inaczej **no-op +
   ostrzeżenie**; **Windows/inne** → no-op (Job/tree-kill już są). `wrap_command(argv, root)` = wejście +
   `resolve_profile` + log; `off`→no-op.
-- [x] Wpięcie wspólnym helperem: [`tools.run_command`](../caelo_core/agent/tools.py) (gałąź POSIX-argv,
-  **fail-open**), [`mcp/client.py`](../caelo_core/mcp/client.py) i [`lsp/client.py`](../caelo_core/lsp/client.py)
+- [x] Wpięcie wspólnym helperem: [`tools.run_command`](../../../caelo_core/agent/tools.py) (gałąź POSIX-argv,
+  **fail-open**), [`mcp/client.py`](../../../caelo_core/mcp/client.py) i [`lsp/client.py`](../../../caelo_core/lsp/client.py)
   spawn. Off-by-default → wszędzie czysty no-op (zero regresji).
 - [x] Opt-in: flaga headless **`--sandbox <profile>`** (B1) + env `CAELO_SANDBOX` + `sandbox.json`
   `default_profile`. Log zdarzeń: `DATA_DIR/sandbox-events.jsonl` (gitignored).
@@ -184,7 +184,7 @@ zmienia zachowania. Wybrano **per-komenda** (§3.3 rekomendacja), nie in-process
 ### 3.3 Alternatywa in-process — odrzucona (jak rekomendacja)
 Per-komenda (granularne, nie psuje sidecara, który potrzebuje sieci do xAI + zapisu DATA_DIR).
 
-- [x] Selfcheck: nowy [`sandbox_check.py`](../caelo_core/tools/sandbox_check.py) (**29/29**, mockowalne
+- [x] Selfcheck: nowy [`sandbox_check.py`](../../../caelo_core/tools/sandbox_check.py) (**29/29**, mockowalne
   per-platforma: profile, `resolve_profile` z `sandbox.json`, `wrap()` bwrap/seatbelt/no-op, sekrety na
   deny-liście, `run_command` off=bez zmian); w pytze (`tests/test_selfchecks.py`). Bateria bez regresji
   (agent/mcp/lsp/headless/api_smoke…). **Realna egzekucja** (bwrap/Seatbelt faktycznie blokuje zapis) = live
@@ -202,26 +202,26 @@ Per-komenda (granularne, nie psuje sidecara, który potrzebuje sieci do xAI + za
 STUB-embedderze (bez sieci); jedyny element zależny od spike'u to potwierdzenie żywego endpointu xAI.**
 
 ### 4.1 Źródło embeddingów — ✅ klient gotowy (live = spike §9)
-- [x] Nowy [`caelo_core/embeddings.py`](../caelo_core/embeddings.py) — cienki klient (jak `responses_client`:
+- [x] Nowy [`caelo_core/embeddings.py`](../../../caelo_core/embeddings.py) — cienki klient (jak `responses_client`:
   endpoint/auth `api_key_provider`, **JAWNE UTF-8**, format OpenAI `{model,input}`→`data[].embedding`,
   parser tolerancyjny). `embed_texts`/`embed_text` (rzucają `EmbeddingError`, wołający połyka) + `probe()`
   (spike: `{ok,model,dim}`, nie rzuca). Domyślny model `config.EMBED_MODEL="embedding-beta-3-small"`.
 - ⏳ **Live (maszyna usera):** `python caelo_core/tools/embeddings_check.py --live` — potwierdza czy
   `POST /v1/embeddings` działa + wymiar/koszt. Jeśli 404/400 → B8 zostaje na stubie/odłożone (bez torch).
 
-### 4.2 Magazyn + KNN ([`history_store.py`](../caelo_core/history_store.py)) — ✅
+### 4.2 Magazyn + KNN ([`history_store.py`](../../../caelo_core/history_store.py)) — ✅
 - [x] Tabela `event_embeddings(event_id PK, dim, vec BLOB float32, created_at)` (idempotentny
   `CREATE TABLE IF NOT EXISTS`). `set_event_embedding`/`count_event_embeddings`/`knn_events`/`hybrid_search`.
 - [x] KNN = brute-force cosine w Pythonie (`array` ze stdlib, bez `sqlite-vec`/numpy); wektory o niezgodnym
   wymiarze pomijane; `min_score`. Hybryda: KNN (rerank, pierwszeństwo) ∪ FTS5 (`history_fts` MATCH), dedup po id.
 
 ### 4.3 Wstrzyknięcie na 1. turze + orkiestracja — ✅
-- [x] Orkiestrator [`caelo_core/memory.py`](../caelo_core/memory.py) `MemoryIndex` (embedder **wstrzykiwany**
+- [x] Orkiestrator [`caelo_core/memory.py`](../../../caelo_core/memory.py) `MemoryIndex` (embedder **wstrzykiwany**
   — jak egzekutor genjobs; magazyn bez sieci): `index_event`/`recall`/`injected_text`. **Opt-in** (`enabled`),
   błędy połykane.
-- [x] [`agent/session.py`](../caelo_core/agent/session.py): na 1. turze embed promptu usera → `injected_text`
+- [x] [`agent/session.py`](../../../caelo_core/agent/session.py): na 1. turze embed promptu usera → `injected_text`
   → blok po CAELO.md/skillach (raz na sesję, cache). Wstrzyknięte przez `AgentRunner` (`backend.memory`).
-- [x] [`state.py`](../caelo_core/state.py): leniwe `backend.memory` (embedder = `embeddings.embed_texts` +
+- [x] [`state.py`](../../../caelo_core/state.py): leniwe `backend.memory` (embedder = `embeddings.embed_texts` +
   `get_api_key`); `record_event` indeksuje w **wątku w tle** (opt-in, nie blokuje gorącej ścieżki).
 - [x] Config `[memory]`: `MEMORY_ENABLED` (env `CAELO_MEMORY=1`, **domyślnie OFF** — koszt+prywatność),
   `MEMORY_MAX_RESULTS`, `MEMORY_MIN_SCORE`, `EMBED_MODEL`. Narzędzie `memory_search` — odłożone (jak plan).

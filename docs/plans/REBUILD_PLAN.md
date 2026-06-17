@@ -7,8 +7,8 @@
 >
 > **Po Fazach 0–8** projekt rozwinął się o nadbudowę (moduł **Voice**, scalenie Generator+Edit → **Image**,
 > **edycja/przedłużanie wideo**, załączniki w Chat/Code) oraz hardening — patrz
-> **[`MODYFIKACJE.md`](MODYFIKACJE.md)** (żywa specyfikacja modułów Image/Video/Voice/załączniki)
-> i **[`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md)** (P0–P3). Aktualny stan modułów/bibliotek/endpointów zebrano
+> **[`MODYFIKACJE.md`](zrealizowane/MODYFIKACJE.md)** (żywa specyfikacja modułów Image/Video/Voice/załączniki)
+> i **[`PLAN_NAPRAWY.md`](zrealizowane/PLAN_NAPRAWY.md)** (P0–P3). Aktualny stan modułów/bibliotek/endpointów zebrano
 > w **§13 „Faza 9"** na końcu. Uwaga: edytor to **CodeMirror 6**, nie Monaco (decyzja w §10f); UI to
 > **Tailwind v4** (nie shadcn/Radix), a stan serwera trzyma własny lekki cache (nie zustand/react-query).
 
@@ -534,7 +534,7 @@ rekonsoliduje **aktualny stan**, by §1–12 nie wprowadzały w błąd (P3-5).
 - **Video**: generowanie (tekst→wideo / obraz startowy) + **edycja** + **przedłużanie**.
 - **Voice** (nowy): Speak (TTS) / Transcribe (STT) / Live (realtime przez WS).
 - **Chat**: doszły **załączniki** (obraz/plik) i **głos** (TTS odpowiedzi, dyktowanie STT).
-- Szczegóły i kontrakty: **[`MODYFIKACJE.md`](MODYFIKACJE.md)** (żywa specyfikacja tych modułów).
+- Szczegóły i kontrakty: **[`MODYFIKACJE.md`](zrealizowane/MODYFIKACJE.md)** (żywa specyfikacja tych modułów).
 
 **Frontend — faktyczny stack** (różni się od planu w §3–4):
 - **Edytor/diff: CodeMirror 6** (nie Monaco — §10f), izolowany w `CodeEditor.tsx`.
@@ -562,7 +562,7 @@ czystego czatu. **Wiedza projektu** (B5): xAI nie ma serwerowych vector stores
 tabela `collection_files`) i dołączane do wiadomości jako `input_file` **na żądanie** („Attach
 all"). Nowe ramki WS: `tool_call` · `citations` · `usage`; pola `chat`: `search_mode`
 (auto/on/off) + `sources`. Live search + Q&A nad dokumentem **potwierdzone na realnym API**.
-Pełny status w **[`PLAN_M10_CZAT.md`](PLAN_M10_CZAT.md)** §6.
+Pełny status w **[`PLAN_M10_CZAT.md`](zrealizowane/PLAN_M10_CZAT.md)** §6.
 
 **M13 KOMPLETNY (agent: zaufanie, 2026-06-05, commit `e8956bf`):** zakładka Code dostała „table
 stakes" dla parytetu z Claude Code/Codex. **Przeglądalne diffy** w karcie zatwierdzenia (nowy plik →
@@ -574,14 +574,14 @@ write/edit, bypass = auto wszystko); **checkpointy + undo** bez zależności od 
 prompcie + edytor w UI. Nowe trasy REST fail-closed (`/agent/checkpoints`, `/agent/undo`,
 `/agent/grok-md`), nowa ramka WS `checkpoint`, ramka `message` niesie `mode`. Selfchecki:
 `agent_selfcheck` **81 → 114**, `api_smoke` **141 → 152**. **⬜ Pozostaje** diff per-hunk (F5).
-Pełny status w **[`PLAN_M13_AGENT_ZAUFANIE.md`](PLAN_M13_AGENT_ZAUFANIE.md)** §6.
+Pełny status w **[`PLAN_M13_AGENT_ZAUFANIE.md`](zrealizowane/PLAN_M13_AGENT_ZAUFANIE.md)** §6.
 
 **Wersja produktu (P3-4):** jedno źródło prawdy = `desktop/package.json`; sidecar raportuje ją w
 handshake / `/health` / `/whoami` (env `GROK_CORE_APP_VERSION` ← Electron, z odczytem package.json jako
 fallbackiem). Legacy `config.APP_VERSION` to **osobna** wersja archiwalnej apki customtkinter.
 
 **Hardening (P0–P3):** bezpieczeństwo agenta, odporność streamingu/WS, obsługa błędów, trwałość danych,
-jakość/wydajność frontu, CI + testy logiki — pełny rejestr i status w **[`PLAN_NAPRAWY.md`](PLAN_NAPRAWY.md)**.
+jakość/wydajność frontu, CI + testy logiki — pełny rejestr i status w **[`PLAN_NAPRAWY.md`](zrealizowane/PLAN_NAPRAWY.md)**.
 
 ---
 
