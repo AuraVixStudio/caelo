@@ -288,6 +288,13 @@ npx --no-install electron-builder --win --publish always
 > Dlatego **podpisane** wydania robisz lokalnie powyżej. Asystent może dodać do `release.yml`
 > guard/komentarz, żeby nie publikował niepodpisanych artefaktów przez przypadek.
 
+> **Pułapki z realnej budowy 2026-06-17 (do powtórzenia przy kolejnych wydaniach):**
+> - **`signtool.exe`** musi być w PATH — dodany z **Windows SDK 10.0.22621**.
+> - **SimplySign** autoryzuje KAŻDY podpis przez aplikację mobilną (sidecar + pliki Electron + instalator) —
+>   ustaw dłuższe okno sesji w SimplySign Desktop.
+> - **Błąd NSIS `German.nlf`** przy 1. uruchomieniu → `Remove-Item -Recurse -Force cache\nsis` (albo
+>   `%LOCALAPPDATA%\electron-builder\Cache\nsis`), drugie uruchomienie OK (uszkodzony cache NSIS).
+
 ### 6.5 DoD Kroku 6 — ✅ 2026-06-17
 
 - ✅ W GitHub Releases jest **podpisany** `Caelo-Setup-0.1.0.exe` (129 MB) + `.blockmap` + `latest.yml`
@@ -315,6 +322,16 @@ npx --no-install electron-builder --win --publish always
 ---
 
 ## Po Fazie B
+
+**Faza B = ✅ ZAMKNIĘTA (2026-06-17).** Zostaje jedna decyzja produktowa: **upublicznienie repo** →
+odblokowuje auto-update dla end-userów (electron-updater + prywatne repo bez auth nie pobierze `latest.yml`).
+
+**Higiena po publikacji (drobne follow-upy, śledzone w [`PLAN_OTWARTE.md`](PLAN_OTWARTE.md) §6a):**
+- ✅ `author` w `desktop/package.json` `grooverpty` → `AuraVix Studio` (NSIS `COMPANY_NAME`).
+- ⬜ CI `release.yml`: deprecation Node — najpewniej runtime akcji (`actions/*@v4`→`@v5`), nie input
+  `node-version` (już `"22"`); zweryfikować z logiem.
+- ⬜ CI `release.yml`: 3× job „Build (UNSIGNED)" czerwone — brak zależności na runnerach (np. `pack:sidecar`
+  PyInstaller na ubuntu/macos); wymaga logu joba. Niski priorytet (podpis i tak lokalny).
 
 Dalej wg [`PLAN_NAPRAWY_4.md`](PLAN_NAPRAWY_4.md): **Faza C** (weryfikacja LIVE D/F/G/H/I/J/K),
 potem **Faza G** TOP-10 (TOP2 = auto-update/signing domknięty tu w Fazie B; reszta od pozycji `S`).

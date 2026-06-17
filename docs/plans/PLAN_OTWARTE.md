@@ -144,6 +144,20 @@
 - [ ] **TOP5 — mermaid w artefaktach** — z [`PLAN_NAPRAWY_4.md`](PLAN_NAPRAWY_4.md) Faza G. CSP blokuje skrypt
   z CDN; bundlowanie wymaga `npm install mermaid` (psułoby `npm ci`/typecheck bez instalacji) — decyzja świadoma.
 
+### 6a. Higiena po publikacji v0.1.0 (z sesji 2026-06-17)  🤖
+
+- [x] **`author` w `desktop/package.json`** `grooverpty` → `AuraVix Studio` — **✅ ZROBIONE 2026-06-17**
+  (NSIS `COMPANY_NAME` wyciekał starą nazwę w logach buildu; wpływa na metadane przyszłych instalatorów,
+  nie na już wydany `v0.1.0`).
+- [ ] **CI `release.yml` — deprecation Node** `[S]` — ⚠️ input `node-version` jest już `"22"`; ostrzeżenie
+  „Node.js 20 deprecated" dotyczy najpewniej **runtime'u akcji** (`actions/*@v4` działają na Node20), nie inputu.
+  Realna naprawa = bump akcji (`actions/setup-node@v5`, `actions/checkout@v5`, itd.), nie `node-version`.
+  Zweryfikować z logiem CI (która akcja emituje warning) przed zmianą.
+- [ ] **CI `release.yml` — 3× job „Build (UNSIGNED)" czerwone** `[S]` — wg sesji to **brak zależności na
+  runnerach**, nie problem architektury (`--publish never` w CI jest zamierzony — patrz `PLAN_FAZA_B_RUNBOOK.md`
+  Krok 6.4). Wymaga logu nieudanego joba, by zidentyfikować brakującą zależność (np. PyInstaller/venv kroku
+  `pack:sidecar` na ubuntu/macos). Niski priorytet — podpisane wydania i tak robione lokalnie.
+
 ---
 
 ## 7. Rekomendowana kolejność
