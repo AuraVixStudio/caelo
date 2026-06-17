@@ -39,6 +39,7 @@ docs/
 | [`plans/PLAN_NAPRAWY_4.md`](plans/PLAN_NAPRAWY_4.md) | **Runda napraw #4** (84 znaleziska z analizy 2026-06-10) — Fazy **A/D/E/F ✅** (P1 + P2/P3 współbieżność/odzysk/limity + frontend). **Otwarte:** Faza B (publikacja), C (LIVE), G (TOP7–10) + motywy 4.1. | 🟡 A/D/E/F ✅ |
 | [`plans/PLAN_FAZA_B_RUNBOOK.md`](plans/PLAN_FAZA_B_RUNBOOK.md) | **Runbook publikacji** — remote (`AuraVixStudio/caelo`) → CI → gitleaks → podpisany release (SimplySign) z auto-update. **Kroki 0–6 ✅ (2026-06-17, release `v0.1.0`)**; pozostaje tylko public repo (→ auto-update end-user). | ✅ (poza public) |
 | [`plans/PLAN_WERYFIKACJI_LIVE.md`](plans/PLAN_WERYFIKACJI_LIVE.md) | **Runbook weryfikacji LIVE** (sandbox blokuje xAI/exec — robi user): A–C ✅, E 🟡; **otwarte D/F/G/H/I/J/K**. Tabela wyników na górze. | 🟡 A–C ✅ |
+| [`plans/FAZA_C_PRZYKLADY.md`](plans/FAZA_C_PRZYKLADY.md) | **Cookbook Fazy C** — gotowe przykłady „co zrobić" do weryfikacji LIVE: konkretne prompty, komendy, configi (`.caelo/permissions.json`, `lsp.json`) + kryteria „✅ zaliczone" dla E-reszta/D/F/G/H/I/J/K. | 🔧 do wykonania |
 | [`plans/ANALIZA_PROGRAMU_2026-06-10.md`](plans/ANALIZA_PROGRAMU_2026-06-10.md) | **Gruntowny przegląd programu (2026-06-10)** — rewizja wieloagentowa 5 obszarów + testy, 10×P1, katalog P2/P3, **porównanie z konkurencją (TOP-10)**. Źródło `PLAN_NAPRAWY_4.md`. | 📋 analiza |
 
 ### Archiwum — zrealizowane rundy napraw

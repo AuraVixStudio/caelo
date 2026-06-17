@@ -69,6 +69,8 @@
 
 ## 2. Weryfikacja LIVE — Faza C  🟠 P1/P2 (robi user — sandbox blokuje xAI/exec)
 
+> **Gotowe przykłady „co zrobić":** [`FAZA_C_PRZYKLADY.md`](FAZA_C_PRZYKLADY.md) — konkretne prompty,
+> komendy, configi (`.caelo/permissions.json`, `lsp.json`) i kryteria „✅ zaliczone" dla każdego punktu.
 > **Pełny runbook z krokami/pułapkami:** [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)
 > (tabela wyników na górze). Status zaliczone: **A** (auth) · **B** (czat) · **C** (Image/Video).
 > Po każdym teście: zaktualizuj tabelę wyników i skoryguj „zrobione (mock)" → realny status w docs.

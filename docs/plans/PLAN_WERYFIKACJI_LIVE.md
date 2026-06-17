@@ -5,6 +5,9 @@
 > kontrakty na **mockach**; sandbox dewelopera blokuje `api.x.ai` i exec OS. Ten dokument to
 > **runbook do wykonania na Twojej maszynie** (ważny klucz/OAuth + sieć + realny OS).
 >
+> **Gotowe przykłady (prompty/komendy/configi + kryteria „✅"):** [`FAZA_C_PRZYKLADY.md`](FAZA_C_PRZYKLADY.md)
+> — cookbook do otwartych sekcji (E-reszta/D/F/G/H/I/J/K).
+>
 > **Jak używać:** wykonuj sekcjami wg priorytetu (P0 → P3). Każde zadanie ma: *Cel ·
 > Wymagania · Kroki · Oczekiwany wynik · Pułapki · Status*. Po teście wstaw `x` w `[ ]`,
 > dopisz datę i krótką notatkę „DZIAŁA / NIE DZIAŁA + co". Na końcu zaktualizuj
