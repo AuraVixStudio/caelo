@@ -39,11 +39,11 @@ win:
   # Klucz jest NIEEKSPORTOWALNY (autoryzacja przez aplikację mobilną), więc NIE używamy
   # CSC_LINK/.pfx ani podpisu w CI — electron-builder woła `signtool` po cert ze SKLEPU
   # certyfikatów Windows (wirtualna karta SimplySign Desktop). Podpis robimy LOKALNIE
-  # (`npm run dist:full` na maszynie usera z aktywnym SimplySign Desktop). Odkomentuj i wpisz
-  # dane SWOJEGO certu (CN albo Thumbprint z `Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert`):
-  # certificateSubjectName: "<CN certu SimplySign>"   # ALBO: certificateSha1: "<THUMBPRINT>"
-  # rfc3161TimeStampServer: http://time.certum.pl     # znacznik czasu Certum (podpis przeżyje wygaśnięcie certu)
-  # signingHashAlgorithms: [sha256]
+  # (`npm run dist:full` na maszynie usera z aktywnym SimplySign Desktop).
+  # Cert: CN=AuraVix Studio Marcin Stelmach (SimplySign), ważny do 2027-03-04.
+  certificateSha1: "B6DB11F7A2C94188FA369685A62D5DFBD4393C67"
+  rfc3161TimeStampServer: http://time.certum.pl     # znacznik czasu Certum (podpis przeżyje wygaśnięcie certu)
+  signingHashAlgorithms: [sha256]
   # Sidecar `caelo-core.exe` (extraResources) NIE jest objęty podpisem instalatora — podpisz go
   # OSOBNO przy budowie: ustaw $env:CAELO_SIGN_THUMBPRINT przed `build_sidecar.ps1` (patrz skrypt).
 
