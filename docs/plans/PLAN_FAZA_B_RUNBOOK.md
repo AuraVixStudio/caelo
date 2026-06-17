@@ -31,9 +31,10 @@
 
 ## Status na 2026-06-17
 
-> **Sesja publikacji 2026-06-17 (👤):** wykonano Kroki **1, 4, 5** + przepisanie historii git.
-> Pozostaje tylko **Krok 6** (SimplySign — wymaga certu). Repo **pozostaje prywatne** (decyzja
-> użytkownika — nie upubliczniać na tym etapie, mimo czystego gitleaks).
+> **Sesja publikacji 2026-06-17 (👤):** wykonano Kroki **1, 4, 5, 6** + przepisanie historii git.
+> **FAZA B DOMKNIĘTA** — podpisany release `v0.1.0` opublikowany. Jedyna pozostałość to
+> upublicznienie repo (odłożone) → od tego zależy auto-update dla end-userów (patrz Krok 6.5).
+> Repo **pozostaje prywatne** (decyzja użytkownika — mimo czystego gitleaks).
 
 | Krok | Pozycja | Status |
 |---|---|---|
@@ -43,7 +44,7 @@
 | 3 | ROAD-3.6-e — los `files/` + docs | ✅ (wchłonięte w Krok 0) |
 | 4 | ROAD-3.6-b — gitleaks pełnej historii → public | ✅ **skan czysty 2026-06-17** (74 commity, 0 leaks); ⏸️ **public ODŁOŻONE** (repo prywatne — decyzja usera) |
 | 5 | ROAD-3.6-f — dev-deps + pytest | ✅ **ZROBIONE 2026-06-17** (pytest 13 passed) |
-| 6 | ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release | 🟡 🤖-część zrobiona (2026-06-13: guard `release.yml` + szablon podpisu + hook sidecara); 👤-reszta ⬜ (wymaga certu SimplySign) |
+| 6 | ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release | ✅ **ZROBIONE 2026-06-17** — podpisany `Caelo-Setup-0.1.0.exe` + `.blockmap` + `latest.yml` w Release `v0.1.0`; cert AuraVix Studio SimplySign. ⏸️ auto-update dla end-userów zależy od public repo |
 
 ### Przepisanie historii git (dodatkowe, 2026-06-17) ✅
 
@@ -190,7 +191,18 @@ caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v
 
 ---
 
-## Krok 6 — Podpis SimplySign + auto-update + release (👤 + 🤖) · ROAD-TOP2 / ROAD-3.6-c
+## Krok 6 — Podpis SimplySign + auto-update + release (👤 + 🤖) · ROAD-TOP2 / ROAD-3.6-c · ✅ ZROBIONE 2026-06-17
+
+> **✅ Wykonano 2026-06-17:** cert SimplySign `CN=AuraVix Studio Marcin Stelmach` (thumbprint
+> `B6DB11F7A2C94188FA369685A62D5DFBD4393C67`, ważny do 2027-03-04) wpięty jako `certificateSha1`
+> w `electron-builder.yml` (commit `cd6528c`); `electron-updater` doinstalowany (lock zsync.).
+> **Lokalny podpisany build + publish** → Release **`v0.1.0`** na `AuraVixStudio/caelo`:
+> podpisany `Caelo-Setup-0.1.0.exe` (129 MB) + `.blockmap` + `latest.yml`. Sidecar podpisany
+> osobno przez `build_sidecar.ps1` (`CAELO_SIGN_THUMBPRINT`).
+>
+> ⏸️ **Jedyna pozostałość DoD:** auto-update dla **end-userów** wymaga **publicznego** repo
+> (`electron-updater` nie pobierze `latest.yml` z prywatnego repo bez auth). Sam podpisany release
+> + auto-update authenticated (dev) działają. Public = osobna, odłożona decyzja (Krok 4).
 
 > **🤖 Zrobione 2026-06-13 (część asystenta — kod/config, nic nie aktywuje się bez certu/sekretów):**
 > - **6.4 guard** — [`release.yml`](../../.github/workflows/release.yml): `--publish always` → **`--publish never`**
@@ -276,12 +288,15 @@ npx --no-install electron-builder --win --publish always
 > Dlatego **podpisane** wydania robisz lokalnie powyżej. Asystent może dodać do `release.yml`
 > guard/komentarz, żeby nie publikował niepodpisanych artefaktów przez przypadek.
 
-### 6.5 DoD Kroku 6
+### 6.5 DoD Kroku 6 — ✅ 2026-06-17
 
-- W GitHub Releases jest **podpisany** instalator `Caelo-Setup-0.1.0.exe` + `latest.yml`.
-- Instalacja starszej wersji → klient oferuje aktualizację (electron-updater czyta `latest.yml`).
-- SmartScreen: nie ostrzega (cert EV) lub buduje reputację z pobraniami (cert OV/standard) —
-  zależnie od typu posiadanego certu SimplySign.
+- ✅ W GitHub Releases jest **podpisany** `Caelo-Setup-0.1.0.exe` (129 MB) + `.blockmap` + `latest.yml`
+  (Release `v0.1.0`, tag → commit `cd6528c`).
+- ⏸️ Instalacja starszej wersji → aktualizacja: **zadziała po upublicznieniu repo** (electron-updater
+  nie czyta `latest.yml` z prywatnego repo bez auth). Mechanizm wpięty, feed gotowy; czeka na public.
+- SmartScreen: cert OV/standard SimplySign → buduje reputację z pobraniami (nie EV → możliwe wstępne ostrzeżenie).
+- Weryfikacja podpisu: `Get-AuthenticodeSignature .\dist\Caelo-Setup-0.1.0.exe` → Status `Valid`,
+  signer CN `AuraVix Studio Marcin Stelmach`.
 
 ---
 
@@ -293,7 +308,7 @@ npx --no-install electron-builder --win --publish always
 | 1 | Remote + push + 1. CI | 👤 ✅ | CI zielone (2026-06-17) |
 | 4 | gitleaks pełnej historii | 👤 ✅ | skan czysty (74 commity, 0 leaks); ⏸️ public odłożone (repo prywatne) |
 | 5 | pip dev-deps + pytest lokalnie | 👤 ✅ | pytest zielony (13 passed, 2026-06-17) |
-| 6 | electron-updater + podpis SimplySign + tag + release | 👤+🤖 ⬜ | podpisany release + auto-update (wymaga certu SimplySign) |
+| 6 | electron-updater + podpis SimplySign + tag + release | 👤+🤖 ✅ | podpisany release `v0.1.0` (2026-06-17); auto-update end-user ⏸️ czeka na public repo |
 
 (Kroki 2 i 3 wchłonięte przez Krok 0.)
 

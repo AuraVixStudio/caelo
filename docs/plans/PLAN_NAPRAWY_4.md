@@ -216,9 +216,9 @@ Kolejność dowolna (pozycje niezależne); P1-D i P1-E są warunkiem zielonego `
 
 Kolejność jest **własnością bezpieczeństwa** (scan-before-public nieprzekraczalny).
 
-> **Stan 2026-06-17: Faza B w większości DOMKNIĘTA** — kroki 1–5 ✅; zostaje tylko krok 6
-> (podpis SimplySign, wymaga certu). Pełny runbook + notki sesji:
-> [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md).
+> **Stan 2026-06-17: Faza B DOMKNIĘTA** — kroki 1–6 ✅ (podpisany release `v0.1.0` opublikowany).
+> Jedyna pozostałość: upublicznienie repo (odłożone) → od tego zależy auto-update end-user.
+> Pełny runbook + notki sesji: [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md).
 
 1. ✅ **ROAD-3.6-a** `[S]` — **ZROBIONE 2026-06-17:** remote `AuraVixStudio/caelo` (prywatny),
    wypchnięto `m15-oss-crossplatform` + `main`, **CI na `main` zielone**. + przepisanie historii git
@@ -231,10 +231,10 @@ Kolejność jest **własnością bezpieczeństwa** (scan-before-public nieprzekr
    ⏸️ **Public ODŁOŻONE** (decyzja usera — repo pozostaje prywatne; bramka „scan-before-public" spełniona).
 5. ✅ **ROAD-3.6-f** `[S]` — **ZROBIONE 2026-06-17:** `pytest caelo_core/tests` → `13 passed`
    (krok już w CI). ⚠️ pułapka: `Scripts\pip.exe` `Fatal error in launcher` → `python.exe -m pip`.
-6. ⬜ **ROAD-TOP2 / ROAD-3.6-c** `[S/M + M]` — `electron-updater` + GitHub Releases jako kanał
-   aktualizacji; **podpisywanie** powłoki Electron i exe sidecara (SimplySign — cert chmurowy, podpis
-   lokalny); sekrety w `release.yml`. DoD: podpisany instalator oferuje auto-update, SmartScreen
-   nie ostrzega. **Jedyny otwarty krok Fazy B — wymaga certu SimplySign.**
+6. ✅ **ROAD-TOP2 / ROAD-3.6-c** `[S/M + M]` — **ZROBIONE 2026-06-17:** `electron-updater` w locku +
+   podpis SimplySign (`certificateSha1`, cert AuraVix Studio) powłoki Electron, instalatora i sidecara.
+   Release **`v0.1.0`**: podpisany `Caelo-Setup-0.1.0.exe` + `.blockmap` + `latest.yml`.
+   ⏸️ Auto-update dla end-userów zależy od public repo (electron-updater + prywatne repo bez auth).
 
 ---
 

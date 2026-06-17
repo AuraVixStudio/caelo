@@ -33,11 +33,11 @@ docs/
 
 | Dokument | Co zawiera | Status |
 |---|---|---|
-| [`plans/PLAN_OTWARTE.md`](plans/PLAN_OTWARTE.md) | **★ Zbiorczy plan wszystkich niezrealizowanych punktów** (2026-06-17) — publikacja (Faza B), weryfikacja LIVE (D/F/G/H/I/J/K + reszta E), TOP-10 (TOP7–10), motywy inżynierskie 4.1, spike B0, ROAD-4.2 (inni dostawcy LLM), per-hunk diff (M13-F5). Jedno źródło prawdy „co zostało". | 🔧 w toku |
+| [`plans/PLAN_OTWARTE.md`](plans/PLAN_OTWARTE.md) | **★ Zbiorczy plan wszystkich niezrealizowanych punktów** (2026-06-17) — Faza B ✅ (release `v0.1.0`); otwarte: weryfikacja LIVE (D/F/G/H/I/J/K + reszta E), TOP-10 (TOP7–10), motywy inżynierskie 4.1, spike B0, ROAD-4.2 (inni dostawcy LLM), per-hunk diff (M13-F5). Jedno źródło prawdy „co zostało". | 🔧 w toku |
 | [`plans/REBUILD_PLAN.md`](plans/REBUILD_PLAN.md) | Plan przebudowy customtkinter → Electron + Python sidecar: decyzje, architektura, **Fazy 0–8** (datowane statusy) oraz **§13 „Faza 9"** rekonsolidująca stan (moduły, stack, pełna lista endpointów). Źródło prawdy architektury. | Fazy 0–8 ✅ |
 | [`plans/PLAN_ROZBUDOWY.md`](plans/PLAN_ROZBUDOWY.md) | **Mapa drogowa „all-in-one hub" (v2)** — rozszerza REBUILD_PLAN od M9: trzy filary (szkielet huba / doskonałość trybów / otwarta platforma), kolejność, ryzyka. Blok „Postęp" = jednolinijkowy status M9–M22. | M9–M22 ✅ |
 | [`plans/PLAN_NAPRAWY_4.md`](plans/PLAN_NAPRAWY_4.md) | **Runda napraw #4** (84 znaleziska z analizy 2026-06-10) — Fazy **A/D/E/F ✅** (P1 + P2/P3 współbieżność/odzysk/limity + frontend). **Otwarte:** Faza B (publikacja), C (LIVE), G (TOP7–10) + motywy 4.1. | 🟡 A/D/E/F ✅ |
-| [`plans/PLAN_FAZA_B_RUNBOOK.md`](plans/PLAN_FAZA_B_RUNBOOK.md) | **Runbook publikacji** — remote (`AuraVixStudio/caelo`) → CI → gitleaks pełnej historii → public → podpisany release (SimplySign) z auto-update. Krok 0 ✅, 6 🟡 (część asystenta), reszta 👤. | 🟡 |
+| [`plans/PLAN_FAZA_B_RUNBOOK.md`](plans/PLAN_FAZA_B_RUNBOOK.md) | **Runbook publikacji** — remote (`AuraVixStudio/caelo`) → CI → gitleaks → podpisany release (SimplySign) z auto-update. **Kroki 0–6 ✅ (2026-06-17, release `v0.1.0`)**; pozostaje tylko public repo (→ auto-update end-user). | ✅ (poza public) |
 | [`plans/PLAN_WERYFIKACJI_LIVE.md`](plans/PLAN_WERYFIKACJI_LIVE.md) | **Runbook weryfikacji LIVE** (sandbox blokuje xAI/exec — robi user): A–C ✅, E 🟡; **otwarte D/F/G/H/I/J/K**. Tabela wyników na górze. | 🟡 A–C ✅ |
 | [`plans/ANALIZA_PROGRAMU_2026-06-10.md`](plans/ANALIZA_PROGRAMU_2026-06-10.md) | **Gruntowny przegląd programu (2026-06-10)** — rewizja wieloagentowa 5 obszarów + testy, 10×P1, katalog P2/P3, **porównanie z konkurencją (TOP-10)**. Źródło `PLAN_NAPRAWY_4.md`. | 📋 analiza |
 

@@ -22,7 +22,7 @@
 
 | # | Blok | Priorytet | Kto | Skrót |
 |---|---|---|---|---|
-| 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | 🟡 remote+CI+gitleaks+pytest ✅ (2026-06-17, repo prywatne); **zostaje B-4** podpisany release + auto-update (cert SimplySign) |
+| 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | ✅ **DOMKNIĘTA 2026-06-17** — remote+CI+gitleaks+pytest+podpisany release `v0.1.0`; zostaje tylko public repo → auto-update end-user |
 | 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | sekcje D (głos), E-reszta, F (subagenci), G (MCP/headless/ACP/LSP), H (funkcje-widma — decyzja), I (pakiety), J (cross-platform), K (terminal) |
 | 3 | **Nowe funkcje TOP-10** | P2/P3 | 🤖 | TOP7 rewind czatu, TOP8 inline Ctrl-K, TOP9 auto-pamięć usera, TOP10 background-agents |
 | 4 | **Motywy inżynierskie 4.1** | P2/P3 | 🤖 | odporność (4.1-c), wydajność (4.1-b), API total/cost (4.1-e), /genjobs WS-push (4.1-f) |
@@ -31,16 +31,16 @@
 
 ---
 
-## 1. Publikacja — Faza B  🟡 P1 (w większości DOMKNIĘTA 2026-06-17)
+## 1. Publikacja — Faza B  ✅ DOMKNIĘTA 2026-06-17 (poza public/auto-update)
 
 > **Pełny runbook:** [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md). Kolejność jest
 > **własnością bezpieczeństwa** — `scan-before-public` nieprzekraczalny.
 > **Decyzje (2026-06-12):** repo `AuraVixStudio/caelo` (organizacja); code signing = Asseco
 > **SimplySign** (cert w chmurze → podpis **lokalny**, nie w CI).
 >
-> **Stan 2026-06-17:** B-1/B-2/B-3 ✅ — **remote istnieje, CI zielone, gitleaks czysty, pytest zielony**
-> (ryzyko „jedyna kopia / OSS bez repo" zdjęte). Repo **prywatne** (public świadomie odłożone).
-> Zostaje **tylko B-4** (podpisany release — wymaga certu SimplySign).
+> **Stan 2026-06-17: B-1…B-4 ✅** — remote + CI zielone + gitleaks czysty + pytest zielony +
+> **podpisany release `v0.1.0`** opublikowany. **Jedyna pozostałość:** upublicznienie repo
+> (świadomie odłożone) → od tego zależy auto-update dla end-userów. Repo **prywatne**.
 
 - [x] **B-1 · ROAD-3.6-a — remote + push + 1. bieg CI** `[S]` 👤 — **✅ ZROBIONE 2026-06-17**
   - Remote `AuraVixStudio/caelo` (prywatne); wypchnięto `m15-oss-crossplatform` (1743 obiekty, 1.82 MiB) + `main`;
@@ -52,7 +52,12 @@
 - [x] **B-3 · ROAD-3.6-f — dev-deps + pytest lokalnie** `[S]` 👤 — **✅ ZROBIONE 2026-06-17**
   - pytest 9.1.0 → `13 passed in 17.16s`. Domyka `0.4` z `PLAN_WERYFIKACJI_LIVE`. ⚠️ pułapka: `Scripts\pip.exe`
     rzucał `Fatal error in launcher` → użyć `python.exe -m pip` (zepsuty shim po odtworzeniu venv).
-- [ ] **B-4 · ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release** `[S/M]` 🟡 👤+🤖 — **jedyny otwarty krok Fazy B (wymaga certu SimplySign)**
+- [x] **B-4 · ROAD-TOP2 / ROAD-3.6-c — podpis SimplySign + auto-update + release** `[S/M]` 👤+🤖 — **✅ ZROBIONE 2026-06-17**
+  - Cert SimplySign `AuraVix Studio` (thumbprint `B6DB11F7…4393C67`, do 2027-03-04) → `certificateSha1`
+    w `electron-builder.yml`; `electron-updater` w locku. Release **`v0.1.0`**: podpisany
+    `Caelo-Setup-0.1.0.exe` (129 MB) + `.blockmap` + `latest.yml`; sidecar podpisany osobno.
+  - ⏸️ **Auto-update dla end-userów** wymaga **publicznego** repo (electron-updater nie czyta `latest.yml`
+    z prywatnego repo bez auth). Mechanizm gotowy — czeka na decyzję o public (patrz B-2).
   - 🤖 zrobione (2026-06-13): guard `release.yml` (`--publish never` + artifact), szablon podpisu
     SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w `build_sidecar.ps1`.
   - 👤 zostaje: `npm install electron-updater` (utrwalenie w locku), setup SimplySign Desktop,
@@ -143,8 +148,8 @@
 
 ## 7. Rekomendowana kolejność
 
-1. **Faza B — publikacja** (B-1 → B-2 → B-3 → B-4). Remote sam zdejmuje ryzyko #1 (jedyna kopia);
-   gitleaks pełnej historii **przed** public jest nieprzekraczalny.
+1. ~~**Faza B — publikacja**~~ ✅ **DOMKNIĘTA 2026-06-17** (B-1…B-4: remote+CI+gitleaks+pytest+podpisany
+   release `v0.1.0`). Pozostaje tylko decyzja o upublicznieniu repo → odblokowuje auto-update end-user.
 2. **Faza C — weryfikacja LIVE** w kolejności priorytetu: **E-reszta → D/F/G** (rdzeń) → **H** (decyzja
    włącz/usuń, zaczynając od H1 embeddings = gate B8) → **I/J/K**. Po każdej sekcji: skoryguj docs
    („mock" → realny status), to domyka dług „dokumentacja przecenia kompletność" (SWOT W2).
