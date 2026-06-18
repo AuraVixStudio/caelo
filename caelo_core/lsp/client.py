@@ -30,7 +30,12 @@ log = logging.getLogger(__name__)
 
 DEFAULT_STARTUP_TIMEOUT_S = 30.0
 DEFAULT_REQUEST_TIMEOUT_S = 15.0
-DEFAULT_DIAGNOSTICS_WAIT_S = 1.5   # best-effort: ile czekać na publishDiagnostics po edycie
+DEFAULT_DIAGNOSTICS_WAIT_S = 5.0   # best-effort: ile czekać na publishDiagnostics po edycie
+                                    # (LIVE 2026-06-17: 1.5 s za krótko dla pyright/duży workspace —
+                                    # pętla i tak przerywa NATYCHMIAST gdy diagnostyka dojdzie, więc
+                                    # czysty plik nie płaci pełnego budżetu; płaci go tylko brak wyniku).
+DIAG_EMPTY_GRACE_S = 1.0           # po PIERWSZYM (często pustym) publishDiagnostics daj serwerowi
+                                    # chwilę na DOSŁANIE właściwego wyniku analizy (pyright: empty→full).
 STDERR_RING = 50
 MAX_LSP_BODY_BYTES = 32 * 1024 * 1024   # S34-f-1: clamp absurdalnego Content-Length (OOM)
 STOP_EXIT_WAIT_S = 2.0                   # S34-f-2: okno na czyste wyjście przed tree-kill
@@ -294,16 +299,30 @@ class LspClient:
 
     def wait_diagnostics(self, abs_path: str, text: str, language_id: str,
                          timeout: float = DEFAULT_DIAGNOSTICS_WAIT_S) -> list:
-        """didOpen/didChange + poczekaj na NOWE publishDiagnostics (best-effort) → lista."""
+        """didOpen/didChange + poczekaj na NOWE publishDiagnostics (best-effort) → lista.
+
+        Pyright (i inne serwery) często wysyła NAJPIERW pusty `publishDiagnostics` po
+        didOpen, a właściwy wynik analizy DOSYŁA chwilę później. Dlatego: przerwij od razu
+        gdy przyjdzie NIEPUSTA diagnostyka; jeśli pierwszy publish był pusty, poczekaj
+        jeszcze krótką „łaskę" (`DIAG_EMPTY_GRACE_S`) na kolejny publish, zamiast zwracać
+        pustkę na pierwszym sygnale. Czysty plik (brak błędów) zwraca pusto po łasce."""
+        import time
         uri = path_to_uri(abs_path)
         seq0 = self._diag_seq.get(uri, 0)
         self.open_or_update(abs_path, text, language_id)
-        # poll (krótkie okno) aż dojdzie świeża diagnostyka dla tego URI lub timeout
-        import time
         deadline = time.monotonic() + timeout
+        grace_deadline: Optional[float] = None
         while time.monotonic() < deadline:
             if self._diag_seq.get(uri, 0) > seq0:
-                break
+                diags = self.diagnostics_for(abs_path)
+                if diags:
+                    return diags  # mamy wynik — koniec
+                # pierwszy publish pusty: daj serwerowi chwilę na DOSŁANIE analizy
+                seq0 = self._diag_seq.get(uri, 0)
+                if grace_deadline is None:
+                    grace_deadline = min(deadline, time.monotonic() + DIAG_EMPTY_GRACE_S)
+                elif time.monotonic() >= grace_deadline:
+                    break
             time.sleep(0.05)
         return self.diagnostics_for(abs_path)
 
