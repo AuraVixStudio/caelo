@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, GitMerge, Users } from 'lucide-react'
+import { ChevronDown, ChevronRight, GitMerge, Users, X } from 'lucide-react'
 import { teamMergeDiff, type Conn, type TeamMerge, type TeamReport } from '../../lib/api'
 import {
   orderedNodes,
@@ -46,6 +46,7 @@ export function TeamView({
   onRejectMerge: (id: string) => void
   busy: boolean
 }) {
+  const [collapsed, setCollapsed] = useState(false)
   const nodes = orderedNodes(nodeMap)
   // scalenia bez żywego węzła (np. po reconnect) — pokaż osobno, by nic nie zginęło.
   const nodeAgentIds = new Set(nodes.map((n) => n.agent_id))
@@ -55,12 +56,23 @@ export function TeamView({
 
   return (
     <div className="shrink-0 border-t border-border bg-surface-2/40">
-      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold text-muted">
+      <button
+        type="button"
+        onClick={() => setCollapsed((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] font-semibold text-muted transition-colors hover:text-fg"
+        title={collapsed ? 'Expand the team panel' : 'Collapse the team panel'}
+      >
+        {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         <Users size={13} />
         <span>Team</span>
+        {/* zwinięty: pokaż skrót (liczba agentów + koszt), by panel nadal coś mówił */}
+        {collapsed && nodes.length > 0 ? (
+          <span className="font-normal">· {nodes.length} agent{nodes.length === 1 ? '' : 's'}</span>
+        ) : null}
         {report ? <span className="font-normal">· {teamCostBadge(report.totals)}</span> : null}
-      </div>
+      </button>
 
+      {collapsed ? null : (
       <div className="flex max-h-64 flex-col gap-1.5 overflow-auto px-2 pb-2">
         {nodes.map((node) => (
           <SubAgentCard
@@ -86,6 +98,7 @@ export function TeamView({
         ))}
         {report ? <Timeline report={report} /> : null}
       </div>
+      )}
     </div>
   )
 }
@@ -257,13 +270,23 @@ function MergeReview({
       .finally(() => setLoading(false))
   }, [open, diff, conn, merge.id])
 
+  // Esc zamyka modal (jak lightbox czatu).
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   return (
     <div className={cn('px-2.5 py-2', embedded && 'border-t border-border bg-accent/5')}>
       <div className="flex items-center gap-2">
         <GitMerge size={13} className="shrink-0 text-accent" />
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen(true)}
           className="min-w-0 flex-1 truncate text-left text-[11.5px] text-fg hover:underline"
           title="Review the subagent's changes as one diff"
         >
@@ -279,26 +302,84 @@ function MergeReview({
         ) : null}
       </div>
 
+      {/* F2: diff w MODALU (overlay) — długi diff przewija się we własnym obszarze,
+          a przyciski Accept/Discard są w przyklejonej stopce, zawsze dostępne.
+          Inline-expand uwięziony w `max-h-64` panelu Team uniemożliwiał ich kliknięcie. */}
       {open ? (
-        <div className="mt-1.5 flex flex-col gap-1.5">
-          {merge.conflicts.length > 0 ? (
-            <div className="rounded bg-error/10 px-2 py-1 text-[11px] text-error">
-              Conflicts (changed by another pending merge): {merge.conflicts.join(', ')}. Merging
-              will overwrite the other subagent's version of these files.
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Review merge"
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+          >
+            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5 text-sm font-semibold">
+              <GitMerge size={15} className="text-accent" />
+              <span>
+                Review merge — {merge.file_count} file{merge.file_count === 1 ? '' : 's'}
+              </span>
+              {merge.conflicts.length > 0 ? (
+                <span className="rounded bg-error/20 px-1.5 py-0.5 text-[10px] font-normal text-error">
+                  {merge.conflicts.length} conflict{merge.conflicts.length === 1 ? '' : 's'}
+                </span>
+              ) : null}
+              <span className="flex-1" />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                title="Close (Esc)"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+              >
+                <X size={15} />
+              </button>
             </div>
-          ) : null}
-          {loading ? (
-            <div className="text-[11px] text-muted">Loading diff…</div>
-          ) : (
-            <DiffView diff={diff ?? ''} />
-          )}
-          <div className="flex gap-1.5">
-            <Button size="sm" icon={<GitMerge size={13} />} disabled={busy} onClick={() => onApply(merge.id)}>
-              Accept &amp; merge
-            </Button>
-            <Button variant="danger" size="sm" disabled={busy} onClick={() => onReject(merge.id)}>
-              Discard
-            </Button>
+
+            <div className="flex-1 overflow-auto px-4 py-3">
+              {merge.conflicts.length > 0 ? (
+                <div className="mb-2 rounded bg-error/10 px-2 py-1.5 text-[11px] text-error">
+                  Conflicts (changed by another pending merge): {merge.conflicts.join(', ')}.
+                  Merging will overwrite the other subagent's version of these files.
+                </div>
+              ) : null}
+              {loading ? (
+                <div className="text-[11px] text-muted">Loading diff…</div>
+              ) : (
+                <DiffView diff={diff ?? ''} />
+              )}
+            </div>
+
+            <div className="flex shrink-0 gap-2 border-t border-border px-4 py-2.5">
+              <Button
+                size="sm"
+                icon={<GitMerge size={13} />}
+                disabled={busy}
+                onClick={() => {
+                  onApply(merge.id)
+                  setOpen(false)
+                }}
+              >
+                Accept &amp; merge
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  onReject(merge.id)
+                  setOpen(false)
+                }}
+              >
+                Discard
+              </Button>
+              <span className="flex-1" />
+              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}

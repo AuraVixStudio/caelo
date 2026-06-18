@@ -81,8 +81,9 @@
 - [ ] **D — Głos** P2 ⬜ — D1 TTS (5 głosów, koszt = szacunek!), D2 STT batch, **D3 STT-stream**
   (⚠️ protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY — główny znak zapytania), D4 Talk +
   barge-in, D5 Realtime (Live), D6/D7 read-aloud + koszt sesji.
-- [ ] **F — Subagenci / zespoły** P2 ⬜ — F1 delegacja end-to-end, F2 merge review (worktree + konflikt),
-  F3 cascade stop (tree-kill), F4 skille-orkiestratory (implement/review/design/best-of-n).
+- [ ] **F — Subagenci / zespoły** P2 🟡 — **F1 ✅ 2026-06-18** (delegacja end-to-end: 3 subagenci równolegle,
+  kontekst rodzica czysty, głębia 1; + przycisk zwijania panelu Team). Zostają: F2 merge review (worktree +
+  konflikt), F3 cascade stop (tree-kill), F4 skille-orkiestratory (implement/review/design/best-of-n).
 - [ ] **G — Rozszerzalność** P2 ⬜ — G1 realny MCP stdio, G2 MCP w agencie (gate), G3 MCP w czacie
   (allowlista), G4 remote MCP (xAI-side), G5 interop (`~/.claude.json`/`.mcp.json`/`AGENTS.md`/skille — NIEDESTRUKCYJNIE),
   G6 headless CLI (`run -p` plain/json/streaming-json, fail-closed), G7 ACP (Zed/Neovim/Emacs).

@@ -30,7 +30,7 @@
 | C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
 | E | Agent kodowania | P1 | ✅ | 2026-06-17 | **E1–E10 ✅ — CAŁA SEKCJA E.** Pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow, **LSP diagnostyka (pyright)**. Naprawiono ~17 bugów/UX (rundy 1–11): m.in. izolacja CAELO.md, edit_file taby/CRLF, @-wyszukiwanie, loop guard (r.8), **LSP URI-match Windows g%3A vs G: (r.10), sesja przeżywa zmianę zakładki — backend mintuje świeże id per połączenie (r.10)**. |
-| F | Subagenci / zespoły | P2 | ⬜ | | |
+| F | Subagenci / zespoły | P2 | 🟡 | 2026-06-18 | **F1 ✅** delegacja end-to-end: 3 subagenci (researcher/implementer/reviewer) równolegle w TeamView, kontekst rodzica czysty (1 `delegate` = streszczenia), głębia 1, `version()` w `util.py` + „Review merge — 1 file". UX: dodano przycisk zwijania panelu Team. Zostają F2–F4. |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
 | I | Pakiety / marketplace | P3 | ⬜ | | |
@@ -368,7 +368,17 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 ## Część F — Subagenci / zespoły (M17)  🟡 P2
 
-- [ ] **F1 — Delegacja end-to-end.** Zadanie złożone → agent woła `delegate` → subagenci (researcher/reviewer/implementer/tester).
+> **Postęp 2026-06-18 (F1 ✅ na żywo):** workspace `G:\Testy\caelo-test-project` (świeży, bez CAELO.md),
+> tryb accept-edits, model `grok-build-0.1`. Prompt „delegate researcher (config.py paths) + implementer
+> (version() w util.py) + reviewer … in parallel" → orkiestrator zawołał `delegate`, **TeamView pokazał 3
+> subagentów RUNNING równolegle**, potem DONE; kontekst rodzica czysty (jeden `delegate` zwrócił findings/
+> summary/verdict, nie transkrypty); głębia 1 (żaden subagent nie delegował); `version()` dopisany do
+> `util.py`, implementer dostał „Review merge — 1 file" (wejście do F2). **Drobny UX dodany po feedbacku
+> usera:** przycisk **zwijania panelu Team** (chevron w nagłówku; zwinięty pokazuje „· N agents · koszt") —
+> [`TeamView.tsx`](../../desktop/src/renderer/src/components/code/TeamView.tsx). Czysto renderer (bez
+> restartu sidecara); typecheck/lint/Vitest 252 OK. Zostają **F2–F4**.
+
+- [x] **F1 — Delegacja end-to-end.**  ✅ 2026-06-18. 3 subagenci równolegle w TeamView, kontekst rodzica czysty (1 `delegate` = streszczenia), głębia 1, `version()` w `util.py`.
   - *Oczekiwane:* TeamView (drzewo) pokazuje subagentów równolegle; kontekst rodzica czysty (1 `tool` = streszczenia). Brak `delegate` u subagentów (głębia 1).
 
 - [ ] **F2 — Merge review (worktree).** Mutujący subagent kończy → „Review merge": JEDEN diff + wykrycie konfliktu (ta sama ścieżka w >1 worktree); apply → checkpoint (cofalny), reject → discard.
