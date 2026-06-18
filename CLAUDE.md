@@ -76,8 +76,11 @@ normalized command, not the exe name. It runs with a **scrubbed env** (no `CAELO
 propagates from the session. `glob`/`grep`/`list_dir` are sandboxed (reject escapes incl.
 symlinks/**junctions** via `resolve()`); `grep` has a ReDoS wall-clock timeout (`regex` module) +
 size/binary skips. Interrupted `tool_calls` get synthetic `tool` results so history stays balanced
-(xAI contract). Writes are atomic (`tools.atomic_write_text`). Don't regress these — `agent_selfcheck.py`
-asserts them (81 checks).
+(xAI contract). Writes are atomic (`tools.atomic_write_text`). A **loop guard** (`session.LOOP_GUARD_LIMIT`,
+LIVE-verified) ends the turn cleanly when an IDENTICAL tool call (name+args) repeats past the limit within a
+turn — models sometimes ignore "never loop on a failing edit" and re-issue the same `edit_file` until the file
+is corrupted; the guard emits `info`+`stopped` with balanced history instead of executing it. Don't regress
+these — `agent_selfcheck.py` asserts them (now 190+ checks, incl. `test_loop_guard`).
 
 **Round-2 hardening (M5–M6, see [`docs/plans/zrealizowane/PLAN_NAPRAWY_2.md`](docs/plans/zrealizowane/PLAN_NAPRAWY_2.md) — done):** the
 agent WS now uses the shared **`WsStream`** (bounded queue + worker join on disconnect, so the agent
@@ -280,6 +283,11 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   Config `lsp.json` (global `DATA_DIR` + project `<ws>/.caelo/lsp.json`); `backend.get_lsp()` is workspace-aware
   (rebuild on root change, like checkpoints) + `reload_lsp()`; REST [`routes/lsp.py`](caelo_core/routes/lsp.py);
   renderer **Extensions → Language Servers**. Editor inline squiggles deferred (diagnostics shown in agent panel).
+  ⚠️ **Diagnostics are matched by `client.canon_key()`, NOT raw URI** (LIVE-verified): a server (e.g. pyright on
+  Windows) publishes `publishDiagnostics` under `file:///g%3A/…` (lowercase drive, `:`→`%3A`) while our
+  `path_to_uri` yields `file:///G:/…`; keying `_diagnostics` by canonical path (`normcase`/`normpath`) is the
+  only thing that makes diagnostics show up — don't revert to raw-URI keying. `DEFAULT_DIAGNOSTICS_WAIT_S`
+  is best-effort (loop breaks as soon as results arrive; first publish may be empty → short grace).
 - **B4 glob permission rules** ([`agent/permission_rules.py`](caelo_core/agent/permission_rules.py)
   `RuleSet`): `ToolPrefix(glob)` (`Bash(npm*)`/`Edit(src/**)`/`Read`/`Grep`/`Write`/`WebFetch(domain:…)`/
   `MCPTool`), **deny>allow**, segment-aware `*`/`**` (path) vs flat (command/name). A layer ABOVE the
@@ -449,7 +457,12 @@ run external copy would use its own `config.py`, hence its own data dir.)
   gained a `session` frame (resume by id / start new) and REST [`routes/sessions.py`](caelo_core/routes/sessions.py)
   (`GET /agent/sessions?project_id=` · `GET /agent/sessions/{id}` · `DELETE`) backs the **Sessions** menu
   in the agent panel (resume + per-project filter). Own files; atomic writes + `load_json_or_backup`;
-  gitignored (`/sessions/`, dev `DATA_DIR` = repo).
+  gitignored (`/sessions/`, dev `DATA_DIR` = repo). ⚠️ **`routes/agent.py` mints a FRESH session id on EVERY
+  WS connection** (announced via the `session` frame on connect). The Code panel is lazy and **unmounts on
+  tab switch** (same gotcha as M11 Hub-staged media), so the agent transcript would be lost; `AgentPanel`
+  persists the *active* session id in **`hub.codeSessionId`** (only once it has a transcript, so the
+  fresh-per-connect id can't clobber it) and **auto-resumes it on (re)mount** (`getAgentSession` +
+  `setSession(sid)`, overriding the fresh id). State that must survive a tab switch lives in Hub, not panel `useState`.
 - `lsp.json` (M19-B3) — GLOBAL language-server config; project config is `<ws>/.caelo/lsp.json` (read-only).
   `load_json_or_backup` + atomic writes; gitignored (`/lsp.json`, dev `DATA_DIR` = repo). Also read:
   `<ws>/.caelo/permissions.json` (M19-B4 project glob rules).
