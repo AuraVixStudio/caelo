@@ -270,6 +270,9 @@ export function AgentPanel({
   // złapałoby busy===false na zawsze).
   const busyRef = useRef(false)
   busyRef.current = busy
+  // M21: panel Code jest leniwy i odmontowuje się przy zmianie zakładki → guard, by
+  // auto-wznowić ostatnią sesję dokładnie RAZ po (re)montażu (a nie w kółko).
+  const restoredRef = useRef(false)
 
   const nextId = (): string => `e${++idRef.current}`
 
@@ -361,6 +364,35 @@ export function AgentPanel({
       refreshFilesRef.current() // M19: spis plików/katalogów → @-odwołania
     }
   }, [workspacePath, connected])
+
+  // M21: zapamiętaj aktywną sesję w Hub (przeżyje zmianę zakładki — panel jest leniwy).
+  // Mirror tylko NIEPUSTEGO id, by początkowe `null` po remoncie nie skasowało zapisu,
+  // ZANIM efekt wznawiający zdąży go odczytać. Reset robi jawnie `newSession`.
+  useEffect(() => {
+    if (sessionId) hub.setCodeSessionId(sessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
+
+  // M21: po (re)montażu panelu auto-wznów ostatnią sesję, jeśli panel jest pusty
+  // (zmiana zakładki Code→inna→Code gubiła transkrypt; sesje są zapisane serwerowo).
+  useEffect(() => {
+    if (restoredRef.current || !connected || busy) return
+    const sid = hub.codeSessionId
+    if (!sid || sessionId || entries.length > 0) return
+    restoredRef.current = true
+    void (async () => {
+      try {
+        const full = await getAgentSession(conn, sid)
+        setEntries(historyToEntries(full.history))
+        curAssistant.current = null
+        setSessionId(sid)
+        agentRef.current?.setSession(sid)
+      } catch {
+        // sesja zniknęła / błąd → zostań na pustym panelu (bez hałasu)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, busy, sessionId, entries.length, hub.codeSessionId])
 
   // #3: tykający licznik czasu tury — żywy znak, że agent pracuje (nie zaciął się).
   useEffect(() => {
@@ -665,6 +697,8 @@ export function AgentPanel({
     setPlanPhase('idle')
     setPlan([])
     setUsage(null) // nowa sesja → wyzeruj licznik tokenów
+    setSessionId(null)
+    hub.setCodeSessionId(null) // świadomy reset → po zmianie zakładki NIE wznawiaj starej sesji
     agentRef.current?.setSession(null)
   }
 

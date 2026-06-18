@@ -72,6 +72,12 @@ interface HubState {
   /** Załaduj wideo jako źródło i przejdź do panelu Video w danym trybie (M11). */
   sendVideoToVideo: (v: { name: string; uri: string; mode: 'edit' | 'extend' }) => void
 
+  // --- Sesja agenta Code (M21): przetrwa zmianę zakładki (panel Code jest leniwy
+  // i odmontowuje się — bez tego transkrypt znika i trzeba wracać z listy Sessions). ---
+  /** Id ostatnio aktywnej sesji agenta; AgentPanel auto-wznawia ją po remoncie. */
+  codeSessionId: string | null
+  setCodeSessionId: Dispatch<SetStateAction<string | null>>
+
   // --- Projekty (F6): wspólny scope historii/artefaktów ---
   projects: HubProject[]
   recentWorkspaces: string[]
@@ -115,6 +121,7 @@ export function HubProvider({
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([])
   const [composerDraft, setComposerDraft] = useState<string | null>(null)
+  const [codeSessionId, setCodeSessionId] = useState<string | null>(null)
 
   const reloadProjects = useCallback(() => {
     if (!conn) return
@@ -230,7 +237,9 @@ export function HubProvider({
       reloadCommands,
       composerDraft,
       setComposerDraft,
-      runSlashCommand
+      runSlashCommand,
+      codeSessionId,
+      setCodeSessionId
     }),
     [
       navigate,
@@ -239,6 +248,7 @@ export function HubProvider({
       videoFrame,
       videoSource,
       videoCommandMode,
+      codeSessionId,
       projects,
       recentWorkspaces,
       currentProjectId,

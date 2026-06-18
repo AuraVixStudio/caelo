@@ -308,6 +308,18 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > czysto (ramka `info` + `stopped`, zbalansowana historia, „send another message"), nie wykonując wywołania
 > (chroni plik). Test: `agent_selfcheck` `test_loop_guard` (6 asercji), RESULT OK. ⚠️ backend → restart `npm run dev`.
 
+> **Postęp 2026-06-17 (runda 9 — E10 + bug zakładek):** serwer **pyright RUNNING** ✅ przez GUI
+> (Extensions → Language Servers), ale **diagnostyki nie pokazywały się**. Przyczyna: w
+> [lsp/client.py](../../caelo_core/lsp/client.py) `DEFAULT_DIAGNOSTICS_WAIT_S=1.5` s było za krótkie
+> (pyright publikuje wynik później, często NAJPIERW pusty `publishDiagnostics`, potem analizę) →
+> `wait_diagnostics` zwracało pustkę → renderer nic nie pokazuje. **Fix:** bump do **5.0 s** (pętla i tak
+> przerywa od razu po nadejściu wyniku, więc czysty plik nie płaci pełnego budżetu) + **łaska
+> `DIAG_EMPTY_GRACE_S`** na DOSŁANIE wyniku po pustym pierwszym publishu. `lsp_check` OK — **wymaga
+> re-testu LIVE** (restart `npm run dev`). **BUG UX (osobny, naprawiony):** zmiana zakładki Code→inna→Code
+> gubiła transkrypt sesji (panel leniwy → unmount → lokalny `useState` przepadał). Fix: `hub.codeSessionId`
+> (Hub przeżywa unmount) + auto-wznowienie ostatniej sesji na (re)montażu `AgentPanel`; `newSession` czyści
+> zapamiętane id. typecheck/lint/Vitest 252 OK.
+
 - [x] **E1 — Pełny bieg agenta.**  ✅ 2026-06-08. Agent czytał (read_file/grep/list_dir) i edytował pliki (edit_file App.tsx/icon-generator.ts) w accept-edits; pętla domknięta, analiza wyrenderowana.
   - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
 
