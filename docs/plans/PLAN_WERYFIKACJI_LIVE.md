@@ -29,7 +29,7 @@
 | B | Czat (Responses API) | P1 | ✅ | 2026-06-07 | **B1–B10 wszystkie ✅** (UTF-8, web/x search + koszt, wizja, PDF Q&A, wiedza projektu, effort, media-gen img2video, eksport MD) |
 | C | Twórczość (Image/Video) | P1/P2 | ✅ | 2026-06-07 | **C1–C7 wszystkie ✅** (text2img, edycja, warianty, text2video/img2video, edit/extend, galeria+kolejka+koszt) |
 | D | Głos | P2 | ⬜ | | |
-| E | Agent kodowania | P1 | 🟡 | 2026-06-17 | **E1–E9 ✅** (pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow). Naprawiono 14 bugów/UX (rundy 1–8): m.in. izolacja CAELO.md, scroll/approve, max-iter+finalizacja, miernik kontekstu, edit_file taby/CRLF, @-wyszukiwanie, **+ runda 8: bezpiecznik pętli (loop guard) — model zapętlał się na identycznym edit_file (25× ta sama linia → „old_string not unique")**. Zostaje **E10 (LSP)** |
+| E | Agent kodowania | P1 | ✅ | 2026-06-17 | **E1–E10 ✅ — CAŁA SEKCJA E.** Pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow, **LSP diagnostyka (pyright)**. Naprawiono ~17 bugów/UX (rundy 1–11): m.in. izolacja CAELO.md, edit_file taby/CRLF, @-wyszukiwanie, loop guard (r.8), **LSP URI-match Windows g%3A vs G: (r.10), sesja przeżywa zmianę zakładki — backend mintuje świeże id per połączenie (r.10)**. |
 | F | Subagenci / zespoły | P2 | ⬜ | | |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
@@ -360,9 +360,9 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [x] **E9 — Reguły glob (M19-B4).**  ✅ 2026-06-17. Odrzucenie deny działa; przy okazji złapany i naprawiony bug pętli agenta (loop guard, patrz runda 8 wyżej).
   - *Oczekiwane:* **deny > allow**; deny = twarda odmowa nawet w bypass; allow auto-akceptuje. **P0-1 zachowane:** `Bash(...)` allow NIE omija metaznaków (`git && rm` dalej blokowane).
 
-- [ ] **E10 — LSP diagnostyka (M19-B3).** Skonfiguruj realny serwer (np. pyright/tsserver) w `lsp.json` (global) lub `<ws>/.caelo/lsp.json` → Extensions → Language Servers.
-  - *Oczekiwane:* po edycji pliku ramka WS `diagnostics` (squiggle w panelu agenta); narzędzie `lsp` widoczne tylko gdy serwer skonfigurowany.
-  - *Pułapki:* LSP używa **Content-Length framing** (binarny stdio) — inaczej niż MCP.
+- [x] **E10 — LSP diagnostyka (M19-B3).**  ✅ 2026-06-17. pyright dodany przez Extensions → Language Servers (RUNNING); po `write_file` pliku `.py` z błędem typu panel agenta pokazał diagnostykę (*Type „Literal['hello']" is not assignable to „int"*). Wymagało naprawy match URI na Windows (`canon_key`, runda 10).
+  - *Oczekiwane:* po edycji pliku ramka WS `diagnostics` (w panelu agenta); narzędzie `lsp` widoczne tylko gdy serwer skonfigurowany.
+  - *Pułapki:* LSP używa **Content-Length framing** (binarny stdio) — inaczej niż MCP; ⚠️ URI pyright (`file:///g%3A/…`) ≠ nasz (`file:///G:/…`) — matchujemy po `canon_key`.
 
 ---
 

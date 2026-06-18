@@ -75,11 +75,9 @@
 > (tabela wyników na górze). Status zaliczone: **A** (auth) · **B** (czat) · **C** (Image/Video).
 > Po każdym teście: zaktualizuj tabelę wyników i skoryguj „zrobione (mock)" → realny status w docs.
 
-- [ ] **E — Agent kodowania (reszta)** P1 🟡 — zaliczone E1–E4, E7–E8. Zostają:
-  - [ ] **E5** checkpointy + undo (wiele plików, „Undo to here/all", baner partial undo po `run_command`).
-  - [ ] **E6** `CAELO.md` wpływa na zachowanie agenta (+ edytor reguł w nagłówku Code).
-  - [ ] **E9** reguły glob (M19-B4): `--deny Bash(rm*)` / `--allow Edit(src/**)`; deny>allow; P0-1 zachowane.
-  - [ ] **E10** LSP diagnostyka (M19-B3): realny pyright/tsserver → ramka `diagnostics`; narzędzie `lsp` tylko gdy skonfigurowane.
+- [x] **E — Agent kodowania** P1 ✅ **CAŁA SEKCJA (2026-06-17)** — E1–E10 zaliczone na żywo (E5 checkpointy/undo,
+  E6 CAELO.md, E9 reguły glob deny>allow, E10 LSP diagnostyka pyright). Po drodze naprawiono m.in. loop guard
+  (zapętlenie na edit_file), URI-match LSP na Windows, sesja przeżywa zmianę zakładki. Szczegóły: `PLAN_WERYFIKACJI_LIVE.md` rundy 8–11.
 - [ ] **D — Głos** P2 ⬜ — D1 TTS (5 głosów, koszt = szacunek!), D2 STT batch, **D3 STT-stream**
   (⚠️ protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY — główny znak zapytania), D4 Talk +
   barge-in, D5 Realtime (Live), D6/D7 read-aloud + koszt sesji.
