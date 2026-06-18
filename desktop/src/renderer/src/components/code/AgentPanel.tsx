@@ -366,33 +366,37 @@ export function AgentPanel({
   }, [workspacePath, connected])
 
   // M21: zapamiętaj aktywną sesję w Hub (przeżyje zmianę zakładki — panel jest leniwy).
-  // Mirror tylko NIEPUSTEGO id, by początkowe `null` po remoncie nie skasowało zapisu,
-  // ZANIM efekt wznawiający zdąży go odczytać. Reset robi jawnie `newSession`.
+  // Mirror tylko gdy jest TRANSKRYPT (entries>0): backend mintuje ŚWIEŻE id na KAŻDYM
+  // (re)połączeniu i ogłasza je przy connect (jeszcze przed turą, entries puste) — bez
+  // tego warunku to świeże id nadpisałoby zapamiętaną sesję, zanim restore ją wznowi.
   useEffect(() => {
-    if (sessionId) hub.setCodeSessionId(sessionId)
+    if (sessionId && entries.length > 0) hub.setCodeSessionId(sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
+  }, [sessionId, entries.length])
 
-  // M21: po (re)montażu panelu auto-wznów ostatnią sesję, jeśli panel jest pusty
-  // (zmiana zakładki Code→inna→Code gubiła transkrypt; sesje są zapisane serwerowo).
+  // M21: po (re)montażu panelu WZNÓW zapamiętaną sesję i ZASTĄP nią świeże id, które
+  // backend ogłosił przy connect (dlatego NIE bramkujemy na `sessionId` — ono już jest
+  // tym świeżym). `setSession(sid)` każe backendowi wczytać historię tej sesji.
   useEffect(() => {
     if (restoredRef.current || !connected || busy) return
     const sid = hub.codeSessionId
-    if (!sid || sessionId || entries.length > 0) return
+    if (!sid || entries.length > 0) return
     restoredRef.current = true
     void (async () => {
       try {
         const full = await getAgentSession(conn, sid)
-        setEntries(historyToEntries(full.history))
-        curAssistant.current = null
+        if (full.history && full.history.length) {
+          setEntries(historyToEntries(full.history))
+          curAssistant.current = null
+        }
         setSessionId(sid)
-        agentRef.current?.setSession(sid)
+        agentRef.current?.setSession(sid) // backend: wznów sid zamiast świeżej sesji
       } catch {
         // sesja zniknęła / błąd → zostań na pustym panelu (bez hałasu)
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected, busy, sessionId, entries.length, hub.codeSessionId])
+  }, [connected, busy, entries.length, hub.codeSessionId])
 
   // #3: tykający licznik czasu tury — żywy znak, że agent pracuje (nie zaciął się).
   useEffect(() => {

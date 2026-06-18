@@ -320,6 +320,19 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > (Hub przeżywa unmount) + auto-wznowienie ostatniej sesji na (re)montażu `AgentPanel`; `newSession` czyści
 > zapamiętane id. typecheck/lint/Vitest 252 OK.
 
+> **Postęp 2026-06-17 (runda 10 — głębsze przyczyny, oba bugi z rundy 9 wracały):** ✅ **E10 prawdziwy
+> root-cause:** na Windows pyright publikuje `publishDiagnostics` pod URI `file:///g%3A/...` (mała litera
+> dysku, `:`→`%3A`), a nasz `path_to_uri` daje `file:///G:/...` — surowe stringi się NIE zgadzały, więc
+> `_diagnostics` był kluczowany inaczej przy zapisie i odczycie → **zawsze pusto** (timeout z rundy 9 był
+> wtórny). Fix [lsp/client.py](../../caelo_core/lsp/client.py): `canon_key()` (uri→ścieżka→`normcase`/
+> `normpath`) kluczuje zapis i odczyt diagnostyk tym samym kluczem. Test `lsp_check` `test_canon_key_uri_match`
+> (3 asercje, Win/POSIX). ✅ **Bug zakładek prawdziwy root-cause:** [routes/agent.py:107](../../caelo_core/routes/agent.py)
+> — KAŻDE połączenie WS mintuje ŚWIEŻĄ sesję i ogłasza ją przy connect, więc po reconnect frontend dostawał
+> nowe puste id; poprzedni fix blokował się na tym. Przeprojektowany [AgentPanel](../../desktop/src/renderer/src/components/code/AgentPanel.tsx):
+> mirror do Hub tylko gdy jest transkrypt (entries>0, by świeże id nie nadpisało zapamiętanego), restore
+> wznawia zapamiętaną sesję i ZASTĘPUJE świeże id (`setSession(sid)` → backend wczytuje historię). typecheck/lint OK.
+> ⚠️ **oba wymagają pełnego restartu `npm run dev`** (backend client.py + renderer).
+
 - [x] **E1 — Pełny bieg agenta.**  ✅ 2026-06-08. Agent czytał (read_file/grep/list_dir) i edytował pliki (edit_file App.tsx/icon-generator.ts) w accept-edits; pętla domknięta, analiza wyrenderowana.
   - *Oczekiwane:* agent czyta (read_file/grep/list_dir), proponuje edycje, woła run_command — pętla domyka się.
 
