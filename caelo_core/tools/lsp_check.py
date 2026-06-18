@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from caelo_core.lsp.client import LspClient, path_to_uri, uri_to_path  # noqa: E402
+from caelo_core.lsp.client import LspClient, canon_key, path_to_uri, uri_to_path  # noqa: E402
 from caelo_core.lsp.manager import LspManager  # noqa: E402
 
 checks: list[tuple[str, bool]] = []
@@ -37,6 +37,23 @@ def test_uri_roundtrip() -> None:
         uri = path_to_uri(p)
         check("uri starts with file://", uri.startswith("file://"))
         check("uri round-trips to path", os.path.normcase(uri_to_path(uri)) == os.path.normcase(str(Path(p).resolve())))
+
+
+def test_canon_key_uri_match() -> None:
+    """LIVE 2026-06-17: pyright publikuje publishDiagnostics pod URI w INNYM formacie niż
+    nasz `path_to_uri` (Win: mała litera dysku + `%3A`), przez co diagnostyki nigdy się nie
+    matchowały (zawsze puste). `canon_key` musi sprowadzać oba formaty do tego samego klucza."""
+    if os.name == "nt":
+        p = r"G:\A B\lsp_test.py"
+        pyright_uri = "file:///g%3A/A%20B/lsp_test.py"   # styl vscode-uri (pyright)
+        ours_uri = "file:///G:/A%20B/lsp_test.py"        # styl Path.as_uri()
+    else:
+        p = "/home/u/a b/lsp_test.py"
+        pyright_uri = "file:///home/u/a%20b/lsp_test.py"
+        ours_uri = pyright_uri
+    check("canon_key: pyright-style URI == local path", canon_key(pyright_uri) == canon_key(p))
+    check("canon_key: our-style URI == local path", canon_key(ours_uri) == canon_key(p))
+    check("canon_key: path_to_uri round-trips to same key", canon_key(path_to_uri(p)) == canon_key(p))
 
 
 def test_client() -> None:
@@ -238,6 +255,7 @@ def test_agent_lsp_tool() -> None:
 
 def main() -> int:
     test_uri_roundtrip()
+    test_canon_key_uri_match()
     test_client()
     test_manager()
     test_concurrent_ensure()  # S34-b

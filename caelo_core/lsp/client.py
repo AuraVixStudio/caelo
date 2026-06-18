@@ -71,6 +71,16 @@ def uri_to_path(uri: str) -> str:
     return path
 
 
+def canon_key(path_or_uri: str) -> str:
+    """Kanoniczny klucz pliku do MATCHOWANIA diagnostyk — odporny na różnice formatu URI.
+    Na Windows pyright publikuje `file:///g%3A/...` (mała litera dysku, `:`→`%3A`), a nasze
+    `path_to_uri` daje `file:///G:/...` — surowe stringi URI się NIE zgadzają (LIVE 2026-06-17:
+    diagnostyki zawsze puste). Sprowadzamy oba do ścieżki i `normcase`+`normpath` (na Win
+    lowercase + ujednolicone separatory), więc klucz zapisu i odczytu jest ten sam."""
+    p = uri_to_path(path_or_uri) if path_or_uri.startswith("file:") else path_or_uri
+    return os.path.normcase(os.path.normpath(p))
+
+
 class LspClient:
     """Jeden serwer LSP. Leniwy: `start()` uruchamia podproces i robi handshake."""
 
@@ -236,9 +246,9 @@ class LspClient:
         method = msg.get("method")
         if method == "textDocument/publishDiagnostics":
             p = msg.get("params") or {}
-            uri = p.get("uri", "")
-            self._diagnostics[uri] = p.get("diagnostics") or []
-            self._diag_seq[uri] = self._diag_seq.get(uri, 0) + 1
+            key = canon_key(p.get("uri", ""))  # kanoniczny klucz (Win: URI pyright ≠ nasz)
+            self._diagnostics[key] = p.get("diagnostics") or []
+            self._diag_seq[key] = self._diag_seq.get(key, 0) + 1
         elif "id" in msg and method:
             # żądanie serwer→klient (np. client/registerCapability, workspace/configuration)
             # — odpowiedz neutralnie, by serwer nie wisiał.
@@ -295,7 +305,7 @@ class LspClient:
                 "contentChanges": [{"text": text}]})
 
     def diagnostics_for(self, abs_path: str) -> list:
-        return list(self._diagnostics.get(path_to_uri(abs_path), []))
+        return list(self._diagnostics.get(canon_key(abs_path), []))
 
     def wait_diagnostics(self, abs_path: str, text: str, language_id: str,
                          timeout: float = DEFAULT_DIAGNOSTICS_WAIT_S) -> list:
@@ -307,18 +317,18 @@ class LspClient:
         jeszcze krótką „łaskę" (`DIAG_EMPTY_GRACE_S`) na kolejny publish, zamiast zwracać
         pustkę na pierwszym sygnale. Czysty plik (brak błędów) zwraca pusto po łasce."""
         import time
-        uri = path_to_uri(abs_path)
-        seq0 = self._diag_seq.get(uri, 0)
+        key = canon_key(abs_path)  # ten sam klucz, którym zapisujemy publishDiagnostics
+        seq0 = self._diag_seq.get(key, 0)
         self.open_or_update(abs_path, text, language_id)
         deadline = time.monotonic() + timeout
         grace_deadline: Optional[float] = None
         while time.monotonic() < deadline:
-            if self._diag_seq.get(uri, 0) > seq0:
+            if self._diag_seq.get(key, 0) > seq0:
                 diags = self.diagnostics_for(abs_path)
                 if diags:
                     return diags  # mamy wynik — koniec
                 # pierwszy publish pusty: daj serwerowi chwilę na DOSŁANIE analizy
-                seq0 = self._diag_seq.get(uri, 0)
+                seq0 = self._diag_seq.get(key, 0)
                 if grace_deadline is None:
                     grace_deadline = min(deadline, time.monotonic() + DIAG_EMPTY_GRACE_S)
                 elif time.monotonic() >= grace_deadline:
