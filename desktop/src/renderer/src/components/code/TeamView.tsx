@@ -73,7 +73,7 @@ export function TeamView({
       </button>
 
       {collapsed ? null : (
-      <div className="flex max-h-64 flex-col gap-1.5 overflow-auto px-2 pb-2">
+      <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto px-2 pb-2">
         {nodes.map((node) => (
           <SubAgentCard
             key={node.agent_id}
@@ -131,7 +131,7 @@ function SubAgentCard({
   const [open, setOpen] = useState(false)
   const hasDetail = node.tools.length > 0 || node.approvals.length > 0 || !!node.summary
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface text-xs">
+    <div className="shrink-0 overflow-hidden rounded-lg border border-border bg-surface text-xs">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -281,7 +281,7 @@ function MergeReview({
   }, [open])
 
   return (
-    <div className={cn('px-2.5 py-2', embedded && 'border-t border-border bg-accent/5')}>
+    <div className={cn('shrink-0 px-2.5 py-2', embedded && 'border-t border-border bg-accent/5')}>
       <div className="flex items-center gap-2">
         <GitMerge size={13} className="shrink-0 text-accent" />
         <button
@@ -392,7 +392,7 @@ function Timeline({ report }: { report: TeamReport }) {
   const rows = timeline(report)
   if (rows.length === 0) return null
   return (
-    <div className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs">
+    <div className="shrink-0 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
