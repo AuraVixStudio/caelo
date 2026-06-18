@@ -68,26 +68,21 @@ cd desktop; npm run dev          # okno Electrona; brak błędów w DevTools
   > „Run `git status && rm -rf .`" → **musi zostać zablokowane** (metaznaki `&&` łapie P0-1 mimo allow `Bash(git*)`).
 
 ### E10 — LSP diagnostyka (Content-Length framing, M19-B3)
-- **Przygotowanie (przykład: pyright):**
-  ```powershell
-  npm i -g pyright
-  ```
-  W workspace utwórz `.caelo\lsp.json`:
-  ```json
-  {
-    "pyright": {
-      "command": "pyright-langserver",
-      "args": ["--stdio"],
-      "extensionToLanguage": { ".py": "python" }
-    }
-  }
-  ```
-  **Restart `npm run dev`.** (tsserver alternatywnie: `npm i -g typescript-language-server typescript`,
-  `command: "typescript-language-server"`, `args: ["--stdio"]`, mapowanie `.ts→typescript`.)
-- **Kroki:** Extensions → **Language Servers** (pyright widoczny/aktywny). W Code każ agentowi:
-  > „Edit `bug.py` to contain: `x: int = 'not a number'`"
-- **✅ gdy:** po edycji w panelu agenta pojawia się ramka **`diagnostics`** (błąd typu z pyright);
-  narzędzie `lsp` jest widoczne TYLKO gdy serwer skonfigurowany. ⚠️ LSP = binarny Content-Length (≠ MCP).
+- **Instalacja serwera (pyright — Python):** `npm i -g pyright`, potem sprawdź PATH:
+  `(Get-Command pyright-langserver).Source` (musi zwrócić ścieżkę; pusto → reopen terminala / PATH).
+- **Dodanie serwera — NAJŁATWIEJ przez GUI** (Extensions → **Language Servers** → „Add a language server"):
+  Name `pyright` · Command `pyright-langserver --stdio` · Extensions `.py:python` → **Add**. **Bez restartu**
+  (`reload_lsp`). Status „stopped" jest OK — serwer startuje **leniwie** przy 1. dotknięciu pliku `.py`.
+  *(Alternatywa: `<ws>/.caelo/lsp.json` `{"pyright":{"command":"pyright-langserver","args":["--stdio"],"extensionToLanguage":{".py":"python"}}}` — ale to WYMAGA restartu `npm run dev`.)*
+  *(tsserver: `npm i -g typescript-language-server typescript`; Command `typescript-language-server --stdio`; Extensions `.ts:typescript,.tsx:typescriptreact`.)*
+- **Wyzwolenie diagnostyki** (pasywna, po UDANEJ edycji `.py`). W Code, tryb `accept-edits`, użyj **write_file**
+  (zawsze się powiedzie, w przeciwieństwie do edit_file z dopasowaniem):
+  > „Create a file `lsp_test.py` with exactly this content: `x: int = 'hello'`"
+- **✅ gdy:** w panelu agenta pojawia się ramka **`diagnostics`** z błędem pyright (np. *Type „str" is not
+  assignable to „int"*); status serwera w Extensions zmienia się na **„running"**. Narzędzie `lsp` jest widoczne
+  modelowi TYLKO gdy serwer skonfigurowany. ⚠️ LSP = binarny Content-Length (≠ MCP).
+  ⚠️ **Zimny start:** 1. edycja może nie pokazać diagnostyk (pyright się inicjuje) → kliknij **Restart** na serwerze,
+  poczekaj ~15 s, zrób DRUGI `write_file` (np. `y: int = 'x'`) → diagnostyki powinny dojść.
 
 ---
 
