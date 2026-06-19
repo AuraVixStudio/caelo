@@ -23,7 +23,7 @@
 | # | Blok | Priorytet | Kto | Skrót |
 |---|---|---|---|---|
 | 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | ✅ **DOMKNIĘTA 2026-06-17** — remote+CI+gitleaks+pytest+podpisany release `v0.1.0`; zostaje tylko public repo → auto-update end-user |
-| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/E/F · zostają: D (głos), G (MCP/headless/ACP/LSP), H (funkcje-widma — decyzja), I (pakiety), J (cross-platform), K (terminal) |
+| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/**D**/E/F/**H**/**I** + **G-rdzeń** (G1–G3/G5/G6) · zostają tylko: **G4/G7** (remote-MCP/ACP), **J** (cross-platform mac/Linux), **K** (terminal) |
 | 3 | **Nowe funkcje TOP-10** | P2/P3 | 🤖 | TOP7 rewind czatu, TOP8 inline Ctrl-K, TOP9 auto-pamięć usera, TOP10 background-agents |
 | 4 | **Motywy inżynierskie 4.1** | P2/P3 | 🤖 | odporność (4.1-c), wydajność (4.1-b), API total/cost (4.1-e), /genjobs WS-push (4.1-f) |
 | 5 | **Strategiczne / długoterminowe** | P2/P3 | 🤖+👤 | ROAD-4.2-a (inni dostawcy LLM), spike B0 (`cli-chat-proxy`), ROAD-4.2-b |
@@ -72,7 +72,9 @@
 > **Gotowe przykłady „co zrobić":** [`FAZA_C_PRZYKLADY.md`](FAZA_C_PRZYKLADY.md) — konkretne prompty,
 > komendy, configi (`.caelo/permissions.json`, `lsp.json`) i kryteria „✅ zaliczone" dla każdego punktu.
 > **Pełny runbook z krokami/pułapkami:** [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)
-> (tabela wyników na górze). Status zaliczone: **A** (auth) · **B** (czat) · **C** (Image/Video).
+> (tabela wyników na górze). Status zaliczone (LIVE): **A** (auth) · **B** (czat) · **C** (Image/Video) ·
+> **D** (głos) · **E** (agent) · **F** (subagenci) · **G-rdzeń** (MCP/headless/LSP) · **H** (funkcje-widma — zdecydowane) ·
+> **I** (pakiety). Zostają tylko: **G4/G7** (remote-MCP/ACP), **J** (mac/Linux), **K** (terminal).
 > Po każdym teście: zaktualizuj tabelę wyników i skoryguj „zrobione (mock)" → realny status w docs.
 
 - [x] **E — Agent kodowania** P1 ✅ **CAŁA SEKCJA (2026-06-17)** — E1–E10 zaliczone na żywo (E5 checkpointy/undo,
@@ -98,6 +100,10 @@
   - [x] **H1 ⭐ embeddings spike** ⛔ **FAILED 2026-06-19** — xAI **404** na `/v1/embeddings` (jak vector stores). **DECYZJA: B8 ODŁOŻONE** (uśpione+udokumentowane w CLAUDE.md, bez torch; usunięcie/FTS5-only = osobna zmiana).
   - [x] **H2** pamięć hybrydowa ⛔ ZABLOKOWANE przez H1 (recall embeduje pierwsze, bez fallbacku FTS → no-op przy 404). · [ ] **H3** sandbox OS (Linux/mac only — Windows no-op) · [x] **H4** web_fetch ✅ (https-only+SSRF+allowlista; opt-in) · [x] **H5** git worktree ✅ (realny `git worktree` subagenta potwierdzony; opt-in) · [x] **H6** auto-compact ✅ selfcheck (live niepraktyczne, próg 48k; opt-in).
 - [x] **I — Pakiety / marketplace** P3 ✅ **2026-06-19** — I1 fetch registry (404 grzecznie obsłużony; ⚠️ **domyślny rejestr nieopublikowany** — URL ustawiony na `AuraVixStudio/caelo-packages`, repo trzeba utworzyć z `registry.json`; import-only/BYO działa bez rejestru), I2 instalacja `.caelopkg` (ConsentCard: typ/wersja/ryzyko/INTEGRITY OK/uprawnienia → Install; round-trip OK), I3 export/share (`plan` → `.caelopkg`). Tamper/strip-sekretów = selfcheck `packages_check` 47/47.
+  - [ ] **👤 Follow-up (opcjonalny): opublikować rejestr** — utwórz repo `AuraVixStudio/caelo-packages` (public) i wrzuć
+    [`docs/guides/registry.starter.json`](registry.starter.json) jako `registry.json` na `main` (przewodnik:
+    [`docs/guides/registry.README.md`](registry.README.md)). Domyślny URL już wskazuje na `AuraVixStudio/caelo-packages`
+    (`config.PACKAGES_REGISTRY_URL`, commit `182bd1b`); do czasu utworzenia repo Browse = 404, ale import-only/BYO działa.
 - [ ] **J — Cross-platform** P3 ⬜ (gdy dostęp do mac/Linux) — J1 build dmg/AppImage/deb, J2 PTY, J3 tree-kill POSIX.
 - [ ] **K — Terminal** P3 ⬜ — K1 pywinpty + potwierdzenie scrubbed env (`echo $env:XAI_API_KEY` puste).
 

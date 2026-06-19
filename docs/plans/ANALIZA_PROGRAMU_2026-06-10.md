@@ -368,6 +368,8 @@ local-first).
 3. **Dokończenie weryfikacji LIVE:** sekcje D (głos), F (subagenci), G (MCP/headless/ACP/LSP),
    H (funkcje-widma — decyzja włącz/usuń), I (pakiety), J (cross-platform), K (terminal)
    z `PLAN_WERYFIKACJI_LIVE.md`.
+   > **Aktualizacja (2026-06-19):** D/F/H/I + G-rdzeń (G1–G3/G5/G6) **zaliczone na żywo**; zostają tylko
+   > G4/G7 (remote-MCP/ACP), J (mac/Linux), K (terminal). Aktualny stan: `PLAN_WERYFIKACJI_LIVE.md` (tabela wyników).
 4. **Runda P2 „współbieżność i odzysk":** wyścigi genjobs/OAuth/lazy-init/RoleRegistry/MCP/LSP
    + zawężenie `except` w `load_json_or_backup`/`history_store` + maskowanie błędów WS +
    limity (`/fs/read`, `caelo-md`, `messages[]`, output-dir).

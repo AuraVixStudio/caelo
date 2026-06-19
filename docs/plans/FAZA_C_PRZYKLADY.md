@@ -86,8 +86,14 @@ cd desktop; npm run dev          # okno Electrona; brak błędów w DevTools
 
 ---
 
-## D — Głos  🟡 P2
+## D — Głos  ✅ P2 (zaliczone 2026-06-19)
 
+> **✅ WYNIK LIVE 2026-06-19 (cała sekcja D):** D1 TTS · D2 STT batch · D4 Talk · D5 Live · D6/D7 ✅.
+> ⚠️ **D3 (partiale na żywo) NIE DZIAŁA** — `wss://api.x.ai/v1/stt` odrzuca nasz protokół
+> (`input_audio_buffer.append`, `expected audio.done`); streaming odłożony. **Talk (D4) używa teraz
+> batch-STT + VAD (auto-stop na ciszy)**, nie streamingu — więc poniższy opis D3/D4 „partiale NA ŻYWO"
+> jest nieaktualny (zostaje jako historia). Szczegóły + commity: `PLAN_WERYFIKACJI_LIVE.md` sekcja D.
+>
 > Settings → **Voice** ustaw głos (Eve/Ara/Leo/Rex/Sal) + język. Mikrofon: Electron poprosi o `media`.
 
 - **D1 TTS:** w czacie najedź na odpowiedź → **Read aloud**.
@@ -158,8 +164,13 @@ caelo_core\.venv\Scripts\python -m caelo_core run -p "Add a test for foo()" --cw
 
 ---
 
-## H — Funkcje-widma OFF-by-default (DECYZJA: włączyć ALBO usunąć)  ⚪ P3
+## H — Funkcje-widma OFF-by-default (DECYZJA: włączyć ALBO usunąć)  ✅ P3 (zdecydowane 2026-06-19)
 
+> **✅ WYNIK LIVE 2026-06-19:** **H1 ⛔** — xAI **404** na `/v1/embeddings` → **B8/pamięć (H1+H2) ODŁOŻONE**
+> (uśpione+udok., bez torch). **H4 web_fetch ✅** (https-only+SSRF+allowlista). **H5 git worktree ✅** (realny
+> `git worktree` potwierdzony). **H6 auto-compact ✅** (selfcheck; live niepraktyczne, próg 48k). **H3** = Linux/mac
+> only (Windows no-op). Wszystkie działające = opt-in (zostaw). Szczegóły: `PLAN_WERYFIKACJI_LIVE.md` sekcja H.
+>
 > Każda: zweryfikuj → działa = rozważ ON-by-default; nie/niepotrzebna = **usuń martwy kod** (SWOT W3).
 
 - **H1 ⭐ embeddings spike (GATE dla B8):**
@@ -182,8 +193,13 @@ caelo_core\.venv\Scripts\python -m caelo_core run -p "Add a test for foo()" --cw
 
 ---
 
-## I — Pakiety / marketplace (M16)  ⚪ P3
+## I — Pakiety / marketplace (M16)  ✅ P3 (zaliczone 2026-06-19)
 
+> **✅ WYNIK LIVE 2026-06-19:** I1–I3 ✅ (round-trip export `plan`→import→ConsentCard→Install; integralność sha256 OK).
+> ⚠️ **Domyślny rejestr nieopublikowany** — URL ustawiony na `AuraVixStudio/caelo-packages`, repo trzeba utworzyć
+> (startowy plik: `docs/guides/registry.starter.json`); import-only/BYO działa bez rejestru. Tamper/strip-sekretów =
+> selfcheck `packages_check` 47/47.
+>
 - **I1 fetch registry:** Extensions → Marketplace → **Browse**. **✅ gdy:** lista z `PACKAGES_REGISTRY_URL` (https-only).
 - **I2 instalacja `.caelopkg`:** Import pliku → **ConsentCard** (uprawnienia/ryzyko) → Install.
   **✅ gdy:** odmowa bez zgody I przy złej integralności (podmień bajt → tamper/sha256); skille install **disabled**, MCP `enabled=False`.
