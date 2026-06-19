@@ -1,9 +1,38 @@
 // @vitest-environment jsdom
+import { StrictMode } from 'react'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useConversations } from '../src/renderer/src/lib/useConversations'
 
 const KEY = 'caelo.chat.conversations.v1'
+
+// Faza-G (LIVE): flush przy odmontowaniu NIE może nadpisać zapisanych rozmów PUSTĄ listą.
+// W dev StrictMode robi mount→unmount→mount: cleanup flusha odpalał się, gdy convosRef
+// wciąż = [] (init jeszcze nie wczytał), zapisywał [] i KASOWAŁ historię → po remoncie
+// został tylko świeży „New chat". To dokładnie objaw „czat się nie zapisuje / znika po
+// zmianie zakładki" (moduł czatu jest lazy i odmontowuje się przy przełączeniu).
+describe('useConversations — StrictMode/odmontowanie nie kasuje historii (Faza-G)', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('podwójny mount (StrictMode) z zaseedowanym localStorage nie nadpisuje go pustką', () => {
+    const seeded = [
+      { id: 'seed1', title: 'Kept', created: 1, project_id: null,
+        messages: [{ role: 'user', content: 'keep me' }] }
+    ]
+    localStorage.setItem(KEY, JSON.stringify(seeded))
+
+    const { unmount } = renderHook(() => useConversations(), { wrapper: StrictMode })
+    act(() => {
+      unmount()
+    })
+
+    const parsed = JSON.parse(localStorage.getItem(KEY) as string)
+    expect(Array.isArray(parsed)).toBe(true)
+    expect(parsed.some((c: { id: string }) => c.id === 'seed1')).toBe(true)
+    const kept = parsed.find((c: { id: string }) => c.id === 'seed1')
+    expect(kept.messages.some((m: { content?: string }) => m.content === 'keep me')).toBe(true)
+  })
+})
 
 // P1-I: zapis rozmów był debounce'owany (800 ms), a cleanup robił tylko clearTimeout —
 // odmontowanie modułu / zamknięcie apki gubiło ostatnią turę. Flush w cleanup to naprawia.

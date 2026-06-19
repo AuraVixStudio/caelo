@@ -64,12 +64,19 @@ export function useConversations(): {
   // gwarantowany przy niszczeniu okna Electron.
   useEffect(() => {
     const onHide = (): void => {
+      // NIE nadpisuj zapisanych rozmów PUSTĄ tablicą. `convos` jest [] tylko ZANIM
+      // efekt init wczyta dane (a w dev StrictMode robi mount→unmount→mount: cleanup
+      // flusha odpala się, gdy convosRef wciąż = [] z initial useState). Bez tego guardu
+      // flush przy odmontowaniu (lazy unmount modułu czatu / podwójny mount) zapisywał []
+      // i KASOWAŁ całą historię. Po init `convos` ma zawsze ≥1 (init tworzy „New chat",
+      // delete też), więc pusta lista nigdy nie jest stanem do utrwalenia.
+      if (convosRef.current.length === 0) return
       saveConversations(convosRef.current)
     }
     window.addEventListener('pagehide', onHide)
     window.addEventListener('beforeunload', onHide)
     return () => {
-      saveConversations(convosRef.current)
+      onHide()
       window.removeEventListener('pagehide', onHide)
       window.removeEventListener('beforeunload', onHide)
     }
