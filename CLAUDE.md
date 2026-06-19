@@ -318,6 +318,12 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   `wrap.py` — macOS seatbelt / Linux bwrap, wired into `run_command` + MCP + LSP spawns). **B8 hybrid-memory**
   ([`caelo_core/memory.py`](caelo_core/memory.py) + [`embeddings.py`](caelo_core/embeddings.py): `/v1/embeddings`
   + an `event_embeddings` table with kNN/`hybrid_search` in `history_store`, injected via `session._maybe_inject_memory`).
+  ⚠️ **B8 is DORMANT — xAI has NO `/v1/embeddings` (LIVE-verified H1, 2026-06-19: `404 Not Found`, same as vector
+  stores).** `memory.recall()` embeds the query first and returns `[]` on failure (deliberately no FTS-only fallback —
+  "no noise from FTS alone"), so with the 404 the whole feature is a no-op even with `CAELO_MEMORY=1`. Kept OFF-by-default
+  + documented (decision: defer, NOT introduce torch); `hybrid_search` already supports `query_vec` so kNN auto-re-enables
+  if xAI ships embeddings. Don't wire memory ON or build on B8 until the endpoint exists. (Removal / FTS5-only repurpose
+  is a separate deliberate change.)
 - **Tier-3 DONE** ([`docs/plans/zrealizowane/PLAN_M19_TIER3.md`](docs/plans/zrealizowane/PLAN_M19_TIER3.md), quick-wins): **B9 effort** (`reasoning.effort`
   in `responses_client`/`llm`, per-role + `EffortSelect.tsx`; **reasoning_effort is MODEL-DEPENDENT** —
   grok-4.3 / grok-4.20-*reasoning support `none/low/medium/high`, but grok-4 / grok-build-* / grok-3 (non-mini)

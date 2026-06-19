@@ -32,7 +32,7 @@
 | E | Agent kodowania | P1 | ✅ | 2026-06-17 | **E1–E10 ✅ — CAŁA SEKCJA E.** Pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow, **LSP diagnostyka (pyright)**. Naprawiono ~17 bugów/UX (rundy 1–11): m.in. izolacja CAELO.md, edit_file taby/CRLF, @-wyszukiwanie, loop guard (r.8), **LSP URI-match Windows g%3A vs G: (r.10), sesja przeżywa zmianę zakładki — backend mintuje świeże id per połączenie (r.10)**. |
 | F | Subagenci / zespoły | P2 | ✅ | 2026-06-18 | **F1–F4 ✅ — CAŁA SEKCJA F.** F1: 3 subagenci równolegle, kontekst rodzica czysty, głębia 1. F2: review w MODALU (Accept&merge/Discard/Cancel zawsze w zasięgu), merge→workspace, **checkpoint cofalny** („Undid 2 checkpoints"), **konflikt wykryty** (implementer+test-writer na `src/calculator.py` → badge „1 conflict"). F3: **cascade stop** — Stop orkiestratora → tester CANCELLED, `python slow_task.py` **ubity (tree-kill)**, brak osieroconego procesu (`Get-CimInstance` = pusto, sprawdzone w sekundy po Stop). F4: **skill `implement` steruje** delegate+rolami (PLAN fazowy → implementer→reviewer→apply, walidacja `--count<0` w `parse_args()`). UX naprawione na żywo: review-modal (diff uwięziony w max-h-64), przycisk zwijania Team, `shrink-0` na kartach (panel ściskał wpisy zamiast scrollować). |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3+G5+G6 ✅** (MCP stdio realny + w agencie + w czacie; interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G7 (ACP). |
-| H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
+| H | Funkcje-widma (decyzja) | P3 | 🟡 | 2026-06-19 | **H1 (embeddingi) ⛔ FAILED — xAI 404 na `/v1/embeddings`** (jak vector stores) → **B8/pamięć (H1+H2) ODŁOŻONE** (uśpione+udokumentowane, bez torch). Zostają H4 (web_fetch), H5 (git worktree), H6 (auto-compact); H3 sandbox = Linux/mac only. |
 | I | Pakiety / marketplace | P3 | ⬜ | | |
 | J | Cross-platform | P3 | ⬜ | | |
 | K | Terminal | P3 | ⬜ | | |
@@ -449,15 +449,16 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > To kod zbudowany, **wyłączony i niezweryfikowany**. Każda pozycja: zweryfikuj → jeśli działa,
 > rozważ ON-by-default; jeśli nie/niepotrzebna → **usuń, by nie utrzymywać martwego kodu** (SWOT W3).
 
-- [ ] **H1 — ⭐ Embeddingi spike (gate dla całego B8).**
-  ```powershell
-  caelo_core\.venv\Scripts\python caelo_core\tools\embeddings_check.py --live
-  ```
-  - *Oczekiwane:* `POST /v1/embeddings` zwraca wektory (~1024 wymiarów).
-  - *Decyzja:* **jeśli 404/400 → xAI nie ma embeddingów → odłóż/usuń B8 (NIE wprowadzaj torch).**
+- [x] **H1 — ⭐ Embeddingi spike (gate dla całego B8).**  ⛔ FAILED 2026-06-19. `embeddings_check.py --live` →
+  **`404 Client Error: Not Found for url: https://api.x.ai/v1/embeddings`** (model `embedding-beta-3-small`).
+  xAI **nie ma** endpointu embeddingów — ten sam wzorzec co vector stores (też 404).
+  - *Decyzja (przyjęta):* **B8 ODŁOŻONE (uśpione + udokumentowane), bez torch.** Plan sankcjonuje „odłóż/usuń"; wybrano
+    najniższe ryzyko przed publikacją. Pełne usunięcie / wariant FTS5-only = osobna, celowa zmiana w przyszłości.
 
-- [ ] **H2 — Pamięć hybrydowa (zależy od H1).** `$env:CAELO_MEMORY="1"; npm run dev` → agent w 2. sesji odwołuje się do faktu z 1.
-  - *Oczekiwane:* recall wstrzyknięty na 1. turze (kNN∪FTS5). Tylko jeśli H1 = OK.
+- [x] **H2 — Pamięć hybrydowa (zależy od H1).**  ⛔ ZABLOKOWANE przez H1 (2026-06-19). `memory.recall()` embeduje
+  zapytanie PIERWSZE i przy błędzie zwraca `[]` (świadomie, bez fallbacku do FTS5 — „nie chcemy hałasu z samego FTS").
+  Skoro embeddingi = 404, `index_event`/`recall` to no-op → żadnej pamięci się nie wstrzyknie. Nietestowalne na żywo
+  dopóki xAI nie doda `/v1/embeddings`. Uśpione razem z B8.
 
 - [ ] **H3 — Sandbox OS (Linux/macOS).** Na Linux/mac:
   ```bash
