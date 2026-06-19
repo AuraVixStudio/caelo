@@ -19,6 +19,7 @@ import { Card } from './ui/Card'
 import { Input } from './ui/Input'
 import { Page, Field } from './ui/Page'
 import { Select } from './ui/Select'
+import { useToast } from './ui/Toast'
 
 function accountLabel(account: Record<string, unknown>): string {
   const email = account.email || account.preferred_username || account.name || account.sub
@@ -60,8 +61,10 @@ export function Settings({ conn }: { conn: Conn }) {
   const [voiceLanguage, setVoiceLanguage] = useState('en')
   const [voiceList, setVoiceList] = useState<string[]>(VOICES.map((v) => v.id))
   const [signingIn, setSigningIn] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // ROAD-4.1-d: potwierdzenia/błędy zapisu idą w toast (fixed bottom-right), nie w
+  // banner na górze strony — sekcje niżej (Voice/Output) były poza widokiem, więc
+  // zapis nie dawał widocznego feedbacku.
+  const toast = useToast()
   // P2-2: współdzielony cache /models i /settings.
   const { models: modelsResp } = useModels(conn)
   const { settings } = useSettings(conn)
@@ -96,15 +99,13 @@ export function Settings({ conn }: { conn: Conn }) {
 
   async function signIn(): Promise<void> {
     setSigningIn(true)
-    setError(null)
-    setMsg('Complete the sign-in in your browser…')
+    toast.push('Complete the sign-in in your browser…', 'info')
     try {
       await login(conn)
-      setMsg('Signed in.')
+      toast.push('Signed in.', 'success')
       void refreshAuth(conn)
     } catch (e) {
-      setError(String((e as Error).message || e))
-      setMsg(null)
+      toast.push(String((e as Error).message || e), 'error')
     } finally {
       setSigningIn(false)
     }
@@ -112,7 +113,7 @@ export function Settings({ conn }: { conn: Conn }) {
 
   async function signOut(): Promise<void> {
     await logout(conn).catch(() => undefined)
-    setMsg('Signed out.')
+    toast.push('Signed out.', 'success')
     void refreshAuth(conn)
   }
 
@@ -123,12 +124,10 @@ export function Settings({ conn }: { conn: Conn }) {
       await saveSettings(conn, { api_key: apiKey.trim() })
       setApiKey('')
       setEditingKey(false)
-      setError(null)
-      setMsg('API key saved.')
+      toast.push('API key saved.', 'success')
       void refreshAuth(conn)
     } catch (e) {
-      setMsg(null)
-      setError(`Could not save API key: ${String((e as Error).message || e)}`)
+      toast.push(`Could not save API key: ${String((e as Error).message || e)}`, 'error')
     }
   }
 
@@ -137,24 +136,20 @@ export function Settings({ conn }: { conn: Conn }) {
       await clearApiKey(conn)
       setApiKey('')
       setEditingKey(false)
-      setError(null)
-      setMsg('API key removed.')
+      toast.push('API key removed.', 'success')
       void refreshAuth(conn)
     } catch (e) {
-      setMsg(null)
-      setError(`Could not remove API key: ${String((e as Error).message || e)}`)
+      toast.push(`Could not remove API key: ${String((e as Error).message || e)}`, 'error')
     }
   }
 
   async function changeSource(src: AuthSource): Promise<void> {
     try {
       await saveSettings(conn, { auth_source: src })
-      setError(null)
-      setMsg('Model source updated.')
+      toast.push('Model source updated.', 'success')
       void refreshAuth(conn)
     } catch (e) {
-      setMsg(null)
-      setError(`Could not update model source: ${String((e as Error).message || e)}`)
+      toast.push(`Could not update model source: ${String((e as Error).message || e)}`, 'error')
     }
   }
 
@@ -164,35 +159,29 @@ export function Settings({ conn }: { conn: Conn }) {
     try {
       await setOutputDir(conn, picked)
       setDir(picked)
-      setError(null)
-      setMsg('Output folder updated.')
+      toast.push('Output folder updated.', 'success')
     } catch (e) {
-      setMsg(null)
-      setError(`Could not update output folder: ${String((e as Error).message || e)}`)
+      toast.push(`Could not update output folder: ${String((e as Error).message || e)}`, 'error')
     }
   }
 
   function saveModels(): void {
     saveSettings(conn, { chat_model: chatModel, code_model: codeModel })
       .then(() => {
-        setError(null)
-        setMsg('Model preferences saved.')
+        toast.push('Model preferences saved.', 'success')
       })
       .catch((e) => {
-        setMsg(null)
-        setError(`Could not save model preferences: ${String((e as Error).message || e)}`)
+        toast.push(`Could not save model preferences: ${String((e as Error).message || e)}`, 'error')
       })
   }
 
   function saveVoice(): void {
     saveSettings(conn, { voice, voice_language: voiceLanguage })
       .then(() => {
-        setError(null)
-        setMsg('Voice preferences saved.')
+        toast.push('Voice preferences saved.', 'success')
       })
       .catch((e) => {
-        setMsg(null)
-        setError(`Could not save voice preferences: ${String((e as Error).message || e)}`)
+        toast.push(`Could not save voice preferences: ${String((e as Error).message || e)}`, 'error')
       })
   }
 
@@ -213,9 +202,6 @@ export function Settings({ conn }: { conn: Conn }) {
       subtitle="Account, API key, output folder and model preferences."
       maxWidth="max-w-3xl"
     >
-      {msg ? <p className="mb-4 text-sm text-success">{msg}</p> : null}
-      {error ? <p className="mb-4 text-sm text-error">{error}</p> : null}
-
       <div className="flex flex-col gap-5">
         {/* Model source — co jest aktywne + przełącznik trybów */}
         <Card
