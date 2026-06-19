@@ -33,7 +33,7 @@
 | F | Subagenci / zespoły | P2 | ✅ | 2026-06-18 | **F1–F4 ✅ — CAŁA SEKCJA F.** F1: 3 subagenci równolegle, kontekst rodzica czysty, głębia 1. F2: review w MODALU (Accept&merge/Discard/Cancel zawsze w zasięgu), merge→workspace, **checkpoint cofalny** („Undid 2 checkpoints"), **konflikt wykryty** (implementer+test-writer na `src/calculator.py` → badge „1 conflict"). F3: **cascade stop** — Stop orkiestratora → tester CANCELLED, `python slow_task.py` **ubity (tree-kill)**, brak osieroconego procesu (`Get-CimInstance` = pusto, sprawdzone w sekundy po Stop). F4: **skill `implement` steruje** delegate+rolami (PLAN fazowy → implementer→reviewer→apply, walidacja `--count<0` w `parse_args()`). UX naprawione na żywo: review-modal (diff uwięziony w max-h-64), przycisk zwijania Team, `shrink-0` na kartach (panel ściskał wpisy zamiast scrollować). |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3+G5+G6 ✅** (MCP stdio realny + w agencie + w czacie; interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G7 (ACP). |
 | H | Funkcje-widma (decyzja) | P3 | ✅ | 2026-06-19 | **CAŁA SEKCJA H zdecydowana.** H1 embeddingi ⛔ xAI **404** → **B8/pamięć (H1+H2) ODŁOŻONE** (uśpione+udok., bez torch). H4 web_fetch ✅ (https-only+SSRF+allowlista, opt-in). H5 git worktree ✅ (realny `git worktree` subagenta potwierdzony, opt-in). H6 auto-compact ✅ selfcheck (live niepraktyczne, opt-in). H3 sandbox = Linux/mac only (Windows no-op). |
-| I | Pakiety / marketplace | P3 | ⬜ | | |
+| I | Pakiety / marketplace | P3 | ✅ | 2026-06-19 | **I1–I3 ✅.** Round-trip export `plan`→import→ConsentCard (typ/wersja/ryzyko/INTEGRITY OK/uprawnienia)→Install zweryfikowany. I1: 404 rejestru obsłużony grzecznie. ⚠️ **domyślny rejestr nieopublikowany** (`grooverpty/caelo-packages` 404) — decyzja: publikacja (rozważ `AuraVixStudio/…`) ALBO import-only/BYO. Tamper/strip-sekretów = selfcheck `packages_check` 47/47. |
 | J | Cross-platform | P3 | ⬜ | | |
 | K | Terminal | P3 | ⬜ | | |
 
@@ -478,12 +478,10 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 ## Część I — Pakiety / marketplace (M16)  ⚪ P3
 
-- [ ] **I1 — Fetch registry.** Extensions → Marketplace → Browse (sieć).
-  - *Oczekiwane:* lista z `PACKAGES_REGISTRY_URL` (https-only + cap).
-- [ ] **I2 — Instalacja `.caelopkg`.** Import → ConsentCard (uprawnienia/ryzyko) → Install.
-  - *Oczekiwane:* odmowa bez zgody I przy złej integralności (tamper/sha256); skille install **disabled**, MCP `enabled=False`.
-- [ ] **I3 — Export/Share.** Share na panelu Skills/Commands/MCP/Templates → plik `.caelopkg`.
-  - *Oczekiwane:* sekrety (`authorization`/`env`) **zdjęte** przy eksporcie.
+- [x] **I1 — Fetch registry.**  ✅ (graceful) 2026-06-19. Browse → Load → **404 obsłużony grzecznie** („Could not load registry: 404 ... grooverpty/caelo-packages/main/registry.json"), bez crasha. Pole „Registry URL" edytowalne → BYO-registry możliwe.
+  - ⚠️ *Decyzja I1:* **domyślny rejestr NIE istnieje** (`grooverpty/caelo-packages` → 404). Do publikacji: utworzyć repo z `registry.json` (rozważ `AuraVixStudio/caelo-packages` zamiast `grooverpty`) ALBO świadomie zostawić marketplace jako **import-only / BYO-registry**.
+- [x] **I2 — Instalacja `.caelopkg`.**  ✅ 2026-06-19. Import → **ConsentCard**: `plan · COMMAND · V1.0.0 · MEDIUM RISK · INTEGRITY OK` + „Declared permissions: Prompt/instructions only" + „Contents: command.json"; **nic nie instaluje się bez Install** → „Installed plan (v1.0.0)". Integralność (sha256) weryfikowana („INTEGRITY OK"). *Tamper (zła sha256) + skille-disabled/MCP-enabled=False pokryte selfcheckiem `packages_check` 47/47 — live fiddly, niepowtarzane.*
+- [x] **I3 — Export/Share.**  ✅ 2026-06-19. Share na komendzie `plan` → pobrany `.caelopkg` (round-trip do I2 zadziałał). *Strip sekretów (`authorization`/`env`) przy eksporcie MCP — pokryty `packages_check`; live opcjonalny.*
 
 ---
 
