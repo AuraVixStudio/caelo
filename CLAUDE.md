@@ -509,6 +509,11 @@ All five JSON readers go through **`config.load_json_or_backup`** (P1-11): a cor
   CORS is narrowed to dev loopback + packaged `file://` (P1-9), not `*`. The renderer ships a
   **CSP** meta (P2-10: source-restricted `connect-src`/`img-src`/…), and `main/index.ts` blocks
   off-origin navigation (`will-navigate`) and allows only `media` permission requests (mic).
+  ⚠️ **`script-src` MUST keep `blob:`** (LIVE-verified D3): the voice `MicCapture` AudioWorklet
+  (`audioStream.ts`) loads its PCM16 processor from a Blob URL, and Chromium checks worklet scripts
+  under `script-src` — without `blob:` `addModule` throws and **Talk/Live/STT-stream** die with
+  "Audio capture is unavailable in this environment." (`MediaRecorder`-based batch STT is unaffected).
+  Guarded by `desktop/test/csp.test.ts`.
 - **Shared backend helpers** (reuse them, don't reinvent). M1/M2: `caelo_core/errors.py`
   `upstream_error()` (log raw exc → return generic detail; use for xAI 5xx / `auth.py` so raw errors
   don't leak), `caelo_core/validation.py` (route input limits + data-URI validators, used in
