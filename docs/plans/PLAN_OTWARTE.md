@@ -85,8 +85,10 @@
   merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
   F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
   panelu Team, `shrink-0`/scroll.
-- [ ] **G — Rozszerzalność** P2 ⬜ — G1 realny MCP stdio, G2 MCP w agencie (gate), G3 MCP w czacie
-  (allowlista), G4 remote MCP (xAI-side), G5 interop (`~/.claude.json`/`.mcp.json`/`AGENTS.md`/skille — NIEDESTRUKCYJNIE),
+- [ ] **G — Rozszerzalność** P2 🟡 — **G1+G2+G3 ✅ 2026-06-19** (realny MCP stdio + w agencie + w czacie;
+  LSP ✅ w E10). Po drodze **4 realne bugi backendu**: cwd serwera (`3a004ef`), `start_enabled` martwy kod
+  (`0376351`), warm-start (`24d4a4a`), **MCP-provider — agent gubił narzędzia po rebuildzie** (`dc8da65`).
+  Zostają: G4 remote MCP (xAI-side), G5 interop (`~/.claude.json`/`.mcp.json`/`AGENTS.md`/skille — NIEDESTRUKCYJNIE),
   G6 headless CLI (`run -p` plain/json/streaming-json, fail-closed), G7 ACP (Zed/Neovim/Emacs).
 - [ ] **H — Funkcje-widma OFF-by-default** P3 ⬜ — **DECYZJA: włączyć po teście ALBO usunąć** (martwy kod = SWOT W3):
   - [ ] **H1 ⭐ embeddings spike** (`embeddings_check.py --live`) — **gate dla całego B8**; 404/400 → odłóż/usuń B8 (NIE wprowadzać torch).

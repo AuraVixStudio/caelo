@@ -31,7 +31,7 @@
 | D | Głos | P2 | ⬜ | | |
 | E | Agent kodowania | P1 | ✅ | 2026-06-17 | **E1–E10 ✅ — CAŁA SEKCJA E.** Pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow, **LSP diagnostyka (pyright)**. Naprawiono ~17 bugów/UX (rundy 1–11): m.in. izolacja CAELO.md, edit_file taby/CRLF, @-wyszukiwanie, loop guard (r.8), **LSP URI-match Windows g%3A vs G: (r.10), sesja przeżywa zmianę zakładki — backend mintuje świeże id per połączenie (r.10)**. |
 | F | Subagenci / zespoły | P2 | ✅ | 2026-06-18 | **F1–F4 ✅ — CAŁA SEKCJA F.** F1: 3 subagenci równolegle, kontekst rodzica czysty, głębia 1. F2: review w MODALU (Accept&merge/Discard/Cancel zawsze w zasięgu), merge→workspace, **checkpoint cofalny** („Undid 2 checkpoints"), **konflikt wykryty** (implementer+test-writer na `src/calculator.py` → badge „1 conflict"). F3: **cascade stop** — Stop orkiestratora → tester CANCELLED, `python slow_task.py` **ubity (tree-kill)**, brak osieroconego procesu (`Get-CimInstance` = pusto, sprawdzone w sekundy po Stop). F4: **skill `implement` steruje** delegate+rolami (PLAN fazowy → implementer→reviewer→apply, walidacja `--count<0` w `parse_args()`). UX naprawione na żywo: review-modal (diff uwięziony w max-h-64), przycisk zwijania Team, `shrink-0` na kartach (panel ściskał wpisy zamiast scrollować). |
-| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ⬜ | | |
+| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3 ✅** (MCP stdio realny + w agencie + w czacie). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G5 (interop), G6 (headless), G7 (ACP). |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
 | I | Pakiety / marketplace | P3 | ⬜ | | |
 | J | Cross-platform | P3 | ⬜ | | |
@@ -402,11 +402,27 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 ## Część G — Rozszerzalność: MCP / headless / ACP / interop  🟡 P2
 
-- [ ] **G1 — Realny serwer MCP (stdio).** Dodaj serwer (np. filesystem/git) w Extensions → MCP → Start.
+> **Postęp 2026-06-19 (G1–G3 ✅ na żywo): 4 realne bugi backendu złapane i naprawione** (mocki były
+> zielone — ścieżki nigdy nie odpalone live, klasyczny dług weryfikacji):
+> (1) **cwd serwera** [`3a004ef`] — serwer stdio startował w CWD sidecara → ścieżki WZGLĘDNE „access denied";
+> teraz startuje w korzeniu workspace (jawny `cwd` ma pierwszeństwo). (2) **`start_enabled` martwy kod**
+> [`0376351`] — nikt go nie wołał → włączone serwery nie wstawały po restarcie/zmianie workspace; teraz
+> `Backend.mcp` auto-startuje je w tle po (prze)budowie. (3) **warm-start** [`24d4a4a`] — serwery wstają już
+> przy starcie sidecara (mniej „pierwsze żądanie nie ma narzędzia"). (4) ⭐ **MCP jako provider** [`dc8da65`]
+> — `AgentSession` łapała instancję `McpManagera` RAZ; po przebudowie (`backend.mcp` jest workspace-aware)
+> trzymała STARĄ/ubitą → **agent tracił WSZYSTKIE narzędzia MCP** mimo serwera READY. Fix: `mcp_provider`
+> resolwujący `backend.mcp` na żywo (jak `lsp_provider`); subagenci dalej dostają instancję (ScopedMcp).
+> **Nauki (nie-bug):** grok-build-0.1 bywa niestabilny w deklarowaniu narzędzi (twierdzi „brak", potem używa
+> po ponowieniu) → do czatu używaj **grok-4.3**; MCP-mutujące w czacie wymaga **„Always allow"** (trwałe),
+> nie „Accept" (jednorazowe) — komunikat odmowy wspomina „MCP configuration", choć nie ma tam przycisku
+> (drobny brak UX, ew. follow-up: per-tool „allow in chat" w ustawieniach MCP). Testy regresyjne: `mcp_check`
+> 46→**51** (cwd default/override + start_enabled), `agent_selfcheck` `test_mcp_provider_live` (+5).
+
+- [x] **G1 — Realny serwer MCP (stdio).**  ✅ 2026-06-19. Filesystem przez katalog (Extensions → MCP), STDIO · READY · 14 narzędzi `mcp__filesystem__*`; subproces hardened (`npx`→`cmd /c`).
   - *Oczekiwane:* narzędzia `mcp__<srv>__<tool>` wylistowane; subproces hardened (scrubbed_env, tree-kill; Windows `.cmd`→`cmd /c`).
 
-- [ ] **G2 — MCP w agencie.** Agent woła narzędzie MCP mutujące → karta approval `mcp_tool_call` (gate po `readOnlyHint`).
-- [ ] **G3 — MCP w czacie.** Czat woła narzędzie MCP (function-call loop). Mutujące działa tylko gdy **wcześniej dopuszczone** na allowliście, inaczej odmowa z komunikatem.
+- [x] **G2 — MCP w agencie.**  ✅ 2026-06-19. Agent dostał kartę `mcp__filesystem__write_file` (kind `mcp_tool_call`, JSON args), po zatwierdzeniu plik utworzony; READONLY MCP bez pytania. (Wymagało fixu provider — patrz wyżej.)
+- [x] **G3 — MCP w czacie.**  ✅ 2026-06-19. READONLY MCP w czacie działa; mutujące niepre-approved → odmowa z komunikatem; po „Always allow" w Code (`mcp:mcp__filesystem__write_file` na allowliście) czat (grok-4.3) **utworzył `chat_mcp.txt`** — ścieżka „dozwolone" potwierdzona.
 - [ ] **G4 — Remote MCP (native).** Skonfiguruj `tools=[{type:mcp,server_url,…}]` → wykonanie po stronie xAI (bez lokalnej bramki).
 - [ ] **G5 — Interop (M19-B5).**
   - `~/.claude.json` + `<ws>/.mcp.json` → serwery MCP importowane `enabled=False` (autostart pomija).
