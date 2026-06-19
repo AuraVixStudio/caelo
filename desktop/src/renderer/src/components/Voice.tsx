@@ -230,7 +230,8 @@ export function Voice({ conn }: { conn: Conn }) {
         onCitations: (urls) => setTalkCitations(urls),
         onCost: ({ ttsChars, ttsCost }) =>
           setUsage((u) => recordTts(u, { chars: ttsChars, cost: ttsCost })),
-        onSttSeconds: (sec) => setUsage((u) => recordStt(u, { seconds: sec, streaming: true }))
+        // Talk używa batch-STT (D3: xAI odrzuca nasz protokół streamingu) → stawka batch.
+        onSttSeconds: (sec) => setUsage((u) => recordStt(u, { seconds: sec, streaming: false }))
       }
     )
     pipelineRef.current = pipeline
