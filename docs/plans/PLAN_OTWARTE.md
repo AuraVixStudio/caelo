@@ -78,14 +78,13 @@
 - [x] **E — Agent kodowania** P1 ✅ **CAŁA SEKCJA (2026-06-17)** — E1–E10 zaliczone na żywo (E5 checkpointy/undo,
   E6 CAELO.md, E9 reguły glob deny>allow, E10 LSP diagnostyka pyright). Po drodze naprawiono m.in. loop guard
   (zapętlenie na edit_file), URI-match LSP na Windows, sesja przeżywa zmianę zakładki. Szczegóły: `PLAN_WERYFIKACJI_LIVE.md` rundy 8–11.
-- [ ] **D — Głos** P2 🟡 — **D1 TTS ✅ + D2 STT batch ✅ 2026-06-19.** D1: 5 głosów + EN/PL, read-aloud + Speak,
-  badge kosztu. D2: dyktowanie czat/Code + Transcribe (transkrypt PL poprawny, koszt z czasu). **2 bugi naprawione:**
-  feedback Settings → toast (`17c2caa`); **CSP `script-src` bez `blob:` blokował AudioWorklet → Talk/Live/STT-stream
-  padały „Audio capture is unavailable" — dodano `blob:` (`a02e67f`, +test).** ⚠️ koszt TTS = SZACUNEK (faktura).
-  **D5 Live ✅** (dwukierunkowa rozmowa głos↔głos). **D3 ROZSTRZYGNIĘTE: streaming `/v1/stt` niekompatybilny** —
-  log mostu pokazał, że xAI odrzuca `input_audio_buffer.append` (`expected audio.done`), oczekuje innego/binarnego
-  formatu; partiale na żywo odłożone do dokumentacji endpointu. **D4 Talk przepięty na batch-STT + VAD** (auto-stop
-  na ciszy, `497cbb2`) — czeka na retest na żywo. **Zostają: retest D4, D6/D7 (read-aloud z ustawień + badge kosztu sesji).**
+- [x] **D — Głos** P2 ✅ **CAŁA SEKCJA (2026-06-19)** — D1 TTS (5 głosów + EN/PL) · D2 STT batch (dyktowanie/Transcribe) ·
+  D4 Talk (batch-STT + VAD auto-stop → Responses+TTS, zweryfikowane: „Paryż.") · D5 Live (dwukierunkowa rozmowa głos↔głos) ·
+  D6 read-aloud z ustawień · D7 badge kosztu audio per sesja. **3 bugi naprawione na żywo:** feedback Settings → toast
+  (`17c2caa`); **CSP `script-src` bez `blob:` blokował AudioWorklet** (`a02e67f`, +test); **Talk → batch-STT+VAD**
+  (`497cbb2`, +testy). **D3 (live-partiale) ROZSTRZYGNIĘTE jako ZEWNĘTRZNE ograniczenie xAI:** streaming `/v1/stt`
+  odrzuca `input_audio_buffer.append` (`expected audio.done`) — log mostu (`6e48df1` diag), nie nasz bug; partiale
+  odłożone do dokumentacji endpointu. ⚠️ koszt TTS = strojalny SZACUNEK — do weryfikacji na fakturze.
 - [x] **F — Subagenci / zespoły** P2 ✅ **2026-06-18 — CAŁA SEKCJA** (F1 delegacja end-to-end; F2 review-modal +
   merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
   F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
