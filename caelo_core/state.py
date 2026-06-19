@@ -441,6 +441,16 @@ class Backend(MediaMixin, CollectionsMixin):
                 self._packages = None  # zależy od mcp_manager — odbuduj ze świeżym
             claude_json = getattr(config, "CLAUDE_JSON", None)
             self._mcp = McpManager(config.MCP_FILE, workspace_root=root, claude_json=claude_json)
+            # Auto-start serwerów WŁĄCZONYCH przez usera (enabled=True). start_enabled() było
+            # martwym kodem — nikt go nie wołał — więc po restarcie sidecara LUB po przebudowie
+            # menedżera (zmiana workspace) włączone serwery nie wstawały i ich narzędzia znikały
+            # (np. czat „nie ma" narzędzia MCP mimo statusu Enabled). W TLE, bo start_server
+            # blokuje na spawnie npx (nie trzymaj _lazy_lock/żądania); idempotentne — start_server
+            # pomija już-gotowe. Tylko enabled=True (catalog „Add" daje enabled=False → install
+            # != autostart; auto-start dotyczy tylko serwerów, które user świadomie Startował).
+            mgr = self._mcp
+            threading.Thread(target=mgr.start_enabled, name="mcp-start-enabled",
+                             daemon=True).start()
             return self._mcp
 
     def reload_mcp(self) -> None:

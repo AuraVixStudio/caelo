@@ -101,6 +101,31 @@ def test_manager() -> None:
         check("S34-f-1: MCP stdout line cap defined", MAX_MCP_LINE_BYTES > 0)
 
 
+def test_start_enabled() -> None:
+    """Faza-G (LIVE): start_enabled() startuje serwery WŁĄCZONE i pomija wyłączone.
+    Metoda byla MARTWYM kodem (nikt jej nie wolal) -> po restarcie sidecara / przebudowie
+    menedzera (zmiana workspace) wlaczone serwery nie wstawaly i ich narzedzia znikaly
+    (czat „nie ma" narzedzia MCP mimo Enabled). Backend.mcp wola ja teraz po (prze)budowie."""
+    with tempfile.TemporaryDirectory() as d:
+        mgr = McpManager(Path(d) / "caelo_mcp.json")
+        mgr.add_server({"id": "on", "name": "On", "transport": "stdio",
+                        "command": MOCK_CMD, "enabled": True})
+        mgr.add_server({"id": "off", "name": "Off", "transport": "stdio",
+                        "command": MOCK_CMD, "enabled": False})
+        # add_server NIE startuje — oba „stopped" tuz po dodaniu (jak po restarcie).
+        check("before start_enabled: enabled server not ready", not mgr._servers["on"].is_ready())
+        mgr.start_enabled()
+        check("start_enabled starts enabled stdio server", mgr._servers["on"].is_ready())
+        check("start_enabled skips disabled server", not mgr._servers["off"].is_ready())
+        # narzedzia wlaczonego serwera widoczne dla czatu/agenta (function defs).
+        on_def_names = {d["function"]["name"] for d in mgr.tool_defs_for_responses()}
+        check("start_enabled -> enabled server tools exposed",
+              _qualify("on", "echo") in on_def_names)
+        check("start_enabled -> disabled server tools NOT exposed",
+              _qualify("off", "echo") not in on_def_names)
+        mgr.shutdown()
+
+
 def test_workspace_cwd_default() -> None:
     """Faza-G (LIVE): serwer stdio bez jawnego `cwd` startuje w korzeniu workspace
     (a nie w CWD sidecara), więc ścieżki względne rozwiązują się w workspace. Jawny
@@ -321,6 +346,7 @@ def test_catalog() -> None:
 def main() -> int:
     test_client()
     test_manager()
+    test_start_enabled()  # Faza-G: auto-start włączonych serwerów (start_enabled wiring)
     test_workspace_cwd_default()  # Faza-G: domyślny cwd = workspace root
     test_concurrent_start()  # S34-a
     test_remote()
