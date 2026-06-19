@@ -1,0 +1,5 @@
+{
+  "_comment": "Caelo package registry — STARTER. Copy this file to the root of the AuraVixStudio/caelo-packages repo as 'registry.json' on the 'main' branch. Caelo's default registry URL points at its raw download (config.PACKAGES_REGISTRY_URL). An empty 'packages' array is valid: Marketplace -> Browse loads cleanly and shows no entries (no 404). Add an entry per published bundle: each needs 'id' + 'type' (skill|command|mcp|template); 'url' is the raw download link to the .caelopkg. See docs/guides/PACKAGES.md and docs/guides/registry.example.json for a fully populated example.",
+  "registry_version": 1,
+  "packages": []
+}
