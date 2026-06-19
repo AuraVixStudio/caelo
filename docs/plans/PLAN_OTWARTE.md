@@ -94,9 +94,9 @@
   + fail-closed + allow + sesje; LSP ✅ w E10). Po drodze **4 realne bugi backendu**: cwd serwera (`3a004ef`),
   `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP-provider — agent gubił narzędzia po
   rebuildzie** (`dc8da65`). Zostają: G4 remote MCP (xAI-side), G7 ACP (Zed/Neovim/Emacs).
-- [ ] **H — Funkcje-widma OFF-by-default** P3 🟡 — **DECYZJA: włączyć po teście ALBO usunąć** (martwy kod = SWOT W3):
+- [x] **H — Funkcje-widma OFF-by-default** P3 ✅ **ZDECYDOWANE 2026-06-19** (włączyć/odłożyć/zostaw-opt-in):
   - [x] **H1 ⭐ embeddings spike** ⛔ **FAILED 2026-06-19** — xAI **404** na `/v1/embeddings` (jak vector stores). **DECYZJA: B8 ODŁOŻONE** (uśpione+udokumentowane w CLAUDE.md, bez torch; usunięcie/FTS5-only = osobna zmiana).
-  - [x] **H2** pamięć hybrydowa ⛔ ZABLOKOWANE przez H1 (recall embeduje pierwsze, bez fallbacku FTS → no-op przy 404). · [ ] **H3** sandbox OS (Linux/mac only) · [x] **H4** web_fetch ✅ 2026-06-19 (https-only+SSRF+allowlista zweryfikowane; opt-in) · [ ] **H5** git worktree · [ ] **H6** auto-compact.
+  - [x] **H2** pamięć hybrydowa ⛔ ZABLOKOWANE przez H1 (recall embeduje pierwsze, bez fallbacku FTS → no-op przy 404). · [ ] **H3** sandbox OS (Linux/mac only — Windows no-op) · [x] **H4** web_fetch ✅ (https-only+SSRF+allowlista; opt-in) · [x] **H5** git worktree ✅ (realny `git worktree` subagenta potwierdzony; opt-in) · [x] **H6** auto-compact ✅ selfcheck (live niepraktyczne, próg 48k; opt-in).
 - [ ] **I — Pakiety / marketplace** P3 ⬜ — I1 fetch registry, I2 instalacja `.caelopkg` (zgoda + integralność; install disabled), I3 export/share (sekrety zdjęte).
 - [ ] **J — Cross-platform** P3 ⬜ (gdy dostęp do mac/Linux) — J1 build dmg/AppImage/deb, J2 PTY, J3 tree-kill POSIX.
 - [ ] **K — Terminal** P3 ⬜ — K1 pywinpty + potwierdzenie scrubbed env (`echo $env:XAI_API_KEY` puste).
