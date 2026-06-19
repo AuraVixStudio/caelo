@@ -165,7 +165,10 @@ class AgentRunner:
                 self.backend.get_api_key, config.API_BASE,
                 emit=self.emit, request_approval=self.request_approval,
                 checkpoints_provider=self.backend.get_checkpoints,  # M13-B3/B5
-                mcp=self.backend.mcp,        # M14-B2: narzędzia MCP w agencie
+                # M14-B2/Faza-G: MCP jako PROVIDER (live), nie instancja — `backend.mcp` jest
+                # workspace-aware i bywa przebudowywany; bez live-resolve sesja trzymała starą,
+                # ubitą instancję i agent tracił narzędzia MCP (jak lsp_provider).
+                mcp_provider=lambda: self.backend.mcp,
                 hooks=self.backend.hooks,    # M14-B5: hooki cyklu życia narzędzi
                 skills=self.backend.skills,  # M14-B6: wstrzykiwanie skilli do promptu
                 # M19-B1: delegacja wyłączalna (--disallowed-tools Agent); zawężenie

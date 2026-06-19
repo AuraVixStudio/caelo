@@ -1037,6 +1037,42 @@ def test_mcp_in_agent() -> None:
         check("B2-mcp: no approval prompt in plan mode", approvals["n"] == 0)
 
 
+def test_mcp_provider_live() -> None:
+    """Faza-G (LIVE): orkiestrator dostaje `mcp_provider` -> `_all_tools` resolwuje menedzera
+    MCP NA ZYWO. Bez tego (instancja zlapana raz w __init__) po przebudowie `backend.mcp`
+    (workspace-aware: zmiana workspace / reload_mcp) sesja trzymala STARA/ubita instancje i
+    agent tracil WSZYSTKIE narzedzia MCP mimo serwera READY. Subagenci dalej moga podac instancje."""
+    def _noop_llm(*a, **k):
+        return {"role": "assistant", "content": "x"}
+
+    # 1) provider: menedzer pojawia sie/zmienia po starcie sesji -> tools resolwowane na zywo
+    with tempfile.TemporaryDirectory() as d:
+        ws = Workspace(d)
+        holder = {"mcp": None}  # brak gotowego menedzera na starcie sesji
+        session = AgentSession(ws, PermissionGate(), _noop_llm, lambda: "k", "http://unused",
+                               emit=lambda e: None, request_approval=lambda *a: "accept",
+                               mcp_provider=lambda: holder["mcp"])
+        names0 = {t["function"]["name"] for t in session._all_tools() if t.get("type") == "function"}
+        check("provider: no MCP tools when manager not ready", "mcp__t__lookup" not in names0)
+        holder["mcp"] = _FakeMcp()  # menedzer (prze)budowany pozniej
+        names1 = {t["function"]["name"] for t in session._all_tools() if t.get("type") == "function"}
+        check("provider: MCP tools appear after manager (re)build (live resolve)",
+              {"mcp__t__lookup", "mcp__t__write"} <= names1)
+        new_mgr = _FakeMcp()
+        holder["mcp"] = new_mgr  # podmiana jak reload_mcp -> wciaz live (nie stara instancja)
+        check("provider: session.mcp resolves to current manager", session.mcp is new_mgr)
+
+    # 2) wsteczna zgodnosc: instancja (subagenci/ScopedMcp) dziala bez providera
+    with tempfile.TemporaryDirectory() as d:
+        inst = _FakeMcp()
+        session = AgentSession(Workspace(d), PermissionGate(), _noop_llm, lambda: "k",
+                               "http://unused", emit=lambda e: None,
+                               request_approval=lambda *a: "accept", mcp=inst)
+        check("instance path: session.mcp is the passed instance", session.mcp is inst)
+        names = {t["function"]["name"] for t in session._all_tools() if t.get("type") == "function"}
+        check("instance path: MCP tools advertised", "mcp__t__lookup" in names)
+
+
 def test_hooks() -> None:
     """M14-B5: hooki (uogólniony PermissionGate) — pre_tool blokuje groźną komendę
     PRZED bramką, post_tool audytuje, run_script odpala po pasującym narzędziu;
@@ -2571,6 +2607,7 @@ def main() -> int:
     test_caelo_md()
     # M14 — rozszerzalność: narzędzia MCP w pętli agenta (B2) + hooki (B5)
     test_mcp_in_agent()
+    test_mcp_provider_live()  # Faza-G: MCP jako provider (live-resolve po rebuildzie)
     test_hooks()
     # M17 — subagenci / zespół (B1 izolacja, B2 role, B3 worktree, B4 merge, B5/B6)
     test_team_isolation_and_roles()

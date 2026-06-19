@@ -259,6 +259,7 @@ class AgentSession:
         checkpoints_provider: Optional[Callable[[], object]] = None,
         caelo_md_global_dir: Optional[str] = None,
         mcp: Optional[object] = None,
+        mcp_provider: Optional[Callable[[], object]] = None,
         hooks: Optional[object] = None,
         skills: Optional[object] = None,
         tool_names: Optional[set] = None,
@@ -299,7 +300,13 @@ class AgentSession:
         # M14-B2: menedżer MCP (duck-typed — bez twardego importu, jak checkpoints).
         # None → brak narzędzi MCP. tool_defs_for_responses/is_mcp_tool/is_mutating/
         # describe_tool/call_tool to kontrakt (patrz caelo_core/mcp/manager.py).
-        self.mcp = mcp
+        # Faza-G (LIVE): orkiestrator dostaje `mcp_provider` (resolwuje `backend.mcp` NA
+        # ŻYWO, jak `lsp_provider`). Bez tego sesja łapała instancję raz; po przebudowie
+        # menedżera (zmiana workspace / reload_mcp — menedżer jest workspace-aware) trzymała
+        # STARĄ, ubitą instancję → agent tracił WSZYSTKIE narzędzia MCP (mimo serwera READY).
+        # Subagenci/zespół przekazują instancję (ScopedMcp, krótko żyją) → ścieżka instancji.
+        self._mcp_provider = mcp_provider
+        self._mcp_instance = mcp
         # M14-B5: menedżer hooków (pre/post-tool, pre-session). None → brak hooków.
         self.hooks = hooks
         # M14-B6: biblioteka skilli (duck-typed: injected_text()). None → brak skilli.
@@ -393,6 +400,18 @@ class AgentSession:
             self._memory_block = self.memory.injected_text(query) or ""
         except Exception:  # noqa: BLE001
             self._memory_block = ""
+
+    @property
+    def mcp(self):
+        """Menedżer MCP — resolwowany NA ŻYWO przez `mcp_provider` (orkiestrator), inaczej
+        stała instancja (subagenci/ScopedMcp). Live-resolve naprawia utratę narzędzi MCP po
+        przebudowie `backend.mcp` (workspace-aware) — patrz komentarz w __init__."""
+        if self._mcp_provider is not None:
+            try:
+                return self._mcp_provider()
+            except Exception:  # noqa: BLE001
+                return None
+        return self._mcp_instance
 
     def _auto_approves(self, name: str) -> bool:
         """M13: czy bieżący tryb pomija dialog zatwierdzenia dla narzędzia `name`.
