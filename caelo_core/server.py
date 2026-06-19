@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable, Optional
@@ -123,6 +124,16 @@ def create_app(
             app.state.backend_error = str(exc)
         if on_startup is not None:
             on_startup()
+        # Warm-start serwerów MCP: dotknij `backend.mcp` w TLE, by włączone serwery zaczęły
+        # wstawać JUŻ przy starcie sidecara (start_enabled „po starcie sidecara" — patrz jego
+        # docstring), zanim user otworzy czat/agenta. Bez tego pierwsze żądanie buduje menedżera
+        # i serwer dopiero wtedy zaczyna wstawać (npx ~kilka s) → pierwsze żądanie nie widzi
+        # narzędzi MCP, dopiero drugie (mylące: „za pierwszym razem czat nie ma narzędzia").
+        # Best-effort + daemon: NIE blokuje handshake (stdout) ani lifespan.
+        _b = getattr(app.state, "backend", None)
+        if _b is not None:
+            threading.Thread(target=lambda: getattr(_b, "mcp", None),
+                             name="mcp-warmstart", daemon=True).start()
         yield
         # Sprzątanie na zamknięciu: ubij podprocesy MCP (tree-kill), itp.
         backend = getattr(app.state, "backend", None)
