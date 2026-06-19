@@ -85,11 +85,11 @@
   merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
   F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
   panelu Team, `shrink-0`/scroll.
-- [ ] **G — Rozszerzalność** P2 🟡 — **G1+G2+G3+G6 ✅ 2026-06-19** (realny MCP stdio + w agencie + w czacie;
-  headless CLI plain/json/streaming-json + fail-closed + allow + sesje; LSP ✅ w E10). Po drodze **4 realne
-  bugi backendu**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`),
-  **MCP-provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Zostają: G4 remote MCP (xAI-side),
-  G5 interop (`~/.claude.json`/`.mcp.json`/`AGENTS.md`/skille — NIEDESTRUKCYJNIE), G7 ACP (Zed/Neovim/Emacs).
+- [ ] **G — Rozszerzalność** P2 🟡 — **G1+G2+G3+G5+G6 ✅ 2026-06-19** (realny MCP stdio + w agencie + w czacie;
+  interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json
+  + fail-closed + allow + sesje; LSP ✅ w E10). Po drodze **4 realne bugi backendu**: cwd serwera (`3a004ef`),
+  `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP-provider — agent gubił narzędzia po
+  rebuildzie** (`dc8da65`). Zostają: G4 remote MCP (xAI-side), G7 ACP (Zed/Neovim/Emacs).
 - [ ] **H — Funkcje-widma OFF-by-default** P3 ⬜ — **DECYZJA: włączyć po teście ALBO usunąć** (martwy kod = SWOT W3):
   - [ ] **H1 ⭐ embeddings spike** (`embeddings_check.py --live`) — **gate dla całego B8**; 404/400 → odłóż/usuń B8 (NIE wprowadzać torch).
   - [ ] **H2** pamięć hybrydowa (zależy od H1) · **H3** sandbox OS (bwrap/seatbelt na Linux/mac) · **H4** web_fetch (SSRF-guard) · **H5** git worktree · **H6** auto-compact.

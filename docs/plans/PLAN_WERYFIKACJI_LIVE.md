@@ -31,7 +31,7 @@
 | D | Głos | P2 | ⬜ | | |
 | E | Agent kodowania | P1 | ✅ | 2026-06-17 | **E1–E10 ✅ — CAŁA SEKCJA E.** Pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow, **LSP diagnostyka (pyright)**. Naprawiono ~17 bugów/UX (rundy 1–11): m.in. izolacja CAELO.md, edit_file taby/CRLF, @-wyszukiwanie, loop guard (r.8), **LSP URI-match Windows g%3A vs G: (r.10), sesja przeżywa zmianę zakładki — backend mintuje świeże id per połączenie (r.10)**. |
 | F | Subagenci / zespoły | P2 | ✅ | 2026-06-18 | **F1–F4 ✅ — CAŁA SEKCJA F.** F1: 3 subagenci równolegle, kontekst rodzica czysty, głębia 1. F2: review w MODALU (Accept&merge/Discard/Cancel zawsze w zasięgu), merge→workspace, **checkpoint cofalny** („Undid 2 checkpoints"), **konflikt wykryty** (implementer+test-writer na `src/calculator.py` → badge „1 conflict"). F3: **cascade stop** — Stop orkiestratora → tester CANCELLED, `python slow_task.py` **ubity (tree-kill)**, brak osieroconego procesu (`Get-CimInstance` = pusto, sprawdzone w sekundy po Stop). F4: **skill `implement` steruje** delegate+rolami (PLAN fazowy → implementer→reviewer→apply, walidacja `--count<0` w `parse_args()`). UX naprawione na żywo: review-modal (diff uwięziony w max-h-64), przycisk zwijania Team, `shrink-0` na kartach (panel ściskał wpisy zamiast scrollować). |
-| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3+G6 ✅** (MCP stdio realny + w agencie + w czacie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G5 (interop), G7 (ACP). |
+| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3+G5+G6 ✅** (MCP stdio realny + w agencie + w czacie; interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G7 (ACP). |
 | H | Funkcje-widma (decyzja) | P3 | ⬜ | | |
 | I | Pakiety / marketplace | P3 | ⬜ | | |
 | J | Cross-platform | P3 | ⬜ | | |
@@ -424,11 +424,11 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 - [x] **G2 — MCP w agencie.**  ✅ 2026-06-19. Agent dostał kartę `mcp__filesystem__write_file` (kind `mcp_tool_call`, JSON args), po zatwierdzeniu plik utworzony; READONLY MCP bez pytania. (Wymagało fixu provider — patrz wyżej.)
 - [x] **G3 — MCP w czacie.**  ✅ 2026-06-19. READONLY MCP w czacie działa; mutujące niepre-approved → odmowa z komunikatem; po „Always allow" w Code (`mcp:mcp__filesystem__write_file` na allowliście) czat (grok-4.3) **utworzył `chat_mcp.txt`** — ścieżka „dozwolone" potwierdzona.
 - [ ] **G4 — Remote MCP (native).** Skonfiguruj `tools=[{type:mcp,server_url,…}]` → wykonanie po stronie xAI (bez lokalnej bramki).
-- [ ] **G5 — Interop (M19-B5).**
-  - `~/.claude.json` + `<ws>/.mcp.json` → serwery MCP importowane `enabled=False` (autostart pomija).
-  - `AGENTS.md`/`CLAUDE.md` obok `CAELO.md` → sklejane do promptu agenta.
-  - `~/.claude/skills` + `<ws>/.claude|.grok/skills` → skille odkryte (badge źródła).
-  - *Pułapka:* odczyt interopu jest NIEDESTRUKCYJNY — nie nadpisuj cudzych plików `.claude`.
+- [x] **G5 — Interop (M19-B5).**  ✅ 2026-06-19. Wszystkie 3 ścieżki + niedestrukcyjność potwierdzone na żywo:
+  - **MCP** — `<ws>/.mcp.json` (serwer `interop-demo`) zaimportowany **STOPPED · Enabled odznaczone** (`enabled=False`, autostart pominięty) ze znacznikiem źródła. ✅
+  - **AGENTS.md** — sklejony do promptu agenta: agent przeczytał `AGENTS.md` i zakończył odpowiedź dokładną linią z reguły (`INTEROP-OK: AGENTS.md was loaded`). ✅
+  - **Skille** — `belt`/`daz-studio-6-plugin` z `~/.claude/skills` odkryte w Extensions → Skills z badge **`~/.CLAUDE`** (read-only, bez Delete, niewłączone). ✅
+  - **Niedestrukcyjność** ✅ — `~/.claude/skills` nietknięty (brak nadpisań/`.corrupt`).
 - [x] **G6 — Headless CLI (M19-B1).**  ✅ 2026-06-19. Zweryfikowane na żywo (PowerShell, `cd` do korzenia repo + `.\caelo_core\.venv\Scripts\python.exe -m caelo_core run …`):
   - `plain` → sformatowany tekst (drzewo + streszczenie util.py); `json` → jeden obiekt `{text,stopReason,sessionId}`; `streaming-json` → NDJSON (`tool_call`/`text`/`end`).
   - **fail-closed** ✅ — „Create headless_test.txt" bez uprawnień → mutacja odrzucona (brak „Created", w przeciwieństwie do biegu z allow).
