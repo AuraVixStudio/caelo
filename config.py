@@ -145,7 +145,7 @@ TEMPLATES_DIR = DATA_DIR / "templates"            # M16-5: zainstalowane szablon
 # Domyślny indeks registry społeczności (git/GitHub, zero infrastruktury). Surowy JSON
 # z listą pakietów + linkami do manifestów/źródeł. Nadpisywalny w UI (pole „registry URL").
 PACKAGES_REGISTRY_URL = (
-    "https://raw.githubusercontent.com/grooverpty/caelo-packages/main/registry.json"
+    "https://raw.githubusercontent.com/AuraVixStudio/caelo-packages/main/registry.json"
 )
 # Twarde limity importu (anty-zip-bomba / anty-OOM, w duchu MAX_MEDIA_BYTES). Pakiet to
 # tekstowe artefakty (skille/komendy/szablony) — nie potrzebuje być duży.

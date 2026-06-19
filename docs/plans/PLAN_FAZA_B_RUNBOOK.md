@@ -6,7 +6,7 @@
 > **Data:** 2026-06-12. **Gałąź robocza:** `m15-oss-crossplatform` (nie `main`).
 >
 > **Decyzje przyjęte (2026-06-12):**
-> - **Repo:** `AuraVixStudio/caelo` (organizacja GitHub, nie konto osobiste `grooverpty`).
+> - **Repo:** `AuraVixStudio/caelo` (organizacja GitHub, nie konto osobiste maintainera).
 > - **Code signing:** certyfikat w chmurze **Asseco SimplySign** (klucz nieeksportowalny, autoryzacja przez
 >   aplikację mobilną + „SimplySign Desktop" jako wirtualny czytnik kart).
 
@@ -50,7 +50,7 @@
 
 Poza runbookiem, w tej samej sesji ujednolicono autorstwo repozytorium:
 - `git-filter-repo` 2.47.0 — przepisano autorów **wszystkich 74 commitów**:
-  `grooverpty <grooverpty@gmail.com>` → **`AuraVix Studio <auravix@auravixstudio.com>`**.
+  poprzedni autor osobisty → **`AuraVix Studio <auravix@auravixstudio.com>`**.
 - Usunięto trailery `Co-authored-by:` z wiadomości commitów.
 - Force-push obu gałęzi po przepisaniu; lokalny `git config` ustawiony na
   `user.name = AuraVix Studio`, `user.email = auravix@auravixstudio.com`.
@@ -327,7 +327,7 @@ npx --no-install electron-builder --win --publish always
 odblokowuje auto-update dla end-userów (electron-updater + prywatne repo bez auth nie pobierze `latest.yml`).
 
 **Higiena po publikacji (drobne follow-upy, śledzone w [`PLAN_OTWARTE.md`](PLAN_OTWARTE.md) §6a):**
-- ✅ `author` w `desktop/package.json` `grooverpty` → `AuraVix Studio` (NSIS `COMPANY_NAME`).
+- ✅ `author` w `desktop/package.json` (poprzedni osobisty) → `AuraVix Studio` (NSIS `COMPANY_NAME`).
 - ⬜ CI `release.yml`: deprecation Node — najpewniej runtime akcji (`actions/*@v4`→`@v5`), nie input
   `node-version` (już `"22"`); zweryfikować z logiem.
 - ⬜ CI `release.yml`: 3× job „Build (UNSIGNED)" czerwone — brak zależności na runnerach (np. `pack:sidecar`

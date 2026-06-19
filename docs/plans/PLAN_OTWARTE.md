@@ -97,7 +97,7 @@
 - [x] **H — Funkcje-widma OFF-by-default** P3 ✅ **ZDECYDOWANE 2026-06-19** (włączyć/odłożyć/zostaw-opt-in):
   - [x] **H1 ⭐ embeddings spike** ⛔ **FAILED 2026-06-19** — xAI **404** na `/v1/embeddings` (jak vector stores). **DECYZJA: B8 ODŁOŻONE** (uśpione+udokumentowane w CLAUDE.md, bez torch; usunięcie/FTS5-only = osobna zmiana).
   - [x] **H2** pamięć hybrydowa ⛔ ZABLOKOWANE przez H1 (recall embeduje pierwsze, bez fallbacku FTS → no-op przy 404). · [ ] **H3** sandbox OS (Linux/mac only — Windows no-op) · [x] **H4** web_fetch ✅ (https-only+SSRF+allowlista; opt-in) · [x] **H5** git worktree ✅ (realny `git worktree` subagenta potwierdzony; opt-in) · [x] **H6** auto-compact ✅ selfcheck (live niepraktyczne, próg 48k; opt-in).
-- [x] **I — Pakiety / marketplace** P3 ✅ **2026-06-19** — I1 fetch registry (404 grzecznie obsłużony; ⚠️ domyślny rejestr `grooverpty/caelo-packages` NIE istnieje — decyzja: publikacja [rozważ `AuraVixStudio/caelo-packages`] ALBO import-only/BYO), I2 instalacja `.caelopkg` (ConsentCard: typ/wersja/ryzyko/INTEGRITY OK/uprawnienia → Install; round-trip OK), I3 export/share (`plan` → `.caelopkg`). Tamper/strip-sekretów = selfcheck `packages_check` 47/47.
+- [x] **I — Pakiety / marketplace** P3 ✅ **2026-06-19** — I1 fetch registry (404 grzecznie obsłużony; ⚠️ **domyślny rejestr nieopublikowany** — URL ustawiony na `AuraVixStudio/caelo-packages`, repo trzeba utworzyć z `registry.json`; import-only/BYO działa bez rejestru), I2 instalacja `.caelopkg` (ConsentCard: typ/wersja/ryzyko/INTEGRITY OK/uprawnienia → Install; round-trip OK), I3 export/share (`plan` → `.caelopkg`). Tamper/strip-sekretów = selfcheck `packages_check` 47/47.
 - [ ] **J — Cross-platform** P3 ⬜ (gdy dostęp do mac/Linux) — J1 build dmg/AppImage/deb, J2 PTY, J3 tree-kill POSIX.
 - [ ] **K — Terminal** P3 ⬜ — K1 pywinpty + potwierdzenie scrubbed env (`echo $env:XAI_API_KEY` puste).
 
@@ -154,7 +154,7 @@
 
 ### 6a. Higiena po publikacji v0.1.0 (z sesji 2026-06-17)  🤖
 
-- [x] **`author` w `desktop/package.json`** `grooverpty` → `AuraVix Studio` — **✅ ZROBIONE 2026-06-17**
+- [x] **`author` w `desktop/package.json`** (poprzedni osobisty) → `AuraVix Studio` — **✅ ZROBIONE 2026-06-17**
   (NSIS `COMPANY_NAME` wyciekał starą nazwę w logach buildu; wpływa na metadane przyszłych instalatorów,
   nie na już wydany `v0.1.0`).
 - [ ] **CI `release.yml` — deprecation Node** `[S]` — ⚠️ input `node-version` jest już `"22"`; ostrzeżenie

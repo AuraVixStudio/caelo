@@ -33,7 +33,7 @@
 | F | Subagenci / zespoły | P2 | ✅ | 2026-06-18 | **F1–F4 ✅ — CAŁA SEKCJA F.** F1: 3 subagenci równolegle, kontekst rodzica czysty, głębia 1. F2: review w MODALU (Accept&merge/Discard/Cancel zawsze w zasięgu), merge→workspace, **checkpoint cofalny** („Undid 2 checkpoints"), **konflikt wykryty** (implementer+test-writer na `src/calculator.py` → badge „1 conflict"). F3: **cascade stop** — Stop orkiestratora → tester CANCELLED, `python slow_task.py` **ubity (tree-kill)**, brak osieroconego procesu (`Get-CimInstance` = pusto, sprawdzone w sekundy po Stop). F4: **skill `implement` steruje** delegate+rolami (PLAN fazowy → implementer→reviewer→apply, walidacja `--count<0` w `parse_args()`). UX naprawione na żywo: review-modal (diff uwięziony w max-h-64), przycisk zwijania Team, `shrink-0` na kartach (panel ściskał wpisy zamiast scrollować). |
 | G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3+G5+G6 ✅** (MCP stdio realny + w agencie + w czacie; interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G7 (ACP). |
 | H | Funkcje-widma (decyzja) | P3 | ✅ | 2026-06-19 | **CAŁA SEKCJA H zdecydowana.** H1 embeddingi ⛔ xAI **404** → **B8/pamięć (H1+H2) ODŁOŻONE** (uśpione+udok., bez torch). H4 web_fetch ✅ (https-only+SSRF+allowlista, opt-in). H5 git worktree ✅ (realny `git worktree` subagenta potwierdzony, opt-in). H6 auto-compact ✅ selfcheck (live niepraktyczne, opt-in). H3 sandbox = Linux/mac only (Windows no-op). |
-| I | Pakiety / marketplace | P3 | ✅ | 2026-06-19 | **I1–I3 ✅.** Round-trip export `plan`→import→ConsentCard (typ/wersja/ryzyko/INTEGRITY OK/uprawnienia)→Install zweryfikowany. I1: 404 rejestru obsłużony grzecznie. ⚠️ **domyślny rejestr nieopublikowany** (`grooverpty/caelo-packages` 404) — decyzja: publikacja (rozważ `AuraVixStudio/…`) ALBO import-only/BYO. Tamper/strip-sekretów = selfcheck `packages_check` 47/47. |
+| I | Pakiety / marketplace | P3 | ✅ | 2026-06-19 | **I1–I3 ✅.** Round-trip export `plan`→import→ConsentCard (typ/wersja/ryzyko/INTEGRITY OK/uprawnienia)→Install zweryfikowany. I1: 404 rejestru obsłużony grzecznie. ⚠️ **domyślny rejestr nieopublikowany** (URL = `AuraVixStudio/caelo-packages`, repo do utworzenia) — import-only/BYO działa. Tamper/strip-sekretów = selfcheck `packages_check` 47/47. |
 | J | Cross-platform | P3 | ⬜ | | |
 | K | Terminal | P3 | ⬜ | | |
 
@@ -76,7 +76,7 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 > **Najważniejsze otwarte pytanie projektu (A3) testuj NAJPIERW** — przesądza architekturę agenta.
 
 > **Postęp 2026-06-07 (z testów na żywo u usera):** logowanie OAuth **DZIAŁA** (zalogowany jako
-> `grooverpty6@proton.me`), czat odpowiada na tokenie OAuth; tryb **API key DZIAŁA** (model odpowiedział).
+> kontem testowym), czat odpowiada na tokenie OAuth; tryb **API key DZIAŁA** (model odpowiedział).
 > Test ujawnił, że pierwotny **łagodny fallback** po cichu używał OAuth, gdy wybrano „API key" bez klucza
 > → wprowadzono **twardy przełącznik źródła** (Settings → „Model source": auto/oauth/api_key, `oauth`/
 > `api_key` bez krzyżowego fallbacku), **usuwanie klucza** (`DELETE /settings/api-key`), **maskę kropek**
@@ -478,8 +478,8 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 ## Część I — Pakiety / marketplace (M16)  ⚪ P3
 
-- [x] **I1 — Fetch registry.**  ✅ (graceful) 2026-06-19. Browse → Load → **404 obsłużony grzecznie** („Could not load registry: 404 ... grooverpty/caelo-packages/main/registry.json"), bez crasha. Pole „Registry URL" edytowalne → BYO-registry możliwe.
-  - ⚠️ *Decyzja I1:* **domyślny rejestr NIE istnieje** (`grooverpty/caelo-packages` → 404). Do publikacji: utworzyć repo z `registry.json` (rozważ `AuraVixStudio/caelo-packages` zamiast `grooverpty`) ALBO świadomie zostawić marketplace jako **import-only / BYO-registry**.
+- [x] **I1 — Fetch registry.**  ✅ (graceful) 2026-06-19. Browse → Load → **404 obsłużony grzecznie** (rejestr nieopublikowany), bez crasha. Pole „Registry URL" edytowalne → BYO-registry możliwe.
+  - ⚠️ *Decyzja I1:* domyślny URL ustawiony na **`AuraVixStudio/caelo-packages`** (commit zmiany), ale **repo rejestru jeszcze nie istnieje** → trzeba utworzyć je z `registry.json` ALBO świadomie zostawić marketplace jako **import-only / BYO-registry**.
 - [x] **I2 — Instalacja `.caelopkg`.**  ✅ 2026-06-19. Import → **ConsentCard**: `plan · COMMAND · V1.0.0 · MEDIUM RISK · INTEGRITY OK` + „Declared permissions: Prompt/instructions only" + „Contents: command.json"; **nic nie instaluje się bez Install** → „Installed plan (v1.0.0)". Integralność (sha256) weryfikowana („INTEGRITY OK"). *Tamper (zła sha256) + skille-disabled/MCP-enabled=False pokryte selfcheckiem `packages_check` 47/47 — live fiddly, niepowtarzane.*
 - [x] **I3 — Export/Share.**  ✅ 2026-06-19. Share na komendzie `plan` → pobrany `.caelopkg` (round-trip do I2 zadziałał). *Strip sekretów (`authorization`/`env`) przy eksporcie MCP — pokryty `packages_check`; live opcjonalny.*
 
