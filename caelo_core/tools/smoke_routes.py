@@ -616,7 +616,7 @@ def _unit_mcp_routes(checks: list) -> None:
                                           command=[sys.executable, mock]), b=b)
             st = mr.start_server("mock", b=b)["server"]
             checks.append(("/mcp start stdio -> ready + tools",
-                           st["status"] == "ready" and st["tool_count"] == 2))
+                           st["status"] == "ready" and st["tool_count"] == 3))
             mr.stop_server("mock", b=b)
 
             mr.remove_server("rmt", b=b)

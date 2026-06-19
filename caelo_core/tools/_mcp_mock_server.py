@@ -7,6 +7,7 @@ Dev-only, nie pakowane.
 """
 
 import json
+import os
 import sys
 
 TOOLS = [
@@ -28,6 +29,12 @@ TOOLS = [
             "properties": {"path": {"type": "string"}},
             "required": ["path"],
         },
+    },
+    {
+        "name": "cwd",
+        "description": "Return the server process working directory (for cwd tests).",
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": True},
     },
 ]
 
@@ -69,6 +76,10 @@ def main():
             elif name == "write_thing":
                 _send({"jsonrpc": "2.0", "id": mid, "result": {
                     "content": [{"type": "text", "text": "wrote " + str(args.get("path", ""))}],
+                    "isError": False}})
+            elif name == "cwd":
+                _send({"jsonrpc": "2.0", "id": mid, "result": {
+                    "content": [{"type": "text", "text": os.getcwd()}],
                     "isError": False}})
             else:
                 _send({"jsonrpc": "2.0", "id": mid, "result": {

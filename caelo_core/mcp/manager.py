@@ -77,7 +77,7 @@ class McpServer:
     def enabled(self) -> bool:
         return bool(self.cfg.get("enabled", True))
 
-    def start(self) -> None:
+    def start(self, default_cwd: Optional[str] = None) -> None:
         if self.transport == "remote":
             # Native remote MCP (B3) — nie startuje lokalnie; obsługą zajmuje się xAI.
             self.status = "remote"
@@ -93,8 +93,13 @@ class McpServer:
             return
         self.status = "starting"
         self.error = ""
+        # Faza-G (LIVE): bez jawnego `cwd` startuj w korzeniu workspace (a NIE w CWD sidecara,
+        # którym jest przypadkowy katalog uruchomienia). Inaczej serwery jak filesystem
+        # rozwiązują ścieżki WZGLĘDNE poza dozwolonym katalogiem → "access denied", a model
+        # marnuje turę na recovery ścieżką absolutną. Jawny `cfg["cwd"]` ma pierwszeństwo.
+        cwd = self.cfg.get("cwd") or default_cwd
         client = McpClient(
-            StdioTransport(command, cwd=self.cfg.get("cwd") or None,
+            StdioTransport(command, cwd=cwd or None,
                            env=self.cfg.get("env") or None),
             name=self.id,
         )
@@ -288,8 +293,11 @@ class McpManager:
             srv.cfg["enabled"] = True
         # connect() blokuje (subprocess + handshake) — poza lockiem, by nie zamrozić
         # innych tras. Re-lock dopiero przy aktualizacji routingu.
+        # _workspace_root jest niezmienny przez życie menedżera (rebuild przy zmianie ws),
+        # więc czytamy go bez locka jako domyślny cwd dla serwerów bez jawnego cwd.
+        default_cwd = str(self._workspace_root) if self._workspace_root else None
         try:
-            srv.start()
+            srv.start(default_cwd)
         finally:
             with self._lock:
                 self._starting.discard(sid)

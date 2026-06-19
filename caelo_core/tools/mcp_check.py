@@ -42,7 +42,7 @@ def test_client() -> None:
 
     tools = client.list_tools()
     names = {t.get("name") for t in tools}
-    check("client list_tools finds both tools", names == {"echo", "write_thing"})
+    check("client list_tools finds the tools", names == {"echo", "write_thing", "cwd"})
 
     res = client.call_tool("echo", {"text": "hi"})
     check("client call_tool echo works", flatten_tool_result(res) == "echo: hi")
@@ -62,7 +62,7 @@ def test_manager() -> None:
 
         status = mgr.start_server("mock")
         check("manager start_server ready", status.get("status") == "ready")
-        check("manager discovered tools", status.get("tool_count") == 2)
+        check("manager discovered tools", status.get("tool_count") == 3)
 
         tools = mgr.list_tools()
         qnames = {t["qualified_name"] for t in tools}
@@ -101,6 +101,32 @@ def test_manager() -> None:
         check("S34-f-1: MCP stdout line cap defined", MAX_MCP_LINE_BYTES > 0)
 
 
+def test_workspace_cwd_default() -> None:
+    """Faza-G (LIVE): serwer stdio bez jawnego `cwd` startuje w korzeniu workspace
+    (a nie w CWD sidecara), więc ścieżki względne rozwiązują się w workspace. Jawny
+    `cfg['cwd']` ma pierwszeństwo. Mock-serwer zwraca własne os.getcwd() narzędziem `cwd`."""
+    with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as d:
+        ws_real = os.path.realpath(ws)
+        # 1) bez jawnego cwd → domyślnie korzeń workspace menedżera
+        mgr = McpManager(Path(d) / "caelo_mcp.json", workspace_root=Path(ws_real))
+        mgr.add_server({"id": "mock", "name": "Mock", "transport": "stdio", "command": MOCK_CMD})
+        mgr.start_server("mock")
+        got = os.path.realpath(mgr.call_tool(_qualify("mock", "cwd"), {}))
+        check("stdio server defaults cwd to workspace root", got == ws_real)
+        mgr.shutdown()
+
+        # 2) jawny cfg['cwd'] ma pierwszeństwo nad domyślnym workspace
+        with tempfile.TemporaryDirectory() as explicit:
+            explicit_real = os.path.realpath(explicit)
+            mgr2 = McpManager(Path(d) / "caelo_mcp.json", workspace_root=Path(ws_real))
+            mgr2.add_server({"id": "m2", "name": "M2", "transport": "stdio",
+                             "command": MOCK_CMD, "cwd": explicit_real})
+            mgr2.start_server("m2")
+            got2 = os.path.realpath(mgr2.call_tool(_qualify("m2", "cwd"), {}))
+            check("explicit cfg cwd overrides workspace default", got2 == explicit_real)
+            mgr2.shutdown()
+
+
 def test_concurrent_start() -> None:
     """S34-a: dwa równoległe start_server(sid) wołają srv.start() RAZ — bez tego oba
     wychodziły z locka i startowały ten sam serwer dwukrotnie (osierocony podproces)."""
@@ -115,11 +141,11 @@ def test_concurrent_start() -> None:
         count = {"n": 0}
         clock = threading.Lock()
 
-        def counting_start():
+        def counting_start(default_cwd=None):
             with clock:
                 count["n"] += 1
             time.sleep(0.05)  # poszerz okno wyścigu
-            return real_start()
+            return real_start(default_cwd)
 
         srv.start = counting_start
         barrier = threading.Barrier(2)
@@ -295,6 +321,7 @@ def test_catalog() -> None:
 def main() -> int:
     test_client()
     test_manager()
+    test_workspace_cwd_default()  # Faza-G: domyślny cwd = workspace root
     test_concurrent_start()  # S34-a
     test_remote()
     test_corrupt_config()
