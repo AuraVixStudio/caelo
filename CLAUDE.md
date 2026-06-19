@@ -214,10 +214,16 @@ popped before history so it never returns to xAI) + a recent-runs ring buffer. *
 `get_team_merges`/`record_team_report`. New state: `caelo_subagents.json` (roles+limits) + `worktrees/`
 (both gitignored). Renderer: **TeamView** ([`components/code/TeamView.tsx`](desktop/src/renderer/src/components/code/TeamView.tsx),
 pure state in [`lib/teamView.ts`](desktop/src/renderer/src/lib/teamView.ts)) in the agent panel + an
-**Extensions → Subagents** tab (role/limit config). Selfchecks: `agent_selfcheck.py` (139 → **166**:
+**Extensions → Subagents** tab (role/limit config). ⚠️ **TeamView UX invariants (LIVE-verified, don't
+regress):** the merge-review diff renders in a **modal**, NOT inline — the Team panel is height-capped
+(`max-h-80 overflow-y-auto`) and an inline diff trapped the Accept/Discard buttons out of reach; and the
+panel's list children must be **`shrink-0`** (else flex compresses the cards instead of scrolling — same
+class of bug as the main agent transcript). Selfchecks: `agent_selfcheck.py` (139 → **166**:
 isolation/roles/no-escalation/worktree/cascade/budget/merge/cost), `api_smoke.py` (217 → **228**:
-`_unit_team_routes`). **Live delegation verified on the user's machine** (sandbox blocks xAI); don't
-regress P0-1…P0-8 / M5–M6 / M13 / M14.
+`_unit_team_routes`), `desktop/test/components/TeamView.test.tsx` (review-modal + conflict badge). **CAŁA
+sekcja F zweryfikowana LIVE 2026-06-18** (delegacja równoległa + czysty kontekst rodzica + głębia 1; merge
+review/konflikt/checkpoint; cascade stop = tree-kill potwierdzony; skill-orkiestrator `implement` steruje
+delegate+rolami); don't regress P0-1…P0-8 / M5–M6 / M13 / M14.
 
 **Community packages = marketplace (M16, see [`docs/plans/zrealizowane/PLAN_M16_SPOLECZNOSC.md`](docs/plans/zrealizowane/PLAN_M16_SPOLECZNOSC.md)
 + [`docs/guides/PACKAGES.md`](docs/guides/PACKAGES.md)):** the M14 artifacts (skills/commands/MCP-configs/templates)

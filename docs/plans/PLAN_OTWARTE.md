@@ -23,7 +23,7 @@
 | # | Blok | Priorytet | Kto | Skrót |
 |---|---|---|---|---|
 | 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | ✅ **DOMKNIĘTA 2026-06-17** — remote+CI+gitleaks+pytest+podpisany release `v0.1.0`; zostaje tylko public repo → auto-update end-user |
-| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | sekcje D (głos), E-reszta, F (subagenci), G (MCP/headless/ACP/LSP), H (funkcje-widma — decyzja), I (pakiety), J (cross-platform), K (terminal) |
+| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/E/F · zostają: D (głos), G (MCP/headless/ACP/LSP), H (funkcje-widma — decyzja), I (pakiety), J (cross-platform), K (terminal) |
 | 3 | **Nowe funkcje TOP-10** | P2/P3 | 🤖 | TOP7 rewind czatu, TOP8 inline Ctrl-K, TOP9 auto-pamięć usera, TOP10 background-agents |
 | 4 | **Motywy inżynierskie 4.1** | P2/P3 | 🤖 | odporność (4.1-c), wydajność (4.1-b), API total/cost (4.1-e), /genjobs WS-push (4.1-f) |
 | 5 | **Strategiczne / długoterminowe** | P2/P3 | 🤖+👤 | ROAD-4.2-a (inni dostawcy LLM), spike B0 (`cli-chat-proxy`), ROAD-4.2-b |
@@ -81,11 +81,10 @@
 - [ ] **D — Głos** P2 ⬜ — D1 TTS (5 głosów, koszt = szacunek!), D2 STT batch, **D3 STT-stream**
   (⚠️ protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY — główny znak zapytania), D4 Talk +
   barge-in, D5 Realtime (Live), D6/D7 read-aloud + koszt sesji.
-- [ ] **F — Subagenci / zespoły** P2 🟡 — **F1+F2+F3 ✅ 2026-06-18** (F1: delegacja end-to-end, 3 subagenci
-  równolegle, kontekst rodzica czysty, głębia 1; F2: review-modal + merge→workspace + checkpoint cofalny +
-  wykrycie konfliktu; F3: cascade stop → tree-kill potwierdzony, brak osieroconego procesu; po drodze
-  naprawione 3 bugi UX: review-modal, zwijanie panelu, `shrink-0`/scroll). Zostaje: F4 skille-orkiestratory
-  (implement/review/design/best-of-n).
+- [x] **F — Subagenci / zespoły** P2 ✅ **2026-06-18 — CAŁA SEKCJA** (F1 delegacja end-to-end; F2 review-modal +
+  merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
+  F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
+  panelu Team, `shrink-0`/scroll.
 - [ ] **G — Rozszerzalność** P2 ⬜ — G1 realny MCP stdio, G2 MCP w agencie (gate), G3 MCP w czacie
   (allowlista), G4 remote MCP (xAI-side), G5 interop (`~/.claude.json`/`.mcp.json`/`AGENTS.md`/skille — NIEDESTRUKCYJNIE),
   G6 headless CLI (`run -p` plain/json/streaming-json, fail-closed), G7 ACP (Zed/Neovim/Emacs).
