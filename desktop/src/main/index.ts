@@ -496,6 +496,16 @@ function createWindow(): void {
 
   if (rendererUrl) {
     void mainWindow.loadURL(rendererUrl)
+    // DEV: aplikacja usuwa menu (Menu.setApplicationMenu(null)), więc domyślny skrót
+    // Ctrl+Shift+I/F12 do DevTools nie działa. W trybie dev (rendererUrl ustawiony przez
+    // electron-vite) przywróć F12 jako toggle — potrzebne m.in. do inspekcji ramek WS
+    // (głos/STT-stream). W buildzie spakowanym (else) DevTools pozostają niedostępne.
+    mainWindow.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && (input.key === 'F12'
+          || (input.control && input.shift && input.key.toLowerCase() === 'i'))) {
+        mainWindow?.webContents.toggleDevTools()
+      }
+    })
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }

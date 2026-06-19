@@ -27,6 +27,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
+import os
 import threading
 from typing import Callable, Optional
 
@@ -43,6 +45,22 @@ from caelo_core.state import Backend, get_backend, ws_authorized
 
 router = APIRouter(tags=["voice"])
 ws_router = APIRouter()
+
+log = logging.getLogger("caelo.voice")
+# Diagnostyka nieudokumentowanego protokołu STT/realtime xAI (D3): gdy CAELO_VOICE_DEBUG
+# jest ustawione, most loguje surowe ramki w obie strony do stderr (widoczne w terminalu
+# `npm run dev`). Bez DevTools to jedyne autorytatywne źródło — sidecar widzi ramki xAI
+# zanim trafią do renderera. Domyślnie wyłączone (zero szumu w produkcji).
+_VOICE_DEBUG = os.environ.get("CAELO_VOICE_DEBUG", "").strip().lower() not in ("", "0", "false")
+
+
+def _dbg_frame(direction: str, msg: object) -> None:
+    if not _VOICE_DEBUG:
+        return
+    s = msg if isinstance(msg, str) else repr(msg)
+    if len(s) > 400:  # skróć ramki audio (base64 input_audio_buffer.append) — liczy się meta
+        s = s[:400] + f"… (+{len(s) - 400} chars)"
+    log.info("[voice %s] %s", direction, s)
 
 
 # --- M12-B5: koszt audio (BYO-key; czyste funkcje — testowalne w api_smoke) ---
@@ -150,6 +168,8 @@ async def _bridge_upstream(ws: WebSocket, build_url: Callable[[], str]) -> None:
     import websockets  # dostarczane przez uvicorn[standard]
 
     url = build_url()
+    if _VOICE_DEBUG:
+        log.info("[voice] connecting upstream: %s", url)
     headers = {"Authorization": f"Bearer {api_key}"}
 
     # Zgodność: websockets>=14 używa `additional_headers`, starsze `extra_headers`.
@@ -164,6 +184,7 @@ async def _bridge_upstream(ws: WebSocket, build_url: Callable[[], str]) -> None:
                 try:
                     while True:
                         msg = await ws.receive_text()
+                        _dbg_frame("c->u", msg)
                         await upstream.send(msg)
                 except WebSocketDisconnect:
                     pass
@@ -175,12 +196,15 @@ async def _bridge_upstream(ws: WebSocket, build_url: Callable[[], str]) -> None:
                     async for msg in upstream:
                         if isinstance(msg, (bytes, bytearray)):
                             msg = msg.decode("utf-8", "replace")
+                        _dbg_frame("u->c", msg)
                         await ws.send_text(msg)
                 except Exception:
                     pass
 
             await asyncio.gather(client_to_upstream(), upstream_to_client())
     except Exception as exc:  # noqa: BLE001
+        if _VOICE_DEBUG:
+            log.warning("[voice] upstream bridge error: %r", exc)
         try:
             await ws.send_json({"type": "error", "error": masked_error(exc, "Voice request failed")})
         except Exception:
