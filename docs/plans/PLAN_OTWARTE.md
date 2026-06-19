@@ -78,11 +78,12 @@
 - [x] **E — Agent kodowania** P1 ✅ **CAŁA SEKCJA (2026-06-17)** — E1–E10 zaliczone na żywo (E5 checkpointy/undo,
   E6 CAELO.md, E9 reguły glob deny>allow, E10 LSP diagnostyka pyright). Po drodze naprawiono m.in. loop guard
   (zapętlenie na edit_file), URI-match LSP na Windows, sesja przeżywa zmianę zakładki. Szczegóły: `PLAN_WERYFIKACJI_LIVE.md` rundy 8–11.
-- [ ] **D — Głos** P2 🟡 — **D1 TTS ✅ 2026-06-19** (5 głosów + EN/PL, read-aloud + Speak, badge kosztu;
-  bug UX naprawiony: feedback Settings → toast, `17c2caa`). ⚠️ koszt TTS = SZACUNEK, do weryfikacji na fakturze.
-  **Zostają D2–D7 — user zablokowany problemem z mikrofonem.** D2 STT batch, **D3 STT-stream**
-  (⚠️ protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY — główny znak zapytania), D4 Talk +
-  barge-in, D5 Realtime (Live), D6/D7 read-aloud + koszt sesji.
+- [ ] **D — Głos** P2 🟡 — **D1 TTS ✅ + D2 STT batch ✅ 2026-06-19.** D1: 5 głosów + EN/PL, read-aloud + Speak,
+  badge kosztu. D2: dyktowanie czat/Code + Transcribe (transkrypt PL poprawny, koszt z czasu). **2 bugi naprawione:**
+  feedback Settings → toast (`17c2caa`); **CSP `script-src` bez `blob:` blokował AudioWorklet → Talk/Live/STT-stream
+  padały „Audio capture is unavailable" — dodano `blob:` (`a02e67f`, +test).** ⚠️ koszt TTS = SZACUNEK (faktura).
+  **Zostają: D3 STT-stream** (⚠️ protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY — główny znak zapytania;
+  fix CSP wymaga restartu `npm run dev`, potem retest), D4 Talk + barge-in, D5 Realtime (Live), D6/D7 read-aloud + koszt sesji.
 - [x] **F — Subagenci / zespoły** P2 ✅ **2026-06-18 — CAŁA SEKCJA** (F1 delegacja end-to-end; F2 review-modal +
   merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
   F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
