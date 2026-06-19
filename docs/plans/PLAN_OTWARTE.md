@@ -82,8 +82,10 @@
   badge kosztu. D2: dyktowanie czat/Code + Transcribe (transkrypt PL poprawny, koszt z czasu). **2 bugi naprawione:**
   feedback Settings → toast (`17c2caa`); **CSP `script-src` bez `blob:` blokował AudioWorklet → Talk/Live/STT-stream
   padały „Audio capture is unavailable" — dodano `blob:` (`a02e67f`, +test).** ⚠️ koszt TTS = SZACUNEK (faktura).
-  **Zostają: D3 STT-stream** (⚠️ protokół/sample-rate `wss://api.x.ai/v1/stt` NIEPOTWIERDZONY — główny znak zapytania;
-  fix CSP wymaga restartu `npm run dev`, potem retest), D4 Talk + barge-in, D5 Realtime (Live), D6/D7 read-aloud + koszt sesji.
+  **D5 Live ✅** (dwukierunkowa rozmowa głos↔głos). **D3 ROZSTRZYGNIĘTE: streaming `/v1/stt` niekompatybilny** —
+  log mostu pokazał, że xAI odrzuca `input_audio_buffer.append` (`expected audio.done`), oczekuje innego/binarnego
+  formatu; partiale na żywo odłożone do dokumentacji endpointu. **D4 Talk przepięty na batch-STT + VAD** (auto-stop
+  na ciszy, `497cbb2`) — czeka na retest na żywo. **Zostają: retest D4, D6/D7 (read-aloud z ustawień + badge kosztu sesji).**
 - [x] **F — Subagenci / zespoły** P2 ✅ **2026-06-18 — CAŁA SEKCJA** (F1 delegacja end-to-end; F2 review-modal +
   merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
   F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
