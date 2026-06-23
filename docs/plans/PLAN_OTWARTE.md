@@ -23,7 +23,7 @@
 | # | Blok | Priorytet | Kto | Skrót |
 |---|---|---|---|---|
 | 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | ✅ **DOMKNIĘTA 2026-06-17** — remote+CI+gitleaks+pytest+podpisany release `v0.1.0`; zostaje tylko public repo → auto-update end-user |
-| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/**D**/E/F/**H**/**I** + **G-rdzeń** (G1–G3/G5/G6) · zostają tylko: **G4/G7** (remote-MCP/ACP), **J** (cross-platform mac/Linux), **K** (terminal) |
+| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/**D**/E/F/**G**(G1–G7)/**H**/**I**/**K** · zostaje tylko: **J** (cross-platform mac/Linux — wymaga maszyny mac/Linux) |
 | 3 | **Nowe funkcje TOP-10** | P2/P3 | 🤖 | TOP7 rewind czatu, TOP8 inline Ctrl-K, TOP9 auto-pamięć usera, TOP10 background-agents |
 | 4 | **Motywy inżynierskie 4.1** | P2/P3 | 🤖 | odporność (4.1-c), wydajność (4.1-b), API total/cost (4.1-e), /genjobs WS-push (4.1-f) |
 | 5 | **Strategiczne / długoterminowe** | P2/P3 | 🤖+👤 | ROAD-4.2-a (inni dostawcy LLM), spike B0 (`cli-chat-proxy`), ROAD-4.2-b |
@@ -74,7 +74,7 @@
 > **Pełny runbook z krokami/pułapkami:** [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)
 > (tabela wyników na górze). Status zaliczone (LIVE): **A** (auth) · **B** (czat) · **C** (Image/Video) ·
 > **D** (głos) · **E** (agent) · **F** (subagenci) · **G-rdzeń** (MCP/headless/LSP) · **H** (funkcje-widma — zdecydowane) ·
-> **I** (pakiety). Zostają tylko: **G4/G7** (remote-MCP/ACP), **J** (mac/Linux), **K** (terminal).
+> **I** (pakiety) · **K** (terminal) · **G** (G1–G7, w tym G4 remote-MCP + G7 ACP). Zostaje tylko: **J** (mac/Linux).
 > Po każdym teście: zaktualizuj tabelę wyników i skoryguj „zrobione (mock)" → realny status w docs.
 
 - [x] **E — Agent kodowania** P1 ✅ **CAŁA SEKCJA (2026-06-17)** — E1–E10 zaliczone na żywo (E5 checkpointy/undo,
@@ -91,11 +91,13 @@
   merge→workspace + checkpoint cofalny + wykrycie konfliktu; F3 cascade stop → tree-kill potwierdzony;
   F4 skill `implement` steruje delegate+rolami). Po drodze naprawione 3 bugi UX: review-modal, zwijanie
   panelu Team, `shrink-0`/scroll.
-- [ ] **G — Rozszerzalność** P2 🟡 — **G1+G2+G3+G5+G6 ✅ 2026-06-19** (realny MCP stdio + w agencie + w czacie;
+- [x] **G — Rozszerzalność** P2 ✅ **CAŁA SEKCJA (G1–G7)** — **G1+G2+G3+G5+G6 ✅ 2026-06-19** (realny MCP stdio + w agencie + w czacie;
   interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json
   + fail-closed + allow + sesje; LSP ✅ w E10). Po drodze **4 realne bugi backendu**: cwd serwera (`3a004ef`),
   `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP-provider — agent gubił narzędzia po
-  rebuildzie** (`dc8da65`). Zostają: G4 remote MCP (xAI-side), G7 ACP (Zed/Neovim/Emacs).
+  rebuildzie** (`dc8da65`). **G4 remote MCP (xAI-side) ✅ 2026-06-23** — deepwiki przez czat (grok-4.3), wykonanie po
+  stronie xAI potwierdzone. **G7 ACP ✅ 2026-06-23** — sterownik JSON-RPC po stdio: `session/update` + `session/request_permission`
+  skorelowane po id + mutacja po zgodzie; obie tury `end_turn`.
 - [x] **H — Funkcje-widma OFF-by-default** P3 ✅ **ZDECYDOWANE 2026-06-19** (włączyć/odłożyć/zostaw-opt-in):
   - [x] **H1 ⭐ embeddings spike** ⛔ **FAILED 2026-06-19** — xAI **404** na `/v1/embeddings` (jak vector stores). **DECYZJA: B8 ODŁOŻONE** (uśpione+udokumentowane w CLAUDE.md, bez torch; usunięcie/FTS5-only = osobna zmiana).
   - [x] **H2** pamięć hybrydowa ⛔ ZABLOKOWANE przez H1 (recall embeduje pierwsze, bez fallbacku FTS → no-op przy 404). · [ ] **H3** sandbox OS (Linux/mac only — Windows no-op) · [x] **H4** web_fetch ✅ (https-only+SSRF+allowlista; opt-in) · [x] **H5** git worktree ✅ (realny `git worktree` subagenta potwierdzony; opt-in) · [x] **H6** auto-compact ✅ selfcheck (live niepraktyczne, próg 48k; opt-in).
@@ -105,7 +107,8 @@
     [`docs/guides/registry.README.md`](registry.README.md)). Domyślny URL już wskazuje na `AuraVixStudio/caelo-packages`
     (`config.PACKAGES_REGISTRY_URL`, commit `182bd1b`); do czasu utworzenia repo Browse = 404, ale import-only/BYO działa.
 - [ ] **J — Cross-platform** P3 ⬜ (gdy dostęp do mac/Linux) — J1 build dmg/AppImage/deb, J2 PTY, J3 tree-kill POSIX.
-- [ ] **K — Terminal** P3 ⬜ — K1 pywinpty + potwierdzenie scrubbed env (`echo $env:XAI_API_KEY` puste).
+- [x] **K — Terminal** P3 ✅ **2026-06-23** — K1 pywinpty 3.0.3 + scrubbed env potwierdzony (`echo %XAI_API_KEY%`/
+  `%CAELO_CORE_TOKEN%` → niezrozwinięte = sekrety nie wyciekają przez WS terminala).
 
 ---
 

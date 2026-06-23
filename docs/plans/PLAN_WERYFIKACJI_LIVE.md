@@ -31,11 +31,11 @@
 | D | Głos | P2 | ✅ | 2026-06-19 | **CAŁA SEKCJA D** (D1 TTS · D2 STT batch · D4 Talk · D5 Live · D6 read-aloud · D7 koszt sesji ✅; D3 live-partiale = potwierdzone ZEWNĘTRZNE ograniczenie xAI, nie nasz bug). D1: 5 głosów + EN/PL, read-aloud + Speak, badge kosztu. D2: dyktowanie czat/Code + Transcribe — transkrypt PL poprawny, koszt z czasu. **2 bugi naprawione:** feedback Settings → toast (`17c2caa`); **CSP `script-src` bez `blob:` blokował AudioWorklet → Talk/Live/STT-stream padały „Audio capture is unavailable" — dodano `blob:` (`a02e67f`, +test).** ⚠️ koszt TTS = SZACUNEK (faktura). **D5 (Live) ✅.** **D3 ROZSTRZYGNIĘTE: streaming `/v1/stt` niekompatybilny** (xAI odrzuca `input_audio_buffer.append`, oczekuje binarnego/`audio.done`) — partiale odłożone. **D4 (Talk) ✅** — batch-STT+VAD zweryfikowane na żywo (auto-stop → „Paryż." tekst+głos; `497cbb2`). D7 (badge sumuje audio/sesja) ✅ przy okazji. Zostaje formalnie D6 (read-aloud z ustawień — potwierdzony już przy D1). |
 | E | Agent kodowania | P1 | ✅ | 2026-06-17 | **E1–E10 ✅ — CAŁA SEKCJA E.** Pełny bieg, diff approval, plan mode, 4 tryby+bypass, checkpointy/undo, CAELO.md, sesje, @-pliki, reguły glob deny>allow, **LSP diagnostyka (pyright)**. Naprawiono ~17 bugów/UX (rundy 1–11): m.in. izolacja CAELO.md, edit_file taby/CRLF, @-wyszukiwanie, loop guard (r.8), **LSP URI-match Windows g%3A vs G: (r.10), sesja przeżywa zmianę zakładki — backend mintuje świeże id per połączenie (r.10)**. |
 | F | Subagenci / zespoły | P2 | ✅ | 2026-06-18 | **F1–F4 ✅ — CAŁA SEKCJA F.** F1: 3 subagenci równolegle, kontekst rodzica czysty, głębia 1. F2: review w MODALU (Accept&merge/Discard/Cancel zawsze w zasięgu), merge→workspace, **checkpoint cofalny** („Undid 2 checkpoints"), **konflikt wykryty** (implementer+test-writer na `src/calculator.py` → badge „1 conflict"). F3: **cascade stop** — Stop orkiestratora → tester CANCELLED, `python slow_task.py` **ubity (tree-kill)**, brak osieroconego procesu (`Get-CimInstance` = pusto, sprawdzone w sekundy po Stop). F4: **skill `implement` steruje** delegate+rolami (PLAN fazowy → implementer→reviewer→apply, walidacja `--count<0` w `parse_args()`). UX naprawione na żywo: review-modal (diff uwięziony w max-h-64), przycisk zwijania Team, `shrink-0` na kartach (panel ściskał wpisy zamiast scrollować). |
-| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | 🟡 | 2026-06-19 | **G1+G2+G3+G5+G6 ✅** (MCP stdio realny + w agencie + w czacie; interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). Zostają G4 (remote MCP), G7 (ACP). |
+| G | Rozszerzalność (MCP/headless/ACP/LSP) | P2 | ✅ | 2026-06-23 | **CAŁA SEKCJA G ✅ (G1–G7).** G1+G2+G3+G5+G6 (MCP stdio realny + w agencie + w czacie; interop `.mcp.json`/`AGENTS.md`/`~/.claude/skills` niedestrukcyjnie; headless CLI plain/json/streaming-json + fail-closed + allow + sesje). LSP ✅ w E10. **4 realne bugi backendu naprawione**: cwd serwera (`3a004ef`), `start_enabled` martwy kod (`0376351`), warm-start (`24d4a4a`), **MCP jako provider — agent gubił narzędzia po rebuildzie** (`dc8da65`). Nauki: grok-build-0.1 niestabilny w deklarowaniu narzędzi (czat→grok-4.3), MCP-w-czacie wymaga „Always allow" (nie „Accept"). **G4 (remote MCP, native) ✅ 2026-06-23** — deepwiki przez xAI-side (czat grok-4.3). **G7 (ACP) ✅ 2026-06-23** — sterownik JSON-RPC po stdio: initialize→session/new→2 tury; ramki `session/update` (tool_call/agent_message_chunk), `session/request_permission` skorelowane po id (`srv-1`, write_file→allow), `acp_test.txt` utworzony, `stopReason: end_turn`. |
 | H | Funkcje-widma (decyzja) | P3 | ✅ | 2026-06-19 | **CAŁA SEKCJA H zdecydowana.** H1 embeddingi ⛔ xAI **404** → **B8/pamięć (H1+H2) ODŁOŻONE** (uśpione+udok., bez torch). H4 web_fetch ✅ (https-only+SSRF+allowlista, opt-in). H5 git worktree ✅ (realny `git worktree` subagenta potwierdzony, opt-in). H6 auto-compact ✅ selfcheck (live niepraktyczne, opt-in). H3 sandbox = Linux/mac only (Windows no-op). |
 | I | Pakiety / marketplace | P3 | ✅ | 2026-06-19 | **I1–I3 ✅.** Round-trip export `plan`→import→ConsentCard (typ/wersja/ryzyko/INTEGRITY OK/uprawnienia)→Install zweryfikowany. I1: 404 rejestru obsłużony grzecznie. ⚠️ **domyślny rejestr nieopublikowany** (URL = `AuraVixStudio/caelo-packages`, repo do utworzenia) — import-only/BYO działa. Tamper/strip-sekretów = selfcheck `packages_check` 47/47. |
 | J | Cross-platform | P3 | ⬜ | | |
-| K | Terminal | P3 | ⬜ | | |
+| K | Terminal | P3 | ✅ | 2026-06-23 | **K1 ✅.** pywinpty 3.0.3 w venv; Terminal w module Code (cmd.exe w workspace). **Env scrubbed potwierdzony:** `echo %XAI_API_KEY%`→`%XAI_API_KEY%` i `echo %CAELO_CORE_TOKEN%`→`%CAELO_CORE_TOKEN%` (oba niezrozwinięte = niezdefiniowane, sekrety nie wyciekają przez WS — `scrubbed_env` w `terminal.py`). |
 
 Legenda statusu: ⬜ nie zaczęte · 🟡 częściowe · ✅ działa · ❌ nie działa · ⏭️ odłożone/usunięte.
 
@@ -426,7 +426,13 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 - [x] **G2 — MCP w agencie.**  ✅ 2026-06-19. Agent dostał kartę `mcp__filesystem__write_file` (kind `mcp_tool_call`, JSON args), po zatwierdzeniu plik utworzony; READONLY MCP bez pytania. (Wymagało fixu provider — patrz wyżej.)
 - [x] **G3 — MCP w czacie.**  ✅ 2026-06-19. READONLY MCP w czacie działa; mutujące niepre-approved → odmowa z komunikatem; po „Always allow" w Code (`mcp:mcp__filesystem__write_file` na allowliście) czat (grok-4.3) **utworzył `chat_mcp.txt`** — ścieżka „dozwolone" potwierdzona.
-- [ ] **G4 — Remote MCP (native).** Skonfiguruj `tools=[{type:mcp,server_url,…}]` → wykonanie po stronie xAI (bez lokalnej bramki).
+- [x] **G4 — Remote MCP (native).**  ✅ 2026-06-23. Serwer `deepwiki` (`transport: remote`, `https://mcp.deepwiki.com/mcp`,
+  bez auth) dodany w Extensions → MCP — badge **REMOTE · STOPPED · Enabled** (nie startuje lokalnie, brak listy narzędzi =
+  poprawne, narzędzia po stronie xAI). W czacie (grok-4.3) prompt „use the deepwiki MCP tool … `modelcontextprotocol/servers`"
+  → model **wykonał narzędzie po stronie xAI** („retrieved via the deepwiki tool") i zwrócił treść SPECYFICZNĄ dla repo
+  (Everything/Filesystem/Git/Fetch/Memory Servers, build pipeline TS+Python, MCP Registry) — nie ogólną wiedzę. Brak lokalnej
+  karty approval (cecha remote — wykonanie + bramka po stronie xAI). Potwierdza ścieżkę `remote_tool_blocks()` →
+  `responses_client.remote_tools` ([chat.py:119](../../caelo_core/routes/chat.py)).
 - [x] **G5 — Interop (M19-B5).**  ✅ 2026-06-19. Wszystkie 3 ścieżki + niedestrukcyjność potwierdzone na żywo:
   - **MCP** — `<ws>/.mcp.json` (serwer `interop-demo`) zaimportowany **STOPPED · Enabled odznaczone** (`enabled=False`, autostart pominięty) ze znacznikiem źródła. ✅
   - **AGENTS.md** — sklejony do promptu agenta: agent przeczytał `AGENTS.md` i zakończył odpowiedź dokładną linią z reguły (`INTEROP-OK: AGENTS.md was loaded`). ✅
@@ -439,7 +445,12 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
   - sesje ✅ — pliki `<id>.json` w `sessions\` (DATA_DIR = korzeń repo w dev).
   - ⚠️ **Pułapka uruchomienia:** musisz być w korzeniu repo (`python -m caelo_core` importuje pakiet z CWD); odpalenie z `C:\Users\…` → „module caelo_core could not be loaded".
 
-- [ ] **G7 — ACP (M19-B2).** W Zed/Neovim/Emacs skonfiguruj agenta ACP: `python -m caelo_core acp`.
+- [x] **G7 — ACP (M19-B2).**  ✅ 2026-06-23. Zweryfikowane sterownikiem-klientem JSON-RPC po stdio (`python -m caelo_core acp`,
+  rola klienta jak Zed/Neovim): `initialize` → `agentCapabilities` (loadSession/image/embeddedContext) → `session/new`
+  (`sessionId`) → 2 tury `session/prompt`. **Wszystkie 3 kryteria spełnione:** (1) ramki `session/update` strumieniowane
+  (`tool_call`/`tool_call_update`/`agent_message_chunk`); (2) **`session/request_permission` poprawnie korelowane po `id`** —
+  mutacja `write_file` → serwer wysłał żądanie (id `srv-1`), klient odpowiedział `allow` z tym samym id → zgoda zmapowana;
+  (3) `acp_test.txt` utworzony po zgodzie. Obie tury `stopReason: end_turn`. Realny bieg agenta (xAI).
   - *Oczekiwane:* JSON-RPC stdio działa, `session/request_permission` poprawnie korelowane, ramki → `session/update`.
 
 ---
@@ -496,8 +507,12 @@ embeddingi `embedding-beta-3-small`. Wizja wymaga rodziny **grok-4**.
 
 ## Część K — Terminal  ⚪ P3
 
-- [ ] **K1 — Terminal (pywinpty).** `caelo_core\.venv\Scripts\pip install pywinpty` → Terminal w apce.
-  - *Oczekiwane:* interaktywny shell; **env scrubbed** (brak `XAI_API_KEY`/`CAELO_CORE_TOKEN` — sprawdź `echo $env:XAI_API_KEY` w terminalu apki = puste).
+- [x] **K1 — Terminal (pywinpty).**  ✅ 2026-06-23. pywinpty 3.0.3 zainstalowane (`python.exe -m pip install pywinpty`),
+  Terminal otwarty w module Code → interaktywny `cmd.exe` w workspace `G:\Testy\caelo-test-project`. **Env scrubbed
+  POTWIERDZONY:** `echo %XAI_API_KEY%` → `%XAI_API_KEY%` i `echo %CAELO_CORE_TOKEN%` → `%CAELO_CORE_TOKEN%` (oba
+  niezrozwinięte = zmienne niezdefiniowane w shellu → sekrety NIE wyciekają przez ten sam WS, `scrubbed_env()` w
+  [terminal.py:50](../../caelo_core/routes/terminal.py)).
+  - *Oczekiwane:* interaktywny shell; **env scrubbed** (brak `XAI_API_KEY`/`CAELO_CORE_TOKEN`).
 
 ---
 
