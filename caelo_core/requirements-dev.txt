@@ -1,4 +1,0 @@
-# Narzędzia deweloperskie/testowe — NIE wymagane do uruchomienia sidecara.
-# P3-13: pytest jako runner self-checków (discovery + jedna komenda + wpięcie w CI).
-#   pip install -r caelo_core/requirements-dev.txt
-pytest>=8.0

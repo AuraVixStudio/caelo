@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Caelo — every mode under one sky</title>
+<meta name="description" content="Open-source desktop client for the xAI Grok API — chat, image & video generation, voice, and an agentic coding module with local file access. Bring your own key, no telemetry." />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+
+<!-- Open Graph / social preview -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Caelo — every mode under one sky" />
+<meta property="og:description" content="Open-source desktop client for the xAI Grok API. Chat, image & video, voice, and an agentic coding module. Bring your own key, no telemetry." />
+<meta property="og:image" content="https://auravixstudio.github.io/caelo/assets/og-banner.png" />
+<meta property="og:url" content="https://auravixstudio.github.io/caelo/" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<style>
+  :root {
+    --bg: #090c17;
+    --bg-2: #0d1122;
+    --surface: #141a2e;
+    --surface-2: #1a2138;
+    --border: #232c47;
+    --text: #e9edf7;
+    --muted: #98a3be;
+    --purple: #8b5cf6;
+    --blue: #3b82f6;
+    --grad: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 40%, #3b82f6 100%);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* Header */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(9, 12, 23, 0.82);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .nav img { height: 30px; }
+  .nav-links { display: flex; gap: 26px; align-items: center; }
+  .nav-links a { color: var(--muted); font-size: 15px; transition: color .15s; }
+  .nav-links a:hover { color: var(--text); }
+  .btn {
+    display: inline-block; padding: 10px 20px; border-radius: 10px; font-weight: 600; font-size: 15px;
+    transition: transform .12s, box-shadow .12s, background .15s; border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--grad); color: #fff; box-shadow: 0 6px 20px rgba(124, 92, 255, .35); }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(124, 92, 255, .45); }
+  .btn-ghost { background: var(--surface); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { background: var(--surface-2); }
+
+  /* Hero */
+  .hero { text-align: center; padding: 96px 0 72px; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -40% 0 auto 0; height: 600px;
+    background: radial-gradient(600px 380px at 50% 0%, rgba(124, 92, 255, .22), transparent 70%);
+    pointer-events: none;
+  }
+  .hero h1 { font-size: 60px; font-weight: 800; letter-spacing: -1.5px; line-height: 1.05; }
+  .hero h1 .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .hero p.tag { color: var(--muted); font-size: 21px; margin: 22px auto 0; max-width: 640px; }
+  .cta { display: flex; gap: 14px; justify-content: center; margin-top: 38px; flex-wrap: wrap; }
+  .badges { display: flex; gap: 10px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
+  .badge {
+    font-size: 13px; color: var(--muted); background: var(--surface); border: 1px solid var(--border);
+    padding: 6px 13px; border-radius: 999px;
+  }
+  .badge b { color: var(--text); font-weight: 600; }
+
+  /* Sections */
+  section.block { padding: 64px 0; }
+  .eyebrow { text-align: center; color: var(--purple); font-weight: 700; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; }
+  h2.title { text-align: center; font-size: 34px; font-weight: 800; letter-spacing: -.5px; margin-top: 10px; }
+  .sub { text-align: center; color: var(--muted); max-width: 620px; margin: 14px auto 0; font-size: 17px; }
+
+  /* Feature grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 26px;
+    transition: transform .15s, border-color .15s;
+  }
+  .card:hover { transform: translateY(-3px); border-color: #34406b; }
+  .card .ic {
+    width: 42px; height: 42px; border-radius: 11px; background: var(--grad);
+    display: grid; place-items: center; font-size: 20px; margin-bottom: 16px;
+  }
+  .card h3 { font-size: 18px; font-weight: 700; }
+  .card p { color: var(--muted); font-size: 15px; margin-top: 8px; }
+
+  /* Privacy strip */
+  .privacy {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 44px; margin-top: 16px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+  }
+  .privacy .item h4 { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .privacy .item p { color: var(--muted); font-size: 15px; margin-top: 8px; }
+  .privacy .dot { color: var(--purple); }
+
+  /* CTA footer block */
+  .final { text-align: center; padding: 80px 0; }
+  .final h2 { font-size: 36px; font-weight: 800; letter-spacing: -.5px; }
+  .final p { color: var(--muted); font-size: 18px; margin: 14px auto 32px; max-width: 560px; }
+
+  footer { border-top: 1px solid var(--border); padding: 40px 0; color: var(--muted); font-size: 14px; }
+  footer .frow { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: center; }
+  footer a { color: var(--muted); } footer a:hover { color: var(--text); }
+  footer .disc { margin-top: 18px; font-size: 12.5px; color: #6c7796; max-width: 760px; }
+
+  @media (max-width: 820px) {
+    .grid, .privacy { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 42px; }
+    .nav-links a:not(.btn) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a href="#top"><img src="assets/lockup-horizontal-ondark.svg" alt="Caelo" /></a>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#privacy">Privacy</a>
+      <a href="https://github.com/AuraVixStudio/caelo/blob/main/docs/guides/USER_GUIDE.md">Docs</a>
+      <a href="https://github.com/AuraVixStudio/caelo">GitHub</a>
+      <a class="btn btn-primary" href="https://github.com/AuraVixStudio/caelo/releases/latest">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <h1>Every mode <span class="grad">under one sky</span></h1>
+      <p class="tag">An open-source desktop client for the xAI Grok API — chat, image &amp; video,
+        voice, and an agentic coding module. Bring your own key.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/AuraVixStudio/caelo/releases/latest">Download for Windows</a>
+        <a class="btn btn-ghost" href="https://github.com/AuraVixStudio/caelo">View on GitHub →</a>
+      </div>
+      <div class="badges">
+        <span class="badge"><b>Bring your own key</b></span>
+        <span class="badge"><b>No telemetry</b></span>
+        <span class="badge">Apache-2.0</span>
+        <span class="badge">Electron + Python</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <p class="eyebrow">Five modes, one hub</p>
+      <h2 class="title">Everything xAI, in one place</h2>
+      <p class="sub">Caelo unifies the full Grok surface behind a single shared backbone — context,
+        history, projects and cost flow across every mode.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="ic">💬</div>
+          <h3>Chat</h3>
+          <p>Responses API with live web &amp; X search, vision, document Q&amp;A, citations and a live cost counter.</p>
+        </div>
+        <div class="card">
+          <div class="ic">🎨</div>
+          <h3>Image &amp; Video</h3>
+          <p>Generate and edit images and video through one async job queue, with a gallery and per-job cost.</p>
+        </div>
+        <div class="card">
+          <div class="ic">🎙️</div>
+          <h3>Voice</h3>
+          <p>Text-to-speech, dictation, a real-time “Live” agent and a “Talk” pipeline — the key never reaches the UI.</p>
+        </div>
+        <div class="card">
+          <div class="ic">⌨️</div>
+          <h3>Coding agent</h3>
+          <p>Sandboxed file tools, diff approval, trust modes, checkpoints/undo, project rules, and subagent teams.</p>
+        </div>
+        <div class="card">
+          <div class="ic">🧩</div>
+          <h3>Extensible</h3>
+          <p>MCP servers, slash commands, hooks, skills, a package marketplace, headless CLI, ACP and LSP.</p>
+        </div>
+        <div class="card">
+          <div class="ic">🗂️</div>
+          <h3>History &amp; projects</h3>
+          <p>A searchable SQLite backbone records every mode; send artifacts between modes and scope work to projects.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="privacy">
+    <div class="wrap">
+      <p class="eyebrow">Local-first by design</p>
+      <h2 class="title">Your keys, your machine</h2>
+      <div class="privacy">
+        <div class="item">
+          <h4><span class="dot">●</span> Bring your own key</h4>
+          <p>You supply your own xAI credentials (OAuth or API key). They stay on your machine and are sent only to api.x.ai.</p>
+        </div>
+        <div class="item">
+          <h4><span class="dot">●</span> No telemetry</h4>
+          <p>Caelo collects nothing. The backend binds to loopback only and is never exposed on a routable interface.</p>
+        </div>
+        <div class="item">
+          <h4><span class="dot">●</span> Open source</h4>
+          <p>Apache-2.0 licensed. The mature xAI logic is reused, not rewritten — auditable end to end.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap">
+      <h2>Ready to bring your own sky?</h2>
+      <p>Download the Windows installer, sign in with your xAI account or paste an API key, and start.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/AuraVixStudio/caelo/releases/latest">Download Caelo</a>
+        <a class="btn btn-ghost" href="https://github.com/AuraVixStudio/caelo">Star on GitHub ★</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="frow">
+      <img src="assets/mark-color.svg" alt="Caelo" style="height:28px" />
+      <div style="display:flex; gap:22px; flex-wrap:wrap">
+        <a href="https://github.com/AuraVixStudio/caelo">GitHub</a>
+        <a href="https://github.com/AuraVixStudio/caelo/releases">Releases</a>
+        <a href="https://github.com/AuraVixStudio/caelo/blob/main/docs/guides/USER_GUIDE.md">User guide</a>
+        <a href="https://github.com/AuraVixStudio/caelo/blob/main/LICENSE">License</a>
+      </div>
+    </div>
+    <p class="disc">Caelo is an independent project by AuraVix Studio. It is not affiliated with, endorsed by,
+      or sponsored by xAI. “Grok”, “SuperGrok” and “xAI” are trademarks of xAI Corp; they are used here only to
+      describe interoperability. © 2026 AuraVix Studio · Apache-2.0.</p>
+  </div>
+</footer>
+
+</body>
+</html>

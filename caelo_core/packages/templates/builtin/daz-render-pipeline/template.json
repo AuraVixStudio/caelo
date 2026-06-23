@@ -1,6 +1,0 @@
-{
-  "name": "DAZ — Render Pipeline",
-  "version": "1.0.0",
-  "author": "Caelo",
-  "description": "A folder layout and helper script for turning DAZ Studio image-sequence renders into web-ready WebM/MP4 clips with ffmpeg."
-}
