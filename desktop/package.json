@@ -1,7 +1,7 @@
 {
   "name": "caelo-desktop",
-  "version": "0.1.0",
-  "description": "Caelo — powłoka Electron (frontend) klienta desktopowego dla modeli xAI Grok, w stylu Claude Code / Codex",
+  "version": "0.1.1",
+  "description": "Caelo — powłoka Electron (frontend) klienta desktopowego dla modeli xAI Grok",
   "author": "AuraVix Studio",
   "repository": {
     "type": "git",
