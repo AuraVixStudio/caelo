@@ -73,8 +73,8 @@ dokończenie weryfikacji LIVE → wyścigi P2 → nowe funkcje wg TOP-10 (§4.3)
 
 **Zdiagnozowane na żywo.** W realnej bazie (`caelo_history.db`, dev `DATA_DIR` = korzeń repo)
 leży 16 zadań generacji z testów LIVE C1–C7; ich `params` zawierają pełne base64 data-URI
-obrazów/wideo — **łącznie 82,2 MB**. `GenJob.to_dict()` ([genjobs.py:105](../../caelo_core/genjobs.py))
-zwraca `params` w całości, a [routes/genjobs.py:127](../../caelo_core/routes/genjobs.py) serializuje
+obrazów/wideo — **łącznie 82,2 MB**. `GenJob.to_dict()` ([genjobs.py:105](../../../caelo_core/genjobs.py))
+zwraca `params` w całości, a [routes/genjobs.py:127](../../../caelo_core/routes/genjobs.py) serializuje
 je dla całej listy. Pomiar: `curl` pobiera 82 236 538 bajtów; klienci `urllib`/`Invoke-WebRequest`
 dostają **reset połączenia w trakcie ciała** (stąd FAIL `api_smoke` na tej maszynie). Renderer
 **polluje** `/genjobs` w trakcie aktywnego zadania — każdy tick to dziesiątki MB.
@@ -89,9 +89,9 @@ tylko wewnętrznie dla egzekutora i `retry`).
 
 ### B-2 (P1) — self-checki chodzą po realnym `DATA_DIR` użytkownika
 
-[`_smoke_common.py` / `api_smoke.py:80-87`](../../caelo_core/tools/api_smoke.py) spawnuje sidecar
+[`_smoke_common.py` / `api_smoke.py:80-87`](../../../caelo_core/tools/api_smoke.py) spawnuje sidecar
 z `cwd=REPO_DIR` i odziedziczonym env — a w dev `config.DATA_DIR` **zawsze** = korzeń repo
-(brak env-override w [config.py:50](../../config.py)). Skutki: (a) test padł na realnych danych
+(brak env-override w [config.py:50](../../../config.py)). Skutki: (a) test padł na realnych danych
 (B-1); (b) linia dalej (`smoke_media.py:410`) wykonałby **`DELETE /genjobs` na realnej liście
 zadań użytkownika** — przed utratą danych uratował go wyłącznie wcześniejszy crash; (c) wyniki
 self-checków zależą od zawartości prywatnej bazy (niedeterminizm).
@@ -108,9 +108,9 @@ przestanie zależeć od czystości workspace.
 
 | # | Znalezisko | Lokalizacja | Opis / naprawa |
 |---|---|---|---|
-| P1-A | **Path traversal w id sesji agenta** | [agent/sessions.py:37](../../caelo_core/agent/sessions.py) + [routes/sessions.py](../../caelo_core/routes/sessions.py) + [routes/agent.py:173](../../caelo_core/routes/agent.py) + headless `-s/-r` | `session_path(sid)` nie sanityzuje `sid`. REST: segment URL nie przepuści `/`, ale **`\` na Windows tak** (`sid="..\..\caelo_auth"` → `DATA_DIR/caelo_auth.json`); WS przyjmuje `{"type":"session","id":…}` z surowego JSON (slashe przechodzą). Skutek: token-gated **odczyt** (`GET`), **usunięcie** (`DELETE`) i — najgroźniejsze — **nadpisanie** dowolnego `*.json` (po `resume_session` kolejna tura persistuje sesję pod spreparowaną ścieżką, np. do `caelo_settings.json`). Naprawa: walidacja `^[A-Za-z0-9_-]{1,64}$` w `session_path`/`load`/`save`/`delete` (wzorzec `_NAME_RX` już istnieje w skills). |
-| P1-B | **Reguły `deny` nie chronią treści przed `grep`/`glob`** | [agent/permission_rules.py:147](../../caelo_core/agent/permission_rules.py) + [agent/tools.py:227](../../caelo_core/agent/tools.py) | `targets_for_tool` mapuje `grep`→`(Grep, path)` i `glob`→`(Read, pattern)` — reguła oceniana na **argumentach**, nie na **wynikach**. `deny Read(secret/**)` nie powstrzyma `grep("API_KEY", path=".")`, który zwróci modelowi dopasowane linie z `secret/`. Deklarowana twarda bariera „deny>allow" jest dla narzędzi przeszukujących obchodzialna. Naprawa: filtrować każdą trafioną ścieżkę wyników grep/glob przez `evaluate_rules("read_file", {"path": rel})`. |
-| P1-C | **LSP: short-reads psują ramkowanie Content-Length** | [lsp/client.py:177](../../caelo_core/lsp/client.py) | `FileIO.read(n)` na pipe (`bufsize=0`) może zwrócić mniej niż `n` bajtów; większe ciała (diagnostyki, `hover` dużego pliku) przychodzą obcięte → `json.loads` pada → wiadomość znika (ciche gubienie `publishDiagnostics`, timeouty `_request` po 15 s). Naprawa: pętla doczytująca do `length` bajtów. |
+| P1-A | **Path traversal w id sesji agenta** | [agent/sessions.py:37](../../../caelo_core/agent/sessions.py) + [routes/sessions.py](../../../caelo_core/routes/sessions.py) + [routes/agent.py:173](../../../caelo_core/routes/agent.py) + headless `-s/-r` | `session_path(sid)` nie sanityzuje `sid`. REST: segment URL nie przepuści `/`, ale **`\` na Windows tak** (`sid="..\..\caelo_auth"` → `DATA_DIR/caelo_auth.json`); WS przyjmuje `{"type":"session","id":…}` z surowego JSON (slashe przechodzą). Skutek: token-gated **odczyt** (`GET`), **usunięcie** (`DELETE`) i — najgroźniejsze — **nadpisanie** dowolnego `*.json` (po `resume_session` kolejna tura persistuje sesję pod spreparowaną ścieżką, np. do `caelo_settings.json`). Naprawa: walidacja `^[A-Za-z0-9_-]{1,64}$` w `session_path`/`load`/`save`/`delete` (wzorzec `_NAME_RX` już istnieje w skills). |
+| P1-B | **Reguły `deny` nie chronią treści przed `grep`/`glob`** | [agent/permission_rules.py:147](../../../caelo_core/agent/permission_rules.py) + [agent/tools.py:227](../../../caelo_core/agent/tools.py) | `targets_for_tool` mapuje `grep`→`(Grep, path)` i `glob`→`(Read, pattern)` — reguła oceniana na **argumentach**, nie na **wynikach**. `deny Read(secret/**)` nie powstrzyma `grep("API_KEY", path=".")`, który zwróci modelowi dopasowane linie z `secret/`. Deklarowana twarda bariera „deny>allow" jest dla narzędzi przeszukujących obchodzialna. Naprawa: filtrować każdą trafioną ścieżkę wyników grep/glob przez `evaluate_rules("read_file", {"path": rel})`. |
+| P1-C | **LSP: short-reads psują ramkowanie Content-Length** | [lsp/client.py:177](../../../caelo_core/lsp/client.py) | `FileIO.read(n)` na pipe (`bufsize=0`) może zwrócić mniej niż `n` bajtów; większe ciała (diagnostyki, `hover` dużego pliku) przychodzą obcięte → `json.loads` pada → wiadomość znika (ciche gubienie `publishDiagnostics`, timeouty `_request` po 15 s). Naprawa: pętla doczytująca do `length` bajtów. |
 | P1-D | **GenJob: data-URI w `params`** | §1 B-1 | jw. |
 | P1-E | **Self-checki na realnym `DATA_DIR`** | §1 B-2 | jw. |
 
@@ -118,11 +118,11 @@ przestanie zależeć od czystości workspace.
 
 | # | Znalezisko | Lokalizacja | Opis / naprawa |
 |---|---|---|---|
-| P1-F | **Martwe linki w odpowiedziach modelu** | [Markdown.tsx:39-66](../../desktop/src/renderer/src/components/Markdown.tsx) + [main/index.ts:397](../../desktop/src/main/index.ts) | `Markdown` nie nadpisuje `<a>` → klik = nawigacja top-level, którą `will-navigate` blokuje. Każdy link z markdownu modelu nic nie robi (cytowania działają, bo mają jawnie `target="_blank"`). Naprawa: `components={{ a: … target="_blank" rel="noreferrer" }}`. |
-| P1-G | **`busy` nie resetuje się po padzie WS** | [AgentPanel.tsx:222,358-373](../../desktop/src/renderer/src/components/code/AgentPanel.tsx) | Po crash/restarcie sidecara composer agenta zostaje zablokowany (tylko „Stop") do przeładowania. Naprawa: reset `busy` + wpis „connection lost" w `onClose`. |
-| P1-H | **„Retry" pisze do złej rozmowy** | [ChatView.tsx:394,524-541,967-979](../../desktop/src/renderer/src/components/ChatView.tsx) | `error`/`lastTurnRef` nie są czyszczone przy zmianie `activeId` — pasek błędu z rozmowy A widać w B, a „Retry" streamuje odpowiedź (z historią A) do rozmowy B. |
-| P1-I | **Debounce zapisu rozmów gubi dane** | [useConversations.ts:42-50](../../desktop/src/renderer/src/lib/useConversations.ts) | Zapis localStorage z debounce 800 ms, a cleanup robi `clearTimeout` (kasuje oczekujący zapis); delty streamingu stale resetują timer. Przełączenie modułu (lazy unmount) / zamknięcie apki = utrata całej tury. Naprawa: flush synchroniczny w cleanup (+ docelowo zapis per-rozmowa / IndexedDB). |
-| P1-J | **Wyścig `MicCapture.start()/stop()`** | [audioStream.ts:80-119](../../desktop/src/renderer/src/lib/audioStream.ts) | Guard „stop ubiegł start" jest po `addModule`, ale nie po `await getUserMedia` — szybki toggle Talk/Live zostawia **włączony track mikrofonu** bez referencji (wskaźnik nagrywania do restartu). Naprawa: flaga `stopped` sprawdzana po każdym await. |
+| P1-F | **Martwe linki w odpowiedziach modelu** | [Markdown.tsx:39-66](../../../desktop/src/renderer/src/components/Markdown.tsx) + [main/index.ts:397](../../../desktop/src/main/index.ts) | `Markdown` nie nadpisuje `<a>` → klik = nawigacja top-level, którą `will-navigate` blokuje. Każdy link z markdownu modelu nic nie robi (cytowania działają, bo mają jawnie `target="_blank"`). Naprawa: `components={{ a: … target="_blank" rel="noreferrer" }}`. |
+| P1-G | **`busy` nie resetuje się po padzie WS** | [AgentPanel.tsx:222,358-373](../../../desktop/src/renderer/src/components/code/AgentPanel.tsx) | Po crash/restarcie sidecara composer agenta zostaje zablokowany (tylko „Stop") do przeładowania. Naprawa: reset `busy` + wpis „connection lost" w `onClose`. |
+| P1-H | **„Retry" pisze do złej rozmowy** | [ChatView.tsx:394,524-541,967-979](../../../desktop/src/renderer/src/components/ChatView.tsx) | `error`/`lastTurnRef` nie są czyszczone przy zmianie `activeId` — pasek błędu z rozmowy A widać w B, a „Retry" streamuje odpowiedź (z historią A) do rozmowy B. |
+| P1-I | **Debounce zapisu rozmów gubi dane** | [useConversations.ts:42-50](../../../desktop/src/renderer/src/lib/useConversations.ts) | Zapis localStorage z debounce 800 ms, a cleanup robi `clearTimeout` (kasuje oczekujący zapis); delty streamingu stale resetują timer. Przełączenie modułu (lazy unmount) / zamknięcie apki = utrata całej tury. Naprawa: flush synchroniczny w cleanup (+ docelowo zapis per-rozmowa / IndexedDB). |
+| P1-J | **Wyścig `MicCapture.start()/stop()`** | [audioStream.ts:80-119](../../../desktop/src/renderer/src/lib/audioStream.ts) | Guard „stop ubiegł start" jest po `addModule`, ale nie po `await getUserMedia` — szybki toggle Talk/Live zostawia **włączony track mikrofonu** bez referencji (wskaźnik nagrywania do restartu). Naprawa: flaga `stopped` sprawdzana po każdym await. |
 
 ---
 

@@ -1,6 +1,6 @@
 # PLAN_FAZA_B_RUNBOOK.md — runbook publikacji (Faza B)
 
-> **Źródło:** [`PLAN_NAPRAWY_4.md`](PLAN_NAPRAWY_4.md) §„Faza B — Publikacja" + [`ANALIZA_PROGRAMU_2026-06-10.md`](ANALIZA_PROGRAMU_2026-06-10.md) §5.
+> **Źródło:** [`PLAN_NAPRAWY_4.md`](../PLAN_NAPRAWY_4.md) §„Faza B — Publikacja" + [`ANALIZA_PROGRAMU_2026-06-10.md`](ANALIZA_PROGRAMU_2026-06-10.md) §5.
 > **Cel:** doprowadzić Caelo do pierwszej publikacji (remote → CI → public → podpisany release z auto-update),
 > w kolejności, w której **bezpieczeństwo jest własnością kolejności** (scan-before-public nieprzekraczalny).
 > **Data:** 2026-06-12. **Gałąź robocza:** `m15-oss-crossplatform` (nie `main`).
@@ -63,24 +63,24 @@ Poza runbookiem, w tej samej sesji ujednolicono autorstwo repozytorium:
 
 Commit **`664e713`** na `m15-oss-crossplatform`:
 
-- **ROAD-3.6-d** — [`genjobs.py:89`](../../caelo_core/genjobs.py) `estimate_cost` rozlicza wideo wg długości
+- **ROAD-3.6-d** — [`genjobs.py:89`](../../../caelo_core/genjobs.py) `estimate_cost` rozlicza wideo wg długości
   **wyjścia**: `edit` zachowuje długość źródła, `extend` = źródło + dodane sekundy (z `source_duration`),
   zamiast bezwarunkowego `duration=6`. Nowe opcjonalne pole `source_duration` w `VideoJobReq`
-  ([`routes/genjobs.py:66`](../../caelo_core/routes/genjobs.py)). `estimate_cost` pozostaje czyste
+  ([`routes/genjobs.py:66`](../../../caelo_core/routes/genjobs.py)). `estimate_cost` pozostaje czyste
   (bez importu `api_manager`/`state`). **+4 asercje** w `genjobs_check._unit_cost_source_duration`
   (suita `RESULT: OK`).
-- **ROAD-3.6-e** — `files/` (lokalny zrzut brand-packa) → [`.gitignore`](../../.gitignore) `/files/`
+- **ROAD-3.6-e** — `files/` (lokalny zrzut brand-packa) → [`.gitignore`](../../../.gitignore) `/files/`
   (źródłem prawdy zostaje `assets/brand/`); `docs/guides/USER_GUIDE.md` zacommitowany; `docs/README.md`
   już był w repo.
-- **Repo wiring** — [`package.json`](../../desktop/package.json) `repository = AuraVixStudio/caelo`
+- **Repo wiring** — [`package.json`](../../../desktop/package.json) `repository = AuraVixStudio/caelo`
   + bump `0.0.1 → 0.1.0` (zsynchronizowane w `package-lock.json`, by `npm ci` nie protestował);
-  [`electron-builder.yml`](../../desktop/electron-builder.yml) `owner: AuraVixStudio` / `repo: caelo`
+  [`electron-builder.yml`](../../../desktop/electron-builder.yml) `owner: AuraVixStudio` / `repo: caelo`
   odkomentowane (feed auto-update = GitHub Releases).
 
 **Świadome odstępstwo:** `electron-updater` **NIE** trafił do `dependencies` — nie ma go w `package-lock.json`,
 a `npm ci` wymaga zgodności lockfile↔package.json (regeneracja wymaga sieci/TLS). Dodanie odłożone do
 **Kroku 6** (`npm install electron-updater`). Runtime działa już dziś przez `require`-fallback w
-[`main/index.ts:448`](../../desktop/src/main/index.ts) + `npm install electron-updater` w `release.yml`.
+[`main/index.ts:448`](../../../desktop/src/main/index.ts) + `npm install electron-updater` w `release.yml`.
 
 **Follow-up (opcjonalny, frontend):** renderer nie wysyła jeszcze `source_duration` (do odczytania z
 `HTMLVideoElement.duration` przy stagowaniu źródła wideo). Bez niego koszt edit/extend spada na `duration`
@@ -114,7 +114,7 @@ git push origin m15-oss-crossplatform       # gałąź robocza
   ```powershell
   gh secret set GITLEAKS_LICENSE -b "<klucz>" -R AuraVixStudio/caelo
   ```
-- **Opcja B:** poproś asystenta o patch [`ci.yml`](../../.github/workflows/ci.yml), który zamienia
+- **Opcja B:** poproś asystenta o patch [`ci.yml`](../../../.github/workflows/ci.yml), który zamienia
   `gitleaks-action` na bezpośrednie wywołanie binarki gitleaks (bez licencji). Wtedy sekret nie jest
   potrzebny, a skan i tak biegnie na pełnej historii (`--log-opts=--all`).
 
@@ -158,7 +158,7 @@ gitleaks detect --source . --config .gitleaks.toml --log-opts="--all" --redact -
   ujawnionego sekretu, potem skan ponownie. Asystent przygotuje polecenia `filter-repo` pod konkretne
   trafienie (wklej wynik gitleaks z `--redact`, bez surowego sekretu).
 
-Config skanu: [`.gitleaks.toml`](../../.gitleaks.toml) (already-allowlisted: `.env`, `caelo_*.json`,
+Config skanu: [`.gitleaks.toml`](../../../.gitleaks.toml) (already-allowlisted: `.env`, `caelo_*.json`,
 `caelo_auth.json`, lockfile, sygnatury CLA, publiczny PKCE `client_id` grok-cli — to NIE sekret).
 
 **DoD:** gitleaks czysty na pełnej historii; repo publiczne.
@@ -169,7 +169,7 @@ Config skanu: [`.gitleaks.toml`](../../.gitleaks.toml) (already-allowlisted: `.e
 
 > **✅ Wykonano 2026-06-17:** pytest **9.1.0** zainstalowany do venv → **`13 passed in 17.16s`**
 > (wszystkie suity przez `caelo_core/tests/test_selfchecks.py`). Domyka `0.4` z
-> [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md).
+> [`PLAN_WERYFIKACJI_LIVE.md`](../PLAN_WERYFIKACJI_LIVE.md).
 >
 > ⚠️ **Pułapka (workaround):** launcher `.venv\Scripts\pip.exe` rzucał `Fatal error in launcher`
 > (typowe po przeniesieniu/odtworzeniu venv — zaszyta ścieżka w shim `.exe`). Obejście: instaluj
@@ -183,9 +183,9 @@ caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt
 caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v
 ```
 
-**Uwaga:** krok pytest **jest już wpięty w CI** ([`ci.yml:75-79`](../../.github/workflows/ci.yml) instaluje
+**Uwaga:** krok pytest **jest już wpięty w CI** ([`ci.yml:75-79`](../../../.github/workflows/ci.yml) instaluje
 `requirements-dev.txt` i odpala `pytest caelo_core/tests`). ROAD-3.6-f sprowadza się więc do
-**potwierdzenia zielonego pytest lokalnie** (domyka `0.4` z [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)).
+**potwierdzenia zielonego pytest lokalnie** (domyka `0.4` z [`PLAN_WERYFIKACJI_LIVE.md`](../PLAN_WERYFIKACJI_LIVE.md)).
 
 **DoD:** lokalny `pytest caelo_core/tests` zielony (= CI też zielone).
 
@@ -205,13 +205,13 @@ caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v
 > + auto-update authenticated (dev) działają. Public = osobna, odłożona decyzja (Krok 4).
 
 > **🤖 Zrobione 2026-06-13 (część asystenta — kod/config, nic nie aktywuje się bez certu/sekretów):**
-> - **6.4 guard** — [`release.yml`](../../.github/workflows/release.yml): `--publish always` → **`--publish never`**
+> - **6.4 guard** — [`release.yml`](../../../.github/workflows/release.yml): `--publish always` → **`--publish never`**
 >   + `upload-artifact` (build waliduje pakowanie cross-OS, ale CI NIE wypchnie niepodpisanego instalatora
 >   ani `latest.yml`); `permissions: contents: read`; nazwa joba „Build (UNSIGNED…)".
-> - **6.3 pre-stage** — [`electron-builder.yml`](../../desktop/electron-builder.yml): szablon podpisu SimplySign
+> - **6.3 pre-stage** — [`electron-builder.yml`](../../../desktop/electron-builder.yml): szablon podpisu SimplySign
 >   (zakomentowany `certificateSubjectName`/`certificateSha1` + `rfc3161TimeStampServer` + `signingHashAlgorithms`)
 >   zastąpił mylącą notkę o `CSC_LINK`. **Aktywacja = odkomentuj i wpisz CN/Thumbprint SWOJEGO certu** (6.2/6.3 niżej).
-> - **„exe sidecara" (DoD TOP2)** — [`build_sidecar.ps1`](../../build_sidecar.ps1): bramkowany podpis sidecara
+> - **„exe sidecara" (DoD TOP2)** — [`build_sidecar.ps1`](../../../build_sidecar.ps1): bramkowany podpis sidecara
 >   (`signtool` po `$env:CAELO_SIGN_THUMBPRINT`, **no-op bez zmiennej**) + dodany **UTF-8 BOM** (PS 5.1 z
 >   `powershell -File` na non-UTF8 codepage psuł parsowanie polskich znaków/`—` — teraz czyste).
 >
@@ -226,7 +226,7 @@ cd desktop
 npm install electron-updater     # aktualizuje package.json + package-lock.json (sync dla npm ci)
 ```
 
-`electron-updater` jest już wpięty w [`main/index.ts:448`](../../desktop/src/main/index.ts) (ładowany przez
+`electron-updater` jest już wpięty w [`main/index.ts:448`](../../../desktop/src/main/index.ts) (ładowany przez
 `require` w try/catch — brak pakietu = auto-update wyłączony, nie crash). Feed = GitHub Releases
 (`electron-builder.yml` → generuje `app-update.yml` w paczce + `latest.yml` w wydaniu).
 Zacommituj zaktualizowane `package.json`+`package-lock.json`.
@@ -244,7 +244,7 @@ Zacommituj zaktualizowane `package.json`+`package-lock.json`.
 
 ### 6.3 Wpięcie certu w electron-builder (🤖)
 
-W [`electron-builder.yml`](../../desktop/electron-builder.yml), sekcja `win:` (asystent doda po otrzymaniu danych):
+W [`electron-builder.yml`](../../../desktop/electron-builder.yml), sekcja `win:` (asystent doda po otrzymaniu danych):
 ```yaml
 win:
   certificateSubjectName: "<CN z certu>"      # ALBO certificateSha1: "<THUMBPRINT>"
@@ -326,14 +326,14 @@ npx --no-install electron-builder --win --publish always
 **Faza B = ✅ ZAMKNIĘTA (2026-06-17).** Zostaje jedna decyzja produktowa: **upublicznienie repo** →
 odblokowuje auto-update dla end-userów (electron-updater + prywatne repo bez auth nie pobierze `latest.yml`).
 
-**Higiena po publikacji (drobne follow-upy, śledzone w [`PLAN_OTWARTE.md`](PLAN_OTWARTE.md) §6a):**
+**Higiena po publikacji (drobne follow-upy, śledzone w [`PLAN_OTWARTE.md`](../PLAN_OTWARTE.md) §6a):**
 - ✅ `author` w `desktop/package.json` (poprzedni osobisty) → `AuraVix Studio` (NSIS `COMPANY_NAME`).
 - ⬜ CI `release.yml`: deprecation Node — najpewniej runtime akcji (`actions/*@v4`→`@v5`), nie input
   `node-version` (już `"22"`); zweryfikować z logiem.
 - ⬜ CI `release.yml`: 3× job „Build (UNSIGNED)" czerwone — brak zależności na runnerach (np. `pack:sidecar`
   PyInstaller na ubuntu/macos); wymaga logu joba. Niski priorytet (podpis i tak lokalny).
 
-Dalej wg [`PLAN_NAPRAWY_4.md`](PLAN_NAPRAWY_4.md): **Faza C** (weryfikacja LIVE D/F/G/H/I/J/K),
+Dalej wg [`PLAN_NAPRAWY_4.md`](../PLAN_NAPRAWY_4.md): **Faza C** (weryfikacja LIVE D/F/G/H/I/J/K),
 potem **Faza G** TOP-10 (TOP2 = auto-update/signing domknięty tu w Fazie B; reszta od pozycji `S`).
 
 ---

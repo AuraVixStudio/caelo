@@ -1,6 +1,6 @@
 # PLAN_NAPRAWY_4.md — runda napraw #4 (po ANALIZA_PROGRAMU_2026-06-10)
 
-> **Źródło:** [`docs/plans/ANALIZA_PROGRAMU_2026-06-10.md`](ANALIZA_PROGRAMU_2026-06-10.md).
+> **Źródło:** [`docs/plans/ANALIZA_PROGRAMU_2026-06-10.md`](zrealizowane/ANALIZA_PROGRAMU_2026-06-10.md).
 > **Cel:** zamienić znaleziska analizy w wykonywalny, fazowy plan z dokładnymi `plik:linia`,
 > krokami naprawy i **asercjami regresyjnymi** dla każdej pozycji.
 > **Data:** 2026-06-11. **Gałąź robocza:** `m15-oss-crossplatform` (nie na `main`).
@@ -218,7 +218,7 @@ Kolejność jest **własnością bezpieczeństwa** (scan-before-public nieprzekr
 
 > **Stan 2026-06-17: Faza B DOMKNIĘTA** — kroki 1–6 ✅ (podpisany release `v0.1.0` opublikowany).
 > Jedyna pozostałość: upublicznienie repo (odłożone) → od tego zależy auto-update end-user.
-> Pełny runbook + notki sesji: [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md).
+> Pełny runbook + notki sesji: [`PLAN_FAZA_B_RUNBOOK.md`](zrealizowane/PLAN_FAZA_B_RUNBOOK.md).
 
 1. ✅ **ROAD-3.6-a** `[S]` — **ZROBIONE 2026-06-17:** remote `AuraVixStudio/caelo` (prywatny),
    wypchnięto `m15-oss-crossplatform` + `main`, **CI na `main` zielone**. + przepisanie historii git
@@ -382,7 +382,7 @@ Zaczynać od pozycji `S` (gotowa infrastruktura). Każda z **definicją „done"
 |---|---|---|---|---|
 | ✅ **TOP1** | `web_search` jako narzędzie agenta — **ZROBIONE** | S | reuse live-search z `responses_client` (`tools.web_search` + `WEB_SEARCH_TOOL`); READONLY, własna wczesna ścieżka jak `lsp`/`delegate` (świadomie **nie** w `permissions.READONLY`, by nie pompować `ALL_FILE_TOOLS`/`PARENT_FILE_TOOLS`); flaga `WEB_SEARCH_ENABLED` (domyślnie ON), reklamowane tylko orkiestratorowi; zwraca syntezę + listę „Sources" (cytowania). Test: `agent_selfcheck` `test_web_search` (13 asercji) | — |
 | ✅ **TOP3** | Widżet planu/TODO agenta — **ZROBIONE** | S | narzędzie `update_plan` (META/READONLY, własna ścieżka jak `delegate`, advertowane orkiestratorowi) → ramka `plan` (WsStream) → live `PlanWidget` w `AgentPanel` (przypięty u góry; pending/in_progress/completed; auto-reset na nową turę/sesję; wiersz narzędzia stłumiony). `tools.normalize_plan`/`plan_summary` (pure). Testy: `agent_selfcheck` `test_plan_widget` (11) + `agentPlan.test.ts` (4) | — |
-| 🟡 **TOP2** | Auto-update + code signing — **🤖-część zrobiona** | S/M+M | auto-update (electron-updater + feed GitHub Releases) wpięty już w M15-8; 2026-06-13 dodano: guard `release.yml` (`--publish never`+artifact — CI nie wypchnie niepodpisanego), szablon podpisu SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w `build_sidecar.ps1` (+BOM). **👤-reszta** (cert SimplySign CN/Thumbprint, remote, lokalny podpisany release) → [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md) Krok 6 | ROAD-3.6-a |
+| 🟡 **TOP2** | Auto-update + code signing — **🤖-część zrobiona** | S/M+M | auto-update (electron-updater + feed GitHub Releases) wpięty już w M15-8; 2026-06-13 dodano: guard `release.yml` (`--publish never`+artifact — CI nie wypchnie niepodpisanego), szablon podpisu SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w `build_sidecar.ps1` (+BOM). **👤-reszta** (cert SimplySign CN/Thumbprint, remote, lokalny podpisany release) → [`PLAN_FAZA_B_RUNBOOK.md`](zrealizowane/PLAN_FAZA_B_RUNBOOK.md) Krok 6 | ROAD-3.6-a |
 | ✅ **TOP4** | Katalog MCP one-click — **ZROBIONE** | S/M | kurowany `mcp/catalog.py` (7 serwerów: filesystem/memory/sequential-thinking/everything/github/playwright/brave-search) → `GET /mcp/catalog`; UI „Catalog" w `McpServers.tsx` (one-click + inputy ścieżka/token, podgląd komendy = consent). „Install" reużywa `POST /mcp` z `enabled=False` (**install ≠ autostart**); start = osobna, potwierdzana akcja. Testy: `mcp_check` `test_catalog` (5) + `api_smoke` (route, niezasłonięty przez `/{sid}`) + `mcpCatalog.test.ts` (5) | M16/M14 |
 | ✅ **TOP5** | Artefakty HTML/SVG (sandbox iframe) — **ZROBIONE** (mermaid odłożony) | M | `lib/artifacts.ts` (`buildArtifactSrcDoc`: wstrzyknięty CSP + auto-resize + wrap SVG) + `ArtifactFrame.tsx` (iframe `sandbox="allow-scripts"` BEZ `same-origin` → opaque origin; toggle Preview/Code); `Markdown.tsx` routuje bloki ```html```/```svg``` → artefakt. Bezpieczeństwo: brak dostępu do rodzica/tokenu, CSP blokuje sieć/skrypty zewn./formularze. **Mermaid odłożony** (CSP blokuje skrypt z CDN, a bundlowanie = `npm install mermaid`). Testy: `artifacts.test.ts` (5) + `Markdown.test.tsx` (+4 integ.) | — |
 | ✅ **TOP6** | Recenzja PR przez `gh` — **ZROBIONE** | M | wbudowana komenda `/pr` (review PR przez `gh pr view`/`gh pr diff`; findings z `file:line`) + skill `pr-review` (multi-agent: `delegate` reviewerów po obszarach → konsolidacja → opcjonalny post). Odczyt i publikacja (`gh pr review`) idą przez `run_command` → **bramka zatwierdzania** (mutacje gated). Pułapka udokumentowana: scrubbed env (P0-6) strippuje `GH_TOKEN` → wymaga `gh auth login`. Testy: `api_smoke` `_unit_commands_skills` (2). ⚠️ realny `gh` u usera | `gh` u usera |
@@ -403,7 +403,7 @@ bez bramki, tylko orkiestrator), ikona w `AgentPanel.tsx`. Weryfikacja: `agent_s
 wpięty (M15-8), doszły guard `release.yml` (`--publish never` — CI nie wypchnie niepodpisanego
 buildu), szablon podpisu SimplySign w `electron-builder.yml`, bramkowany podpis sidecara w
 `build_sidecar.ps1` (+UTF-8 BOM dla PS 5.1). YAML/PS zwalidowane. **👤-reszta** (cert SimplySign,
-remote ROAD-3.6-a, lokalny podpisany release) wg [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md)
+remote ROAD-3.6-a, lokalny podpisany release) wg [`PLAN_FAZA_B_RUNBOOK.md`](zrealizowane/PLAN_FAZA_B_RUNBOOK.md)
 Krok 6.
 
 ✅ **TOP3** — **ZROBIONE** (2026-06-13): narzędzie `update_plan` (live checklist jak TodoWrite,

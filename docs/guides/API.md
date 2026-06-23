@@ -259,7 +259,7 @@ A `{"type":"stop"}` frame from the client cancels the in-flight operation.
 | `/voice/stt/stream` | Live streaming STT (partials + final). | partial/final transcript frames |
 
 The exact WS frame protocols are documented in the docstrings atop
-[`routes/chat.py`](../caelo_core/routes/chat.py) and [`routes/agent.py`](../caelo_core/routes/agent.py).
+[`routes/chat.py`](../../caelo_core/routes/chat.py) and [`routes/agent.py`](../../caelo_core/routes/agent.py).
 
 ---
 

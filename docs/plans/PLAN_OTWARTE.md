@@ -2,7 +2,7 @@
 
 > **Cel:** jedno źródło prawdy „**co jeszcze zostało**". Zebrane z audytu dokumentacji
 > planowania (2026-06-17) — pozostałe otwarte pozycje z [`PLAN_NAPRAWY_4.md`](PLAN_NAPRAWY_4.md),
-> [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md), [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)
+> [`PLAN_FAZA_B_RUNBOOK.md`](zrealizowane/PLAN_FAZA_B_RUNBOOK.md), [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)
 > oraz odłożone punkty z ukończonych milestone'ów (archiwum w [`zrealizowane/`](zrealizowane/)).
 > **Gałąź robocza:** `m15-oss-crossplatform` (nie `main`).
 >
@@ -33,7 +33,7 @@
 
 ## 1. Publikacja — Faza B  ✅ DOMKNIĘTA 2026-06-17 (poza public/auto-update)
 
-> **Pełny runbook:** [`PLAN_FAZA_B_RUNBOOK.md`](PLAN_FAZA_B_RUNBOOK.md). Kolejność jest
+> **Pełny runbook:** [`PLAN_FAZA_B_RUNBOOK.md`](zrealizowane/PLAN_FAZA_B_RUNBOOK.md). Kolejność jest
 > **własnością bezpieczeństwa** — `scan-before-public` nieprzekraczalny.
 > **Decyzje (2026-06-12):** repo `AuraVixStudio/caelo` (organizacja); code signing = Asseco
 > **SimplySign** (cert w chmurze → podpis **lokalny**, nie w CI).
@@ -103,8 +103,8 @@
   - [x] **H2** pamięć hybrydowa ⛔ ZABLOKOWANE przez H1 (recall embeduje pierwsze, bez fallbacku FTS → no-op przy 404). · [ ] **H3** sandbox OS (Linux/mac only — Windows no-op) · [x] **H4** web_fetch ✅ (https-only+SSRF+allowlista; opt-in) · [x] **H5** git worktree ✅ (realny `git worktree` subagenta potwierdzony; opt-in) · [x] **H6** auto-compact ✅ selfcheck (live niepraktyczne, próg 48k; opt-in).
 - [x] **I — Pakiety / marketplace** P3 ✅ **2026-06-19** — I1 fetch registry (404 grzecznie obsłużony; ⚠️ **domyślny rejestr nieopublikowany** — URL ustawiony na `AuraVixStudio/caelo-packages`, repo trzeba utworzyć z `registry.json`; import-only/BYO działa bez rejestru), I2 instalacja `.caelopkg` (ConsentCard: typ/wersja/ryzyko/INTEGRITY OK/uprawnienia → Install; round-trip OK), I3 export/share (`plan` → `.caelopkg`). Tamper/strip-sekretów = selfcheck `packages_check` 47/47.
   - [ ] **👤 Follow-up (opcjonalny): opublikować rejestr** — utwórz repo `AuraVixStudio/caelo-packages` (public) i wrzuć
-    [`docs/guides/registry.starter.json`](registry.starter.json) jako `registry.json` na `main` (przewodnik:
-    [`docs/guides/registry.README.md`](registry.README.md)). Domyślny URL już wskazuje na `AuraVixStudio/caelo-packages`
+    [`docs/guides/registry.starter.json`](../guides/registry.starter.json) jako `registry.json` na `main` (przewodnik:
+    [`docs/guides/registry.README.md`](../guides/registry.README.md)). Domyślny URL już wskazuje na `AuraVixStudio/caelo-packages`
     (`config.PACKAGES_REGISTRY_URL`, commit `182bd1b`); do czasu utworzenia repo Browse = 404, ale import-only/BYO działa.
 - [ ] **J — Cross-platform** P3 ⬜ (gdy dostęp do mac/Linux) — J1 build dmg/AppImage/deb, J2 PTY, J3 tree-kill POSIX.
 - [x] **K — Terminal** P3 ✅ **2026-06-23** — K1 pywinpty 3.0.3 + scrubbed env potwierdzony (`echo %XAI_API_KEY%`/
@@ -136,6 +136,17 @@
   kNN poza lockiem; `compute_changes` przez `os.stat`; prune `dirnames` w `glob`; memo `EntryView`.
 - [ ] **4.1-e — API** `[S]` — realne `total` (COUNT), `total_cost` przez SUM, rozróżnienie 4xx w `packages._err`.
 - [ ] **4.1-f — `/genjobs` przez WS-push** `[M]` — hook `on_update` istnieje, nieużyty (po P1-D, który jest zrobiony).
+- [~] **4.1-g — realne koszty z `cost_in_usd_ticks`** `[S/M]` 🤖 🟡 **CZĘŚCIOWO (2026-06-23)** — xAI zwraca realny koszt
+  w `usage.cost_in_usd_ticks` (1 USD = 10^10 ticks; [docs](https://docs.x.ai/developers/cost-tracking)). **Zrobione:**
+  pure helper `config.usd_from_ticks`/`real_cost_from_usage` (+ guard na `bool`); **czat/Responses** — `responses_client`
+  wyprowadza `usage.cost_usd` (już sumowany przez tury), renderer `formatUsage` pokazuje realny koszt (`formatCostUsd`,
+  4dp <$1); **STT** — `voice.py` używa realnego kosztu z `usage`, fallback do szacunku + `cost_source` w meta M9.
+  Selfchecki: `api_smoke` (6 asercji 4.1-g) + `searchState.test.ts` (formatUsage/formatCostUsd). **Zostaje (blokada
+  architektury):** **image/video** (`api_manager.generate_image`/`create_video_job` zwracają tylko url/request_id —
+  ODRZUCAJĄ `usage`; ekspozycja wymaga zmiany **root `api_manager.py`**, którego CLAUDE.md zabrania restrukturyzować)
+  i **TTS** (odpowiedź **binarna**, koszt byłby w nagłówku — nazwa niepotwierdzona live). Te dwa zostają na szacunku
+  z jawnym fallbackiem; pełne domknięcie = osobna, ostrożna zmiana + weryfikacja LIVE. ⚠️ **LIVE:** realne `cost_usd`
+  w czacie/STT wymaga potwierdzenia, że xAI faktycznie odsyła pole (sandbox blokuje API).
 
 ---
 
