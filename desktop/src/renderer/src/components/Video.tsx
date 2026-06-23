@@ -77,12 +77,12 @@ export function Video({ conn }: { conn: Conn }) {
 
   const needsSource = mode === 'edit' || mode === 'extend'
 
-  // Edit/Extend nie działają na modelu "preview" (np. grok-imagine-video-1.5-preview
-  // zwraca 400 na /videos/extensions). Po wejściu w te tryby wybieramy pierwszy
-  // model bez "preview". Ręczny wybór użytkownika nie jest nadpisywany.
+  // Edit/Extend nie działają na modelach 1.5 (grok-imagine-video-1.5 obsługuje tylko
+  // image→video → 400 na /videos/extensions); tylko bazowy grok-imagine-video.
+  // Po wejściu w te tryby wybieramy pierwszy model bez "1.5". Ręczny wybór nie jest nadpisywany.
   useEffect(() => {
-    if (needsSource && model.includes('preview')) {
-      const base = models.find((m) => !m.includes('preview'))
+    if (needsSource && model.includes('1.5')) {
+      const base = models.find((m) => !m.includes('1.5'))
       if (base) setModel(base)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

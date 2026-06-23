@@ -78,10 +78,10 @@ IMAGE_COST_PER_IMAGE = {
 }
 VIDEO_COST_PER_SECOND = {
     "grok-imagine-video": 0.05,              # $0.050 / sec
-    "grok-imagine-video-1.5-preview": 0.08,  # $0.080 / sec (domyślny)
+    "grok-imagine-video-1.5": 0.08,          # $0.080 / sec (domyślny)
 }
 # Stawka, gdy model nieznany/niepodany → model domyślny z config.py
-# (DEFAULT_IMAGE_MODEL = grok-imagine-image, DEFAULT_VIDEO_MODEL = …-video-1.5-preview).
+# (DEFAULT_IMAGE_MODEL = grok-imagine-image, DEFAULT_VIDEO_MODEL = …-video-1.5).
 DEFAULT_IMAGE_COST_PER_IMAGE = 0.02
 DEFAULT_VIDEO_COST_PER_SECOND = 0.08
 

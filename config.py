@@ -352,15 +352,16 @@ IMAGE_MODELS = [
 DEFAULT_IMAGE_MODEL = "grok-imagine-image"
 
 # --- Modele wideo (zakładka Video + komendy czatu /video, narzędzie generate_video) ---
-# Nowszy model preview daje lepszą jakość; starszy zostawiamy jako wybór wsteczny.
+# Nowszy model 1.5 daje lepszą jakość; bazowy zostawiamy jako wybór wsteczny.
+# (xAI zdjęło sufiks `-preview` — `grok-imagine-video-1.5` to teraz stabilne ID; docs 2026-06.)
 VIDEO_MODELS = [
-    "grok-imagine-video-1.5-preview",
+    "grok-imagine-video-1.5",
     "grok-imagine-video",
 ]
-DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5-preview"
-# Model wideo dla CZATU (narzedzie generate_video). Celowo BAZOWY, nie preview:
-# 1.5-preview ma mniej mozliwosci (np. brak edit/extend) niz bazowy grok-imagine-video.
-# Panel Video nadal pozwala wybrac dowolny model (domyslnie 1.5-preview).
+DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5"
+# Model wideo dla CZATU (narzedzie generate_video). Celowo BAZOWY, nie 1.5:
+# 1.5 ma mniej mozliwosci (tylko image->video, brak edit/extend) niz bazowy grok-imagine-video.
+# Panel Video nadal pozwala wybrac dowolny model (domyslnie 1.5).
 # Override: env CAELO_CHAT_VIDEO_MODEL.
 CHAT_VIDEO_MODEL = (os.environ.get("CAELO_CHAT_VIDEO_MODEL", "").strip()
                     or "grok-imagine-video")

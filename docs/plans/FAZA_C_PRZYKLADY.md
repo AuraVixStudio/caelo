@@ -20,7 +20,7 @@ cd desktop; npm run dev          # okno Electrona; brak błędów w DevTools
 - **Testuj na KOPII repo**, nie na oryginale — agent pisze pliki:
   `Copy-Item -Recurse G:\jakies\repo G:\test\repo-kopia`
 - **Modele (z `config.py`):** czat `grok-4.3` · obraz `grok-imagine-image` · wideo
-  `grok-imagine-video-1.5-preview` · głos `grok-voice-latest` · embeddingi `embedding-beta-3-small`.
+  `grok-imagine-video-1.5` · głos `grok-voice-latest` · embeddingi `embedding-beta-3-small` (⛔ xAI 404).
   Wizja/dokumenty wymagają rodziny **grok-4**.
 - **⚠️ Backend NIE hot-reloaduje** — po każdej zmianie pliku `.caelo/*.json`, `lsp.json`, env (`$env:CAELO_*`)
   zrób **pełny restart `npm run dev`** (Ctrl+C + ponownie). Vite HMR odświeża tylko renderer.
