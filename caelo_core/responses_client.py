@@ -461,6 +461,13 @@ def stream_response(
                 "output": str(result),
             })
 
+    # 4.1-g: REALNY koszt z `usage.cost_in_usd_ticks` (sumowany przez tury pętli narzędzi
+    # razem z tokenami powyżej) → wygodne pole `cost_usd` dla konsumentów. Brak pola =
+    # brak `cost_usd` (renderer nie pokazuje kosztu zamiast szacować w czacie).
+    real_cost = config.real_cost_from_usage(usage)
+    if real_cost is not None:
+        usage["cost_usd"] = real_cost
+
     return {
         "text": "".join(parts),
         "citations": list(citations.values()),

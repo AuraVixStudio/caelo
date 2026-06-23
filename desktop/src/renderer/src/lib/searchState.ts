@@ -63,7 +63,13 @@ export function formatTokens(n: number): string {
   return String(n)
 }
 
-/** Compact usage summary, e.g. "2 searches · 1.2k tokens". Empty when nothing to show. */
+/** Format a USD cost, e.g. "$0.0234" (4dp under $1 — API costs are sub-dollar, 2dp above). */
+export function formatCostUsd(usd: number): string {
+  return `$${usd.toFixed(usd < 1 ? 4 : 2)}`
+}
+
+/** Compact usage summary, e.g. "2 searches · 1.2k tokens · $0.0234". Empty when nothing to show.
+ *  cost_usd (4.1-g) is the REAL cost from xAI; shown only when present (no estimate in chat). */
 export function formatUsage(usage: ChatUsage | undefined): string {
   if (!usage) return ''
   const parts: string[] = []
@@ -71,5 +77,7 @@ export function formatUsage(usage: ChatUsage | undefined): string {
   if (calls > 0) parts.push(`${calls} ${calls === 1 ? 'search' : 'searches'}`)
   const tokens = (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)
   if (tokens > 0) parts.push(`${formatTokens(tokens)} tokens`)
+  const cost = usage.cost_usd
+  if (typeof cost === 'number' && cost > 0) parts.push(formatCostUsd(cost))
   return parts.join(' · ')
 }

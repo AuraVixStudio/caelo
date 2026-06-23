@@ -6,7 +6,8 @@ import {
   dedupeCitations,
   citationHost,
   citationLabel,
-  formatUsage
+  formatUsage,
+  formatCostUsd
 } from '../src/renderer/src/lib/searchState'
 
 describe('searchActivityLabel', () => {
@@ -99,5 +100,21 @@ describe('formatUsage', () => {
   it('omits zero parts and handles undefined', () => {
     expect(formatUsage({ tool_calls: 0, input_tokens: 0, output_tokens: 0 })).toBe('')
     expect(formatUsage(undefined)).toBe('')
+  })
+  it('appends real cost_usd when present (4.1-g)', () => {
+    expect(formatUsage({ output_tokens: 50, cost_usd: 0.025 })).toBe('50 tokens · $0.0250')
+    expect(formatUsage({ tool_calls: 1, output_tokens: 50, cost_usd: 1.5 })).toBe(
+      '1 search · 50 tokens · $1.50'
+    )
+    // absent/zero cost → no cost segment (no estimate in chat)
+    expect(formatUsage({ output_tokens: 50 })).toBe('50 tokens')
+    expect(formatUsage({ output_tokens: 50, cost_usd: 0 })).toBe('50 tokens')
+  })
+})
+
+describe('formatCostUsd', () => {
+  it('uses 4dp under a cent, 2dp above (4.1-g)', () => {
+    expect(formatCostUsd(0.0234)).toBe('$0.0234')
+    expect(formatCostUsd(1.5)).toBe('$1.50')
   })
 })

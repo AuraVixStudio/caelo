@@ -28,6 +28,7 @@ export interface ChatUsage {
   tool_calls?: number
   input_tokens?: number
   output_tokens?: number
+  cost_usd?: number // 4.1-g: REAL cost from xAI usage.cost_in_usd_ticks (absent = no real cost)
 }
 
 export interface ChatMessage {

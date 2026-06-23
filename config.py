@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 _log = logging.getLogger("caelo.config")
 
@@ -386,6 +387,30 @@ STT_STREAM_URL = API_BASE.replace("http", "ws") + "/stt"
 STT_COST_PER_HOUR_BATCH = 0.10
 STT_COST_PER_HOUR_STREAM = 0.20
 TTS_COST_PER_1K_CHARS = 0.015
+
+# 4.1-g: REALNY koszt z xAI „cost tracking". Każda odpowiedź API niesie
+# `usage.cost_in_usd_ticks` (dokładny koszt żądania, NIE szacunek) — czat/Responses,
+# image/video, streaming (w finalnym chunku). 1 USD = 10^10 ticks (precyzja bez
+# błędów zaokrągleń float). Patrz https://docs.x.ai/developers/cost-tracking.
+# Gdy pole obecne → używamy go zamiast lokalnych szacunków (rate'y wyżej zostają fallbackiem).
+USD_TICKS_PER_DOLLAR = 10_000_000_000
+
+
+def usd_from_ticks(ticks) -> Optional[float]:
+    """`cost_in_usd_ticks` (int/float) → USD; None gdy brak/niepoprawny typ."""
+    if isinstance(ticks, bool):  # bool jest podtypem int — odrzuć jawnie
+        return None
+    if isinstance(ticks, (int, float)):
+        return ticks / USD_TICKS_PER_DOLLAR
+    return None
+
+
+def real_cost_from_usage(usage) -> Optional[float]:
+    """REALNY koszt USD z `usage.cost_in_usd_ticks`, lub None gdy pola brak
+    (wywołujący spada wtedy na lokalny szacunek)."""
+    if isinstance(usage, dict):
+        return usd_from_ticks(usage.get("cost_in_usd_ticks"))
+    return None
 
 # --- Design Tokens (AI Studio Pro) ---
 COLORS = {

@@ -48,7 +48,8 @@ def _unit_responses_client(checks: list) -> None:
                 "annotation": {"type": "url_citation", "url": "https://x.com/a", "title": "A"}}),
         b"",
         _frame({"type": "response.completed", "response": {
-            "usage": {"input_tokens": 12, "output_tokens": 34},
+            "usage": {"input_tokens": 12, "output_tokens": 34,
+                      "cost_in_usd_ticks": 250_000_000},  # 4.1-g: 2.5e8 / 1e10 = $0.025
             "output": [{"type": "message", "content": [
                 {"type": "output_text", "text": text, "annotations": [
                     {"type": "url_citation", "url": "https://x.com/a", "title": "A"},
@@ -120,6 +121,18 @@ def _unit_responses_client(checks: list) -> None:
     checks.append(("responses: citations parsed + deduped",
                    cit_urls == ["https://ex.com/n", "https://x.com/a"]))
     checks.append(("responses: usage captured", res["usage"].get("output_tokens") == 34))
+    # 4.1-g: REAL cost from usage.cost_in_usd_ticks (2.5e8 ticks / 1e10 = $0.025).
+    checks.append(("responses: cost_usd from cost_in_usd_ticks (4.1-g)",
+                   res["usage"].get("cost_usd") == 0.025))
+    import config as _cfg  # noqa: E402  (helper jednostkowo: konwersja + brak-pola)
+    checks.append(("cost: usd_from_ticks 1e10 == $1 (4.1-g)", _cfg.usd_from_ticks(10_000_000_000) == 1.0))
+    checks.append(("cost: usd_from_ticks(None) is None (4.1-g)", _cfg.usd_from_ticks(None) is None))
+    checks.append(("cost: usd_from_ticks(True) is None (bool guard, 4.1-g)",
+                   _cfg.usd_from_ticks(True) is None))
+    checks.append(("cost: real_cost_from_usage real (4.1-g)",
+                   _cfg.real_cost_from_usage({"cost_in_usd_ticks": 5_000_000_000}) == 0.5))
+    checks.append(("cost: real_cost_from_usage absent -> None (4.1-g)",
+                   _cfg.real_cost_from_usage({"input_tokens": 1}) is None))
     checks.append(("responses: mode=off attaches no tools", rc.build_search_tools("off") is None))
     # M19-B9: reasoning_effort → `reasoning.effort` w payloadzie (tylko gdy poprawny).
     checks.append(("responses: reasoning_effort -> reasoning.effort in payload (B9)",

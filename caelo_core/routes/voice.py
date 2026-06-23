@@ -131,13 +131,19 @@ def voice_stt(req: STTReq, b: Backend = Depends(get_backend)) -> dict:
         duration = float(result.get("duration") or 0.0)
     except (TypeError, ValueError):
         duration = 0.0
-    cost = stt_cost(duration, streaming=False)
+    # 4.1-g: jeśli xAI dołączył REALNY koszt (`usage.cost_in_usd_ticks`) — użyj go;
+    # inaczej spadnij na szacunek z czasu trwania. `cost_source` informuje UI/meta.
+    real_cost = config.real_cost_from_usage(result.get("usage"))
+    cost = real_cost if real_cost is not None else stt_cost(duration, streaming=False)
+    cost_source = "real" if real_cost is not None else "estimate"
     result["cost"] = cost
+    result["cost_source"] = cost_source
     # M9-B2: transkrypt trafia do wspólnej historii huba (przeszukiwalny). Błędy połykane.
     transcript = result.get("text") if isinstance(result, dict) else None
     if transcript:
         b.record_event(mode="voice", text=transcript,
-                       meta={"op": "stt", "duration": duration, "cost": cost})
+                       meta={"op": "stt", "duration": duration, "cost": cost,
+                             "cost_source": cost_source})
     return result
 
 
