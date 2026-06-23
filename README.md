@@ -4,8 +4,8 @@
 
 # Caelo
 
-**Caelo** is an independent, open-source **desktop client for the xAI Grok API**,
-in the style of **Claude Code / Codex** — chat, image & video generation/editing,
+**Caelo** is an independent, open-source **desktop client for the xAI Grok API** —
+chat, image & video generation/editing,
 voice, and an **agentic coding module** with local file access (read/edit, run
 commands, project tree, diff preview, and change approval).
 
