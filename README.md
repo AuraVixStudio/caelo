@@ -23,6 +23,8 @@
   <a href="https://auravixstudio.github.io/caelo/"><b>🌐 Website</b></a>
   &nbsp;·&nbsp;
   <a href="docs/guides/USER_GUIDE.md"><b>📖 User Guide</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://buymeacoffee.com/auravixstudio"><b>☕ Support</b></a>
 </p>
 
 <p align="center">
@@ -204,6 +206,16 @@ The architecture source of truth for contributors is [`CLAUDE.md`](CLAUDE.md).
 
 Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [`CLA`](CLA.md),
 and please follow the [`Code of Conduct`](CODE_OF_CONDUCT.md).
+
+## ☕ Support
+
+Caelo is free and open source. If it's useful to you, you can support its development:
+
+<p>
+  <a href="https://buymeacoffee.com/auravixstudio"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-AuraVix%20Studio-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee" /></a>
+</p>
+
+Every coffee helps keep the project maintained and the updates coming. Thank you! 💜
 
 ## 📄 License &amp; trademarks
 
