@@ -149,17 +149,23 @@ per-char is a **tunable estimate**) → response fields + M9 meta; renderer accu
 (like M11). Voice defaults (`voice`/`voice_language`) live in `caelo_settings.json`. Dictation
 (`useDictation` in chat + agent) uses **batch** STT; live partials are the **Talk** mode. Selfcheck:
 `api_smoke.py` `_unit_voice_converse` (pipeline + barge-in + cost) + WS bad-token rejection for the
-new routes. ⚠️ **xAI streaming-STT (`/v1/stt`) is CONFIRMED incompatible (LIVE D3, 2026-06-19):** the
-endpoint connects + sends `transcript.created` but **rejects** our realtime-style frames with
-`error: unknown variant input_audio_buffer.append, expected audio.done` — it wants a different
-(binary) format, undocumented. This is NOT a bridge bug (Live/`/v1/realtime` shares `_bridge_upstream`
-and works, because realtime genuinely uses `input_audio_buffer.append`). **Decision:** the **Talk** mode
-([`lib/converse.ts`](desktop/src/renderer/src/lib/converse.ts)) drives its STT half via the working
-**batch `/voice/stt`** with a **local VAD** (`AnalyserNode` RMS + auto-stop on ~1.5 s silence,
-`computeRms` is pure/tested), NOT the stream — barge-in preserved, live partials dropped (the stream
-never delivered them). `parseStt` + the `/voice/stt/stream` proxy stay in the tree in case xAI documents
-the endpoint; don't re-wire Talk back to the stream without confirming the protocol live (guarded by
-`desktop/test/voice.test.ts`: no `input_audio_buffer` send + batch `speechToText`).
+new routes. ⚠️ **xAI streaming-STT (`/v1/stt`) — our LIVE D3 attempt (2026-06-19) sent the WRONG frame format**: the
+endpoint connects + sends `transcript.created` but **rejected** our realtime-style frames with
+`error: unknown variant input_audio_buffer.append, expected audio.done`. We deferred it as "undocumented".
+**UPDATE (docs review 2026-06-23): the streaming-STT protocol IS now documented** ([Speech to Text |
+xAI Docs](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text)) and the error was telling
+the truth: the client must stream **RAW AUDIO as BINARY WS frames** (NOT JSON `input_audio_buffer.append`),
+end with `{"type":"audio.done"}` → `transcript.done`; config via query-params (`sample_rate` ∈
+8000/16000/22050/24000/44100/48000, `encoding` ∈ pcm-s16le/mulaw/alaw). xAI also added server **"Smart Turn"**
+end-of-turn detection. So D3 is **NOT a dead end — it's an open follow-up**: rewire `/voice/stt/stream` +
+[`lib/converse.ts`](desktop/src/renderer/src/lib/converse.ts) to send binary PCM frames + `audio.done`
+instead of `input_audio_buffer.append` (Live/`/v1/realtime` genuinely uses `input_audio_buffer.append`, so
+that bridge is unaffected). **Current Decision (until the rewire lands):** the **Talk** mode drives its STT
+half via the working **batch `/voice/stt`** with a **local VAD** (`AnalyserNode` RMS + auto-stop on ~1.5 s
+silence, `computeRms` is pure/tested) — barge-in preserved, live partials dropped. `parseStt` + the
+`/voice/stt/stream` proxy stay in the tree; before re-wiring Talk to the stream, implement the BINARY+
+`audio.done` protocol above and confirm live (guarded by `desktop/test/voice.test.ts`: no
+`input_audio_buffer` send + batch `speechToText`).
 
 **Extensibility = MCP + commands + hooks + skills (M14, see [`docs/plans/zrealizowane/PLAN_M14_ROZSZERZALNOSC.md`](docs/plans/zrealizowane/PLAN_M14_ROZSZERZALNOSC.md)):**
 the hub became a **programmable platform** — tools serve chat AND the agent. The **MCP client** is a
