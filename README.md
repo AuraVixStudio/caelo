@@ -1,32 +1,176 @@
 <p align="center">
-  <img src="assets/brand/og-banner.png" alt="Caelo — every mode under one sky" width="640" />
+  <img src="assets/brand/og-banner.png" alt="Caelo — every mode under one sky" width="720" />
 </p>
 
-# Caelo
+<h3 align="center">Every mode of xAI's Grok — in one desktop app.</h3>
 
-**Caelo** is an independent, open-source **desktop client for the xAI Grok API** —
-chat, image & video generation/editing,
-voice, and an **agentic coding module** with local file access (read/edit, run
-commands, project tree, diff preview, and change approval).
+<p align="center">
+  Chat, image &amp; video, voice, and an <b>agentic coding module</b> — unified behind one hub.<br/>
+  <b>Bring your own key. No telemetry. Open source.</b>
+</p>
 
-It is **bring-your-own-key (BYO-key)**: you supply your own xAI credentials, they
-stay on your machine, and they are sent **only** to `api.x.ai`. Caelo collects **no
-telemetry**.
+<p align="center">
+  <a href="https://github.com/AuraVixStudio/caelo/releases/latest"><img src="https://img.shields.io/github/v/release/AuraVixStudio/caelo?style=flat-square&label=download&color=8b5cf6" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3b82f6?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows-0a7bce?style=flat-square&logo=windows&logoColor=white" alt="Platform" />
+  <a href="https://github.com/AuraVixStudio/caelo/releases"><img src="https://img.shields.io/github/downloads/AuraVixStudio/caelo/total?style=flat-square&color=22c55e&label=downloads" alt="Downloads" /></a>
+  <a href="https://github.com/AuraVixStudio/caelo/stargazers"><img src="https://img.shields.io/github/stars/AuraVixStudio/caelo?style=flat-square&color=eab308" alt="Stars" /></a>
+</p>
 
-> Caelo is not affiliated with, endorsed by, or sponsored by xAI. "Grok", "SuperGrok",
-> and "xAI" are trademarks of xAI Corp; they are used here only to describe
-> interoperability (see [`NOTICE`](NOTICE)).
+<p align="center">
+  <a href="https://github.com/AuraVixStudio/caelo/releases/latest"><b>⬇️ Download for Windows</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://auravixstudio.github.io/caelo/"><b>🌐 Website</b></a>
+  &nbsp;·&nbsp;
+  <a href="docs/guides/USER_GUIDE.md"><b>📖 User Guide</b></a>
+</p>
 
-> **License:** [Apache-2.0](LICENSE). Contributions are welcome — see
-> [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [`CLA`](CLA.md).
-
-This monorepo is an **Electron (frontend) + Python sidecar (backend)** application.
-The mature xAI logic (OAuth, SSE streaming, media) is **reused, not rewritten**.
-The architecture source of truth for contributors is [`CLAUDE.md`](CLAUDE.md).
+<p align="center">
+  <img src="assets/screenshots/hero.png" alt="Caelo — main interface" width="900" />
+</p>
 
 ---
 
-## Architecture
+## ✨ What is Caelo?
+
+**Caelo** is an independent, open-source **desktop client for the xAI Grok API**. Instead of
+five separate tools, it puts the entire Grok surface behind **one shared backbone** — context,
+history, projects and cost flow across every mode:
+
+> 💬 **Chat** &nbsp;·&nbsp; 🎨 **Image &amp; Video** &nbsp;·&nbsp; 🎙️ **Voice** &nbsp;·&nbsp; ⌨️ **Agentic coder** &nbsp;·&nbsp; 🧩 **Extensions**
+
+It's **bring-your-own-key**: you supply your own xAI credentials, they stay on your machine, and
+they're sent **only** to `api.x.ai`. No accounts, no middleman, no telemetry.
+
+## 🚀 Highlights
+
+|  |  |
+|---|---|
+| 🔑 **Bring your own key** | Sign in with your xAI account (OAuth) or paste an API key. It never leaves your machine and is never returned by the local API. |
+| 🛡️ **Private by design** | Backend binds to `127.0.0.1` only, every request is token-authenticated, and the key never reaches the renderer. Zero telemetry. |
+| ⌨️ **Real coding agent** | Sandboxed file tools, unified diff approval, 4 trust modes, checkpoints &amp; undo, project rules (`CAELO.md`), and parallel **subagent teams**. |
+| 🔎 **Live search &amp; vision** | Web &amp; X search with clickable citations, image understanding, and document Q&amp;A — with a live token/cost counter. |
+| 🧩 **Extensible** | MCP servers (local + remote), slash commands, hooks, skills, a package marketplace, headless CLI, plus ACP &amp; LSP. |
+| 🔄 **Auto-updating** | Signed installer with delta updates via `electron-updater`. |
+
+## 🖼️ Take a look
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/chat.png" alt="Chat with live search and citations" /><br/>
+      <sub><b>Chat</b> — live web/X search, citations &amp; cost counter</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/code.png" alt="Coding agent with diff approval" /><br/>
+      <sub><b>Code</b> — agent with diff approval &amp; checkpoints</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/image.png" alt="Image generation and gallery" /><br/>
+      <sub><b>Image &amp; Video</b> — generate, edit, and a unified gallery</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="assets/screenshots/voice.png" alt="Voice module" /><br/>
+      <sub><b>Voice</b> — speak, transcribe, Talk &amp; realtime Live</sub>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="assets/screenshots/extensions.png" alt="Extensions — MCP servers, skills, commands" width="900" /><br/>
+      <sub><b>Extensions</b> — MCP servers, skills, commands, hooks &amp; a package marketplace</sub>
+    </td>
+  </tr>
+</table>
+
+## 🧭 The modules
+
+- **💬 Chat** — streaming multi-conversation chat with a model picker, system prompt &amp;
+  temperature, markdown + code, attachments (image/file), **live web/X search**, vision,
+  document Q&amp;A with citations, and voice (TTS replies + STT dictation).
+- **⌨️ Code** — a mini-IDE: file tree, CodeMirror editor, terminal, and an **agent** with file
+  tools and **approval cards** (Accept / Reject / Always) + diff preview, checkpoints/undo,
+  plan mode, per-project rules (`CAELO.md`), and **subagent teams** with merge review.
+- **🎨 Image** — generate and edit images in one panel (no refs → generate, with refs → edit),
+  model picker, and variations.
+- **🎬 Video** — text→video and image→video generation, plus edit and extend.
+- **🎙️ Voice** — Speak (TTS), Transcribe (STT), Talk (voice conversation), and Live (realtime).
+- **🗂️ History &amp; Gallery** — a searchable artifact &amp; generation history (SQLite + FTS5),
+  scoped to projects; send artifacts between modes.
+- **🧩 Extensions** — MCP servers, slash commands, hooks, skills, and a package marketplace.
+
+## 🔐 Privacy &amp; security
+
+Caelo is **local-first** and sends **no telemetry** — no analytics endpoint, no usage reporting.
+A fresh install talks only to `api.x.ai` (with your key, for the features you use) and to GitHub
+Releases (to check for updates — skippable).
+
+- Backend listens on **127.0.0.1 only**, never exposed to the network.
+- REST requires `Authorization: Bearer <token>`; WebSockets take the token via query — both **fail-closed**.
+- The xAI bearer token is sent **only** to `api.x.ai` and **never reaches the renderer**.
+- Agent file operations are **sandboxed** to the workspace; writes and shell commands require
+  **approval**, and run with a **secret-free** environment.
+
+Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
+
+## ⬇️ Install
+
+**For users** — download the signed installer from the
+**[latest release](https://github.com/AuraVixStudio/caelo/releases/latest)**, run it, then open
+**Settings** and sign in with your xAI account or paste an API key. That's it.
+
+<details>
+<summary><b>For developers — run from source</b></summary>
+
+**Requirements:** Node.js ≥ 20 (tested on v22) · Python 3.10+ · an xAI account or API key.
+
+```powershell
+# 1) Backend (caelo_core) — isolated venv
+cd caelo_core
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+#   behind a TLS-intercepting proxy, add:  --trusted-host pypi.org --trusted-host files.pythonhosted.org
+cd ..
+
+# 2) Frontend (desktop)
+cd desktop
+npm install
+npm run dev      # launches the Electron window and spawns the backend
+```
+
+`npm run dev` starts electron-vite (HMR); the main process spawns the sidecar, reads the
+handshake (port + token), and connects over `127.0.0.1`. Python is located via
+`CAELO_CORE_PYTHON` (env) → `caelo_core/.venv/Scripts/python.exe` → system `python`.
+
+Auth precedence: **OAuth access token → saved API key → `XAI_API_KEY` from `.env`**.
+
+</details>
+
+<details>
+<summary><b>Packaging &amp; self-checks</b></summary>
+
+```powershell
+# Build the Windows installer
+cd desktop
+npm run dist:full      # PyInstaller sidecar + electron-builder NSIS → desktop/dist/Caelo-Setup-*.exe
+
+# Backend self-checks (mocks where xAI is needed), from the repo root
+caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt   # one-time: pytest
+caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v
+
+# Frontend
+cd desktop && npm run typecheck && npm run lint && npm test
+```
+
+macOS (dmg) and Linux (AppImage/deb) targets are configured but built on demand on a per-OS runner.
+
+</details>
+
+## 🏗️ Architecture
+
+**Electron (frontend) + Python sidecar (backend).** The mature xAI logic (OAuth, SSE streaming,
+media) is **reused, not rewritten**.
 
 ```
 ┌──────────────────────── Electron (main process) ──────────────────────────┐
@@ -47,160 +191,24 @@ The architecture source of truth for contributors is [`CLAUDE.md`](CLAUDE.md).
               ▼  xAI / Grok API
 ```
 
-The backend binds **127.0.0.1 only** and authenticates every request with a session
-token generated by the main process. See [`CLAUDE.md`](CLAUDE.md) for the full
-handshake, auth precedence, and security model.
+The architecture source of truth for contributors is [`CLAUDE.md`](CLAUDE.md).
 
-## Requirements
+## 📚 Documentation
 
-- **Node.js ≥ 20** (tested on v22)
-- **Python 3.10+** (tested on 3.10 / 3.11)
-- Windows is the primary platform today. The codebase is platform-neutral; macOS /
-  Linux builds are producible on demand (PTY, process-kill, and data paths are
-  abstracted per-OS).
-- An **xAI account or API key** (BYO-key — see below).
+- [**User Guide**](docs/guides/USER_GUIDE.md) — every module, step by step.
+- [**API reference**](docs/guides/API.md) — backend REST/WebSocket API (96 routes + 6 WS).
+- [**CLAUDE.md**](CLAUDE.md) — architecture source of truth + hardening history.
+- [**Docs index**](docs/README.md) · [**Changelog**](CHANGELOG.md) · [**Roadmap**](docs/plans/PLAN_OTWARTE.md)
 
-## Quickstart (BYO-key)
+## 🤝 Contributing
 
-**1) Get xAI credentials (one of):**
+Contributions are welcome! See [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [`CLA`](CLA.md),
+and please follow the [`Code of Conduct`](CODE_OF_CONDUCT.md).
 
-- An **API key** from the xAI developer console (`https://console.x.ai`), or
-- An **xAI account** (SuperGrok / X Premium+) to sign in via OAuth inside the app.
+## 📄 License &amp; trademarks
 
-**2) Backend (`caelo_core`) — isolated venv:**
+Licensed under [**Apache-2.0**](LICENSE). © 2026 AuraVix Studio.
 
-```powershell
-cd caelo_core
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt   # or -r requirements.lock for pinned versions
-# behind a TLS-intercepting proxy, add:
-#   --trusted-host pypi.org --trusted-host files.pythonhosted.org
-cd ..
-```
-
-**3) Frontend (`desktop`):**
-
-```powershell
-cd desktop
-npm install      # one-time (or after dependency changes)
-npm run dev      # launches the Electron window and spawns the backend
-```
-
-`npm run dev` starts electron-vite (HMR); the main process spawns the sidecar,
-reads the handshake (port + token), and connects over `127.0.0.1`.
-
-> The main process locates Python in this order: `CAELO_CORE_PYTHON` (env) →
-> `caelo_core/.venv/Scripts/python.exe` → system `python`.
-
-**4) Add your key in the app:** open **Settings** and either
-
-- **Sign in** with your xAI account (OAuth), or
-- paste your **API key**, or
-- create a `.env` file at the repo root with `XAI_API_KEY=sk-...` (gitignored).
-
-Auth precedence is: OAuth access token → saved API key → `XAI_API_KEY` from `.env`.
-Your key is stored locally, **never returned** by the API (`/settings` exposes only
-`has_api_key`), and sent **only** to `api.x.ai`.
-
-That's it — start chatting, generate media, or open a workspace in the **Code**
-module to use the agent.
-
-> **New to the app?** The **[User Guide](docs/guides/USER_GUIDE.md)** walks through every module
-> (Chat, Code, Image, Video, Gallery, Voice, History, Extensions, Settings) step by step.
-> Integrating? See the **[API reference](docs/guides/API.md)**.
-
-## Modules
-
-- **Chat** — streaming, multi-conversation, model picker, system prompt +
-  temperature, markdown + code, attachments (image/file), live web/X search,
-  vision, document Q&A with citations, and voice (TTS replies + STT dictation).
-- **Code** — mini-IDE: file tree, CodeMirror editor, terminal (xterm), and an
-  **agent chat** with file tools and **approval cards** (Accept/Reject/Always) +
-  diff preview, checkpoints/undo, plan mode, and per-project rules (`CAELO.md`).
-- **Image** — generate and edit images in one panel (no refs → generate, with refs
-  → edit), model picker, variations.
-- **Video** — text→video / image→video generation, plus edit and extend.
-- **Voice** — Speak (TTS), Transcribe (STT), Talk, and Live (realtime over WS).
-- **History** — searchable artifact & generation history (SQLite + FTS5), projects.
-- **Extensions** — MCP servers, slash commands, hooks, and skills.
-- **Settings** — xAI account/key, output folder, default models, agent permissions.
-
-## Privacy & telemetry
-
-Caelo sends **no telemetry** — there is no analytics endpoint and no usage
-reporting. A fresh install talks only to:
-
-- `api.x.ai` — with your key, for the features you use, and
-- GitHub Releases — to check for application updates (this is the only outbound
-  network call Caelo itself makes; update checks can be skipped).
-
-Your credentials and data (conversations, history, generated media, project
-knowledge) stay on your machine. See [`SECURITY.md`](SECURITY.md).
-
-## Security
-
-- Backend listens on **127.0.0.1 only** (never exposed to the network).
-- REST requires `Authorization: Bearer <token>`; WebSockets take the token via
-  query (`?token=`). Both are **fail-closed**.
-- The xAI bearer token is sent **only** to `api.x.ai` and never reaches the renderer.
-- Agent file operations are **sandboxed** to the workspace; file changes and shell
-  commands require **approval**. `run_command`, the terminal, and MCP subprocesses
-  run with a **secret-free** environment.
-
-Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
-
-## Backend self-checks
-
-Each script in `caelo_core/tools/` is a self-contained suite (mocks where xAI is
-needed). Run them all via **pytest** (P3-13) from the **repo root**:
-
-```powershell
-caelo_core\.venv\Scripts\pip install -r caelo_core\requirements-dev.txt   # one-time: pytest
-caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v             # all suites
-caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -k api_smoke   # one suite (-k filter)
-```
-
-Each suite is also runnable directly as a standalone script:
-
-```powershell
-caelo_core\.venv\Scripts\python caelo_core\tools\handshake_check.py      # handshake + /health + token auth
-caelo_core\.venv\Scripts\python caelo_core\tools\api_smoke.py            # REST + WS routes + token/CORS
-caelo_core\.venv\Scripts\python caelo_core\tools\agent_selfcheck.py      # agent tools + loop + sandbox
-caelo_core\.venv\Scripts\python caelo_core\tools\crossplatform_check.py  # PTY / tree-kill / paths per-OS
-caelo_core\.venv\Scripts\python caelo_core\tools\mcp_check.py            # MCP client (mock stdio server)
-caelo_core\.venv\Scripts\python caelo_core\tools\genjobs_check.py        # generation queue lifecycle
-caelo_core\.venv\Scripts\python caelo_core\tools\history_check.py        # SQLite hub backbone
-```
-
-Frontend: `cd desktop && npm run typecheck && npm run lint && npm test`.
-
-## Packaging (Windows)
-
-```powershell
-cd desktop
-npm run pack:sidecar   # PyInstaller onedir → ../dist/caelo-core/caelo-core.exe
-npm run dist           # frontend build + electron-builder NSIS → desktop/dist/Caelo-Setup-*.exe
-npm run dist:full      # all of the above
-```
-
-macOS (dmg) and Linux (AppImage/deb) targets are configured but built on demand on
-a per-OS runner (cross-compiling PyInstaller is impractical).
-
-## Known limitations
-
-- Real xAI calls (chat content, image/video, OAuth login, full agent runs) require
-  valid credentials and network; the self-checks mock xAI.
-- The **Terminal** module needs `pip install pywinpty` in the backend venv (on
-  Windows); the agent's `run_command` tool works without it.
-- The editor is **CodeMirror 6** (deliberately, not Monaco).
-
-## Documentation
-
-- [`docs/guides/USER_GUIDE.md`](docs/guides/USER_GUIDE.md) — **end-user guide**: every module, step by step.
-- [`docs/guides/API.md`](docs/guides/API.md) — backend **REST/WebSocket API reference** (96 routes + 6 WS).
-- [`CLAUDE.md`](CLAUDE.md) — architecture source of truth + hardening history.
-- [`docs/README.md`](docs/README.md) — documentation index (guides + plans).
-- [`docs/plans/REBUILD_PLAN.md`](docs/plans/REBUILD_PLAN.md) — the rebuild plan and phase status;
-  [`docs/plans/PLAN_ROZBUDOWY.md`](docs/plans/PLAN_ROZBUDOWY.md) — the all-in-one hub roadmap (M9–M19).
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) ·
-  [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [`CLA.md`](CLA.md).
+> Caelo is an independent project and is **not affiliated with, endorsed by, or sponsored by xAI**.
+> "Grok", "SuperGrok", and "xAI" are trademarks of xAI Corp; they are used here only to describe
+> interoperability (see [`NOTICE`](NOTICE)).
