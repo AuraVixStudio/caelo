@@ -38,6 +38,6 @@ jobs:
           # URL rozwiązuje się do faktycznego repo po publikacji (server_url/owner/repo).
           path-to-document: '${{ github.server_url }}/${{ github.repository }}/blob/main/CLA.md'
           branch: 'main'
-          allowlist: 'dependabot[bot],bot*'
+          allowlist: 'dependabot[bot],bot*,AuraVixStudio'
           custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
           custom-allsigned-prcomment: 'All contributors have signed the CLA. Thank you!'
