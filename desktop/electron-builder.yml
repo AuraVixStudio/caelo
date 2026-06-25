@@ -77,8 +77,8 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   # Cert (CSC_LINK/CSC_KEY_PASSWORD) + dane notaryzacji (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/
   # APPLE_TEAM_ID) electron-builder czyta z ENV (ustawiane z sekretów w release.yml).
-  # Brak certu → build NIEPODPISANY (bez notaryzacji), ale wciąż się produkuje.
-  notarize: true
+  # Notaryzacja NIE jest tu włączona na sztywno — workflow dokłada `-c.mac.notarize=true`
+  # TYLKO gdy cert jest obecny, więc build bez sekretów daje czysty NIEPODPISANY .dmg.
 
 linux:
   target:

@@ -100,12 +100,26 @@ jobs:
         working-directory: desktop
         run: npm run build
 
-      # ROAD-TOP2 / Krok 6.4: `--publish never` — CI NIE może podpisać (cert chmurowy
-      # SimplySign jest lokalny), więc nie publikujemy. Build waliduje pakowanie cross-OS.
-      # `matrix.ebuild` = platforma+arch (np. `--mac --arm64`); flagi CLI nadpisują arch z konfiga.
-      - name: Build installer (UNSIGNED — validation only, never published)
+      # `--publish never` — CI nie publikuje wydania (robi to user lokalnie). `matrix.ebuild`
+      # = platforma+arch (np. `--mac --arm64`); flagi CLI nadpisują arch z konfiga.
+      #
+      # Podpis macOS jest OPCJONALNY i sterowany obecnością sekretu MAC_CSC_LINK:
+      #  • brak certu → USUWAMY puste zmienne podpisu (inaczej electron-builder bierze pusty
+      #    CSC_LINK za ścieżkę certu i pada „... not a file") → czysty NIEPODPISANY .dmg;
+      #  • cert obecny → dokładamy `-c.mac.notarize=true` → podpis Developer ID + notaryzacja.
+      - name: Build installer (signs + notarizes macOS only if MAC_CSC_LINK secret is set)
         working-directory: desktop
-        run: npx --no-install electron-builder ${{ matrix.ebuild }} --publish never
+        shell: bash
+        run: |
+          EXTRA=""
+          if [ -n "$CSC_LINK" ]; then
+            echo "Signing certificate present → enabling notarization."
+            EXTRA="-c.mac.notarize=true"
+          else
+            echo "No signing certificate → building UNSIGNED (dropping empty signing vars)."
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+          fi
+          npx --no-install electron-builder ${{ matrix.ebuild }} $EXTRA --publish never
 
       # Artefakty do wglądu/diagnostyki builda (NIE są wydaniem). Pełne, PODPISANE wydanie
       # Windows publikuje user lokalnie (SimplySign Desktop aktywny) — runbook Krok 6.4.
