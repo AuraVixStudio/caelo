@@ -32,12 +32,13 @@ jobs:
       # Maca budują się na ODDZIELNYCH runnerach: macos-13 (Intel/x64) + macos-14
       # (Apple Silicon/arm64). `ebuild` mówi electron-builderowi, którą platformę+arch
       # spakować (flagi CLI nadpisują arch z electron-builder.yml).
+      # Windows NIE buduje się tutaj: podpis Authenticode używa certu CHMUROWEGO
+      # SimplySign, który istnieje WYŁĄCZNIE lokalnie na maszynie utrzymującego
+      # (SimplySign Desktop, karta wirtualna) — runner GitHuba go nie ma, więc
+      # podpis padał. Podpisany .exe Windows powstaje lokalnie (`npm run dist:full`).
+      # CI waliduje tylko cele cross-OS, których NIE da się zbudować lokalnie na Windows.
       matrix:
         include:
-          - os: windows-latest
-            arch: x64
-            sidecar: powershell -ExecutionPolicy Bypass -File build_sidecar.ps1
-            ebuild: --win --x64
           - os: ubuntu-latest
             arch: x64
             sidecar: bash build_sidecar.sh
@@ -53,6 +54,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
+      # Podpis + notaryzacja macOS (Developer ID). electron-builder czyta te zmienne
+      # automatycznie: CSC_LINK/CSC_KEY_PASSWORD = cert .p12 (base64), APPLE_* = notaryzacja.
+      # Gdy sekrety NIE są ustawione, renderują się jako pusty string → electron-builder
+      # POMIJA podpis i buduje NIEPODPISANY .dmg (build pozostaje zielony). Notaryzacja
+      # uruchamia się dopiero, gdy aplikacja została podpisana. Na Linuksie ignorowane.
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
 

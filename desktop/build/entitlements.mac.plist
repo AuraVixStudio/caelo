@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements dla Hardened Runtime (notaryzacja macOS).
+  Stosowane do aplikacji (entitlements) ORAZ binariów zagnieżdżonych (entitlementsInherit),
+  w tym sidecara PyInstaller `caelo-core` + jego _internal/*.dylib.
+
+  Dlaczego te klucze:
+   - allow-jit / allow-unsigned-executable-memory — Electron (V8) i interpreter Pythona
+     generują/wykonują kod w pamięci; bez nich Hardened Runtime ubija proces.
+   - disable-library-validation — sidecar PyInstaller ładuje własne .dylib/.so spoza
+     podpisu aplikacji; inaczej notaryzacja/uruchomienie odrzuca je.
+   - allow-dyld-environment-variables — PyInstaller bootloader ustawia zmienne dyld.
+   - network.client / network.server — klient HTTP do api.x.ai oraz lokalny sidecar
+     nasłuchujący na 127.0.0.1 (handshake).
+   - device.audio-input — przechwytywanie mikrofonu (moduł głosu: Talk/Live/dyktando).
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>
