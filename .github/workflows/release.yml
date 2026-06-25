@@ -37,20 +37,26 @@ jobs:
       # (SimplySign Desktop, karta wirtualna) — runner GitHuba go nie ma, więc
       # podpis padał. Podpisany .exe Windows powstaje lokalnie (`npm run dist:full`).
       # CI waliduje tylko cele cross-OS, których NIE da się zbudować lokalnie na Windows.
+      # macOS jest CHWILOWO ODŁOŻONY: cel macOS wymaga certu Developer ID do podpisu+
+      # notaryzacji (w toku aktywacji u utrzymującego), a Intelowe runnery GitHuba długo
+      # czekają w kolejce. Buildy macOS (Intel + Apple Silicon) zostały zweryfikowane
+      # jako działające (niepodpisane .dmg) — wystarczy ODKOMENTOWAĆ oba wpisy poniżej, gdy
+      # cert będzie gotowy i sekrety MAC_CSC_LINK/… dodane. Cała reszta (electron-builder.yml
+      # mac:, entitlements, logika podpisu w kroku budowy) jest już na miejscu i czeka.
       matrix:
         include:
           - os: ubuntu-latest
             arch: x64
             sidecar: bash build_sidecar.sh
             ebuild: --linux --x64
-          - os: macos-13          # Intel
-            arch: x64
-            sidecar: bash build_sidecar.sh
-            ebuild: --mac --x64
-          - os: macos-14          # Apple Silicon
-            arch: arm64
-            sidecar: bash build_sidecar.sh
-            ebuild: --mac --arm64
+          # - os: macos-13          # Intel
+          #   arch: x64
+          #   sidecar: bash build_sidecar.sh
+          #   ebuild: --mac --x64
+          # - os: macos-14          # Apple Silicon
+          #   arch: arm64
+          #   sidecar: bash build_sidecar.sh
+          #   ebuild: --mac --arm64
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
