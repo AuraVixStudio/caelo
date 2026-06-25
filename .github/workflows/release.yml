@@ -24,17 +24,32 @@ permissions:
 
 jobs:
   build:
-    name: Build (UNSIGNED, ${{ matrix.os }})
+    name: Build (UNSIGNED, ${{ matrix.os }} ${{ matrix.arch }})
     strategy:
       fail-fast: false
+      # Każdy wpis = osobny runner danego OS/architektury. Sidecar PyInstaller jest
+      # natywny dla architektury runnera (cross-compile niepraktyczny), więc x64/arm64
+      # Maca budują się na ODDZIELNYCH runnerach: macos-13 (Intel/x64) + macos-14
+      # (Apple Silicon/arm64). `ebuild` mówi electron-builderowi, którą platformę+arch
+      # spakować (flagi CLI nadpisują arch z electron-builder.yml).
       matrix:
         include:
           - os: windows-latest
+            arch: x64
             sidecar: powershell -ExecutionPolicy Bypass -File build_sidecar.ps1
-          - os: macos-latest
-            sidecar: bash build_sidecar.sh
+            ebuild: --win --x64
           - os: ubuntu-latest
+            arch: x64
             sidecar: bash build_sidecar.sh
+            ebuild: --linux --x64
+          - os: macos-13          # Intel
+            arch: x64
+            sidecar: bash build_sidecar.sh
+            ebuild: --mac --x64
+          - os: macos-14          # Apple Silicon
+            arch: arm64
+            sidecar: bash build_sidecar.sh
+            ebuild: --mac --arm64
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: "1"
@@ -66,11 +81,20 @@ jobs:
         working-directory: desktop
         run: npm ls electron-updater || npm install electron-updater
 
+      # electron-builder pakuje GOTOWY build (out/main, out/preload, out/renderer);
+      # bez tego kroku `out/main/index.js` nie istnieje i pakowanie pada
+      # ("Application entry file ... does not exist"). Skrypty dist:* w package.json
+      # robią to przez `npm run build &&`, ale tu wołamy binarkę wprost — więc budujemy jawnie.
+      - name: Build frontend (electron-vite)
+        working-directory: desktop
+        run: npm run build
+
       # ROAD-TOP2 / Krok 6.4: `--publish never` — CI NIE może podpisać (cert chmurowy
       # SimplySign jest lokalny), więc nie publikujemy. Build waliduje pakowanie cross-OS.
+      # `matrix.ebuild` = platforma+arch (np. `--mac --arm64`); flagi CLI nadpisują arch z konfiga.
       - name: Build installer (UNSIGNED — validation only, never published)
         working-directory: desktop
-        run: npx --no-install electron-builder --publish never
+        run: npx --no-install electron-builder ${{ matrix.ebuild }} --publish never
 
       # Artefakty do wglądu/diagnostyki builda (NIE są wydaniem). Pełne, PODPISANE wydanie
       # Windows publikuje user lokalnie (SimplySign Desktop aktywny) — runbook Krok 6.4.
