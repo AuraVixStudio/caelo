@@ -66,8 +66,19 @@ mac:
         - x64
         - arm64
   category: public.app-category.developer-tools
-  # Notaryzacja (Developer ID + notarytool): ustaw APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
-  # APPLE_TEAM_ID + cert w env CI. Bez tego Gatekeeper zablokuje. Patrz docs/PLAN_M15 §Podpisywanie.
+  # --- Podpis Developer ID + notaryzacja (Gatekeeper) ---
+  # Hardened Runtime + entitlements są WYMAGANE do notaryzacji. entitlementsInherit
+  # stosuje się do zagnieżdżonych binariów — w tym sidecara PyInstaller (caelo-core +
+  # _internal/*.dylib): Python potrzebuje allow-jit / allow-unsigned-executable-memory /
+  # disable-library-validation, inaczej notaryzacja odrzuci pakiet.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Cert (CSC_LINK/CSC_KEY_PASSWORD) + dane notaryzacji (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/
+  # APPLE_TEAM_ID) electron-builder czyta z ENV (ustawiane z sekretów w release.yml).
+  # Notaryzacja NIE jest tu włączona na sztywno — workflow dokłada `-c.mac.notarize=true`
+  # TYLKO gdy cert jest obecny, więc build bez sekretów daje czysty NIEPODPISANY .dmg.
 
 linux:
   target:
