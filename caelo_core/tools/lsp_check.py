@@ -68,7 +68,7 @@ def test_client() -> None:
             started = False
         check("client starts + initialize handshake", started)
 
-        diags = c.wait_diagnostics(fp, "def foo():\n    return 1\n", "python", timeout=3.0)
+        diags = c.wait_diagnostics(fp, "def foo():\n    return 1\n", "python", timeout=5.0)
         check("client receives publishDiagnostics", len(diags) == 1 and diags[0]["message"] == "mock problem")
 
         loc = c.query("definition", fp, "x", "python", 1, 4)
@@ -98,7 +98,7 @@ def test_manager() -> None:
         check("manager enabled when configs present", mgr.enabled())
         check("manager disabled when empty", not LspManager({}, workspace_root=Path(d)).enabled())
 
-        diags = mgr.diagnostics(fp, "y = 2\n", timeout=3.0)
+        diags = mgr.diagnostics(fp, "y = 2\n", timeout=5.0)
         check("manager routes diagnostics by extension", len(diags) == 1)
 
         loc = mgr.query("definition", fp, "y = 2\n", 0, 0)

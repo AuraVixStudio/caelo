@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from caelo_core.tools._smoke_common import (  # noqa: F401
     PREFIX, REPO_DIR, THIS_DIR, PKG_DIR,
-    _read_handshake, _get, _post, _delete, _cors_acao, _capture_no_token_warn,
+    _read_handshake, _wait_ready, _get, _post, _delete, _cors_acao, _capture_no_token_warn,
     _isolated_env, _ws_check, _ws_bad_token_rejected,
 )
 
@@ -94,6 +94,7 @@ def main() -> int:
         info = _read_handshake(proc)
         port = info["port"]
         base = f"http://127.0.0.1:{port}"
+        _wait_ready(base)  # poczekaj aż uvicorn naprawdę nasłuchuje (wyścig announce↔listen)
         print(f"[handshake] port={port} version={info.get('version')}")
 
         checks = []

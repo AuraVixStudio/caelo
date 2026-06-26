@@ -78,7 +78,16 @@ def canon_key(path_or_uri: str) -> str:
     diagnostyki zawsze puste). Sprowadzamy oba do ścieżki i `normcase`+`normpath` (na Win
     lowercase + ujednolicone separatory), więc klucz zapisu i odczytu jest ten sam."""
     p = uri_to_path(path_or_uri) if path_or_uri.startswith("file:") else path_or_uri
-    return os.path.normcase(os.path.normpath(p))
+    # realpath (nie sam normpath): serwer publikuje URI dla ŚCIEŻKI RZECZYWISTEJ
+    # (`path_to_uri` = `Path.resolve()`), więc klucz ZAPISU jest po symlinkach
+    # rozwiązany. Klucz ODCZYTU musi być tak samo — inaczej na macOS (`/var`→
+    # `/private/var` w tempdirach) i Windows CI (nazwy 8.3) zapis≠odczyt i diagnostyki
+    # nigdy się nie matchują. realpath robi też normpath; normcase ujednolica wielkość.
+    try:
+        p = os.path.realpath(p)
+    except OSError:
+        p = os.path.normpath(p)
+    return os.path.normcase(p)
 
 
 class LspClient:

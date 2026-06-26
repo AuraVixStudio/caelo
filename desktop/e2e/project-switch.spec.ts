@@ -32,12 +32,14 @@ test('project switcher lists backend projects and switches the active one', asyn
   await expect(trigger).toBeVisible()
   await trigger.click()
 
-  // Popover listuje oba zmockowane projekty.
-  await expect(page.getByRole('button', { name: 'Alpha' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Beta' })).toBeVisible()
+  // Popover listuje oba zmockowane projekty. `exact: true` — od M22 obok każdego
+  // projektu jest przycisk „Manage <name>" (aria-label), więc samo „Alpha"/„Beta"
+  // matchowałoby 2 elementy (strict-mode violation).
+  await expect(page.getByRole('button', { name: 'Alpha', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Beta', exact: true })).toBeVisible()
 
   // Wybór „Alpha" → POST /projects/current {project_id:'p1'}; trigger aktualizuje się na „Alpha".
-  await page.getByRole('button', { name: 'Alpha' }).click()
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click()
   await expect.poll(() => selected).toContain('p1')
-  await expect(page.getByRole('button', { name: 'Alpha' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Alpha', exact: true })).toBeVisible()
 })
