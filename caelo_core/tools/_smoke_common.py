@@ -63,6 +63,28 @@ def _read_handshake(proc: subprocess.Popen, timeout: float = 25.0) -> dict:
     raise RuntimeError("timed out waiting for handshake")
 
 
+def _wait_ready(base: str, timeout: float = 15.0) -> None:
+    """Czekaj, aż serwer FAKTYCZNIE przyjmuje połączenia (poll /health).
+
+    Handshake jest drukowany z `lifespan.startup()` uvicorna, a ten odpala się
+    PRZED `loop.create_server()` (otwarciem nasłuchu) — więc tuż po handshake
+    pierwsze żądanie potrafi dostać `Connection refused` (wyścig widoczny zwłaszcza
+    na POSIX, gdzie połączenie loopback jest natychmiastowe). Realny klient
+    (Electron) toleruje to swoim monitorem /health; testy muszą zrobić to samo,
+    inaczej są fałszywie czerwone. Poll przerywa się, gdy /health odpowie."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(base + "/health", timeout=2) as resp:
+                if resp.status == 200:
+                    return
+        except urllib.error.HTTPError:
+            return  # serwer nasłuchuje (odpowiedział HTTP), to wystarczy
+        except (urllib.error.URLError, OSError):
+            time.sleep(0.05)  # jeszcze nie nasłuchuje — spróbuj ponownie
+    # Nie udało się w deadline — pozostałe asercje pokażą realny błąd.
+
+
 def _get(base: str, path: str, token: str | None = None):
     req = urllib.request.Request(base + path)
     if token:

@@ -67,7 +67,11 @@ def test_pty_interface() -> None:
         shell = os.environ.get("COMSPEC", "cmd.exe")
         cmd = f'{shell} /c echo PTY_OK_MARKER'
     else:
-        cmd = '/bin/sh -c "echo PTY_OK_MARKER"'
+        # POSIX: open_pty -> UnixPtyProcess.spawn NIE parsuje powłokowo stringa
+        # (to nie shell=True) — string trafia do Popen jako pojedynczy argv, więc
+        # '/bin/sh -c "..."' byłoby szukane jako nazwa pliku (FileNotFoundError).
+        # Przekazujemy gotowe argv (lista), tak jak realny terminal podaje shell.
+        cmd = ['/bin/sh', '-c', 'echo PTY_OK_MARKER']
 
     try:
         proc = pty_compat.open_pty(cmd, cwd=os.getcwd(), env=T.scrubbed_env())

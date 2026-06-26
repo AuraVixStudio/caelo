@@ -72,6 +72,19 @@ def main() -> int:
         info = _read_handshake(proc)
         port = info["port"]
         base = f"http://127.0.0.1:{port}"
+        # Handshake (lifespan.startup) wyprzedza otwarcie nasłuchu (create_server)
+        # w uvicornie — odczekaj na realną gotowość, inaczej pierwsze /health bywa
+        # odrzucone (Connection refused), zwłaszcza na POSIX.
+        _deadline = time.time() + 15.0
+        while time.time() < _deadline:
+            try:
+                with urllib.request.urlopen(base + "/health", timeout=2) as _r:
+                    if _r.status == 200:
+                        break
+            except urllib.error.HTTPError:
+                break
+            except (urllib.error.URLError, OSError):
+                time.sleep(0.05)
         print(f"[handshake] port={port} version={info.get('version')} token-match={info.get('token') == token}")
 
         checks = []
