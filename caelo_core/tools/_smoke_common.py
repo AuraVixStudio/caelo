@@ -141,7 +141,10 @@ def _capture_no_token_warn(call) -> bool:
     import logging as _logging
     from caelo_core import auth_tokens as _auth_mod  # P2-13: auth wydzielony ze state.py
     lg = _logging.getLogger("caelo_core.auth_tokens")
-    old_lvl, _auth_mod._no_token_last_warn = lg.level, 0.0
+    # -inf, NIE 0.0: monotonic() liczy od nieokreślonego punktu (~uptime); na świeżym
+    # runnerze CI (np. ubuntu) now < 60, więc reset do 0.0 dawał `now-0 < interwał` →
+    # brak ostrzeżenia → fałszywie czerwony test. -inf zawsze przekracza interwał.
+    old_lvl, _auth_mod._no_token_last_warn = lg.level, float("-inf")
     lg.setLevel(_logging.WARNING)
     rec: list = []
     h = _logging.Handler()
