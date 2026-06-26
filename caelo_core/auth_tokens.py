@@ -30,7 +30,11 @@ log = logging.getLogger(__name__)
 # autoryzacji. server.py loguje to raz na starcie; tu logujemy też przy ruchu
 # (rate-limited, by nie zalać logu), aby świadomy tryb dev zostawiał ślad per-request.
 _NO_TOKEN_WARN_INTERVAL_S = 60.0
-_no_token_last_warn = 0.0
+# -inf, NIE 0.0: `_warn_no_token` porównuje `time.monotonic() - _no_token_last_warn`,
+# a punkt odniesienia `monotonic()` jest NIEokreślony (na Linuksie ~uptime). Na świeżo
+# wystartowanym hoście monotonic bywa < interwał, więc init 0.0 zjadałby PIERWSZE
+# ostrzeżenie (now - 0 < 60). -inf gwarantuje, że pierwszy no-token request zawsze loguje.
+_no_token_last_warn = float("-inf")
 
 
 def _warn_no_token(channel: str) -> None:
