@@ -104,15 +104,37 @@ they're sent **only** to `api.x.ai`. No accounts, no middleman, no telemetry.
 
 ## 🔐 Privacy &amp; security
 
-Caelo is **local-first** and sends **no telemetry** — no analytics endpoint, no usage reporting.
-A fresh install talks only to `api.x.ai` (with your key, for the features you use) and to GitHub
-Releases (to check for updates — skippable).
+Caelo is a **normal desktop app** — a Windows GUI you install from a signed `.exe` and click
+around in. (There's a Python backend bundled *inside* the installer, but you never see a terminal.)
+It is **local-first** and sends **no telemetry** — no analytics endpoint, no usage reporting, no
+phoning home. A fresh install talks only to `api.x.ai` (with **your** key, for the features you
+use) and to GitHub Releases (to check for updates — skippable).
 
-- Backend listens on **127.0.0.1 only**, never exposed to the network.
+**Where your data goes:**
+
+```
+   You ──▶ Caelo (your PC) ──▶ api.x.ai   ← the only outbound destination
+                  │
+                  └──▶ GitHub Releases (update check only — can be skipped)
+```
+
+- Backend listens on **127.0.0.1 (localhost) only** — never exposed to the network.
 - REST requires `Authorization: Bearer <token>`; WebSockets take the token via query — both **fail-closed**.
-- The xAI bearer token is sent **only** to `api.x.ai` and **never reaches the renderer**.
+- The xAI bearer token is sent **only** to `api.x.ai` and **never reaches the renderer**; it is
+  stored locally and never returned by the local API.
 - Agent file operations are **sandboxed** to the workspace; writes and shell commands require
   **approval**, and run with a **secret-free** environment.
+
+**What Caelo does *not* do:**
+
+- ❌ No telemetry, analytics, or tracking of any kind.
+- ❌ No third-party servers — nothing is sent anywhere except xAI's own API.
+- ❌ No account, no sign-up, no middleman — it's **bring-your-own-key**.
+- ❌ Your key, chats, files, and generations never leave your machine (except your prompts to xAI,
+  which Grok needs to answer them).
+
+**Don't trust — verify.** Caelo is fully open source under Apache-2.0. Read the code, or just watch
+the traffic: with the app running, `api.x.ai` is the only outbound connection you'll see.
 
 Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 
