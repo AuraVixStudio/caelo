@@ -468,6 +468,14 @@ export interface HubArtifact {
   created_at: number
 }
 
+/** Prompt zapisany w metadanych wygenerowanego artefaktu (obraz/wideo/audio).
+ *  Zapisywany przez backend (`_record_media_artifact` → `meta.prompt`); tu wyciągany
+ *  bezpiecznie do podglądu i „Reuse prompt". Pusty string, gdy brak. */
+export function artifactPrompt(art: HubArtifact): string {
+  const p = art.meta?.prompt
+  return typeof p === 'string' ? p.trim() : ''
+}
+
 export interface HubProject {
   id: string
   name: string

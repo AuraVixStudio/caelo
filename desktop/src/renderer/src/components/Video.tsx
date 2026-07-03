@@ -63,7 +63,9 @@ export function Video({ conn }: { conn: Conn }) {
     videoSource: source,
     setVideoSource: setSource,
     videoCommandMode,
-    setVideoCommandMode
+    setVideoCommandMode,
+    promptReuse,
+    setPromptReuse
   } = useHub()
 
   const videoJobs = jobs.filter((j) => j.kind === 'video')
@@ -98,6 +100,14 @@ export function Video({ conn }: { conn: Conn }) {
   useEffect(() => {
     refreshResults()
   }, [refreshResults, doneCount])
+
+  // „Reuse prompt" z karty artefaktu (galeria / Recent videos): wstaw zapisany
+  // prompt do pola i zeruj (panel jest leniwy — konsumujemy po montażu).
+  useEffect(() => {
+    if (promptReuse?.target !== 'Video') return
+    setPrompt(promptReuse.text)
+    setPromptReuse(null)
+  }, [promptReuse, setPromptReuse])
 
   // M11: „Send to → Animate (Video)" — podnieś obraz jako kadr startowy (image→video).
   useEffect(() => {

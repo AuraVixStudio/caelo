@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from 'react'
-import { Trash2 } from 'lucide-react'
-import { deleteArtifact, type Conn, type HubArtifact } from '../lib/api'
+import { Check, Copy, RotateCcw, Trash2 } from 'lucide-react'
+import { artifactPrompt, deleteArtifact, type Conn, type HubArtifact } from '../lib/api'
+import { copyText } from '../lib/clipboard'
+import { useHub } from '../lib/hub'
+import type { HubModule } from '../lib/hubQuery'
 import { ArtifactMedia } from './ArtifactMedia'
 import { SendToMenu } from './SendToMenu'
 import { VideoSendMenu } from './VideoSendMenu'
@@ -12,6 +15,77 @@ import { Popover } from './ui/Popover'
 function modelOf(art: HubArtifact): string {
   const m = art.meta?.model
   return typeof m === 'string' ? m : ''
+}
+
+/** Moduł twórczy, do którego „Reuse prompt" wstawi prompt (obraz→Image, wideo→Video).
+ *  Null dla pozostałych typów (audio itp.) — wtedy pokazujemy tylko „Copy". */
+function reuseTargetOf(art: HubArtifact): HubModule | null {
+  if (art.type === 'image') return 'Image'
+  if (art.type === 'video') return 'Video'
+  return null
+}
+
+// Powyżej tej długości prompt jest w galerii skracany (pokazujemy początek) —
+// z afordancją „Show more" do rozwinięcia całości.
+const PROMPT_CLAMP_CHARS = 90
+
+/** Prompt zapisany przy generacji: skrócony podgląd (rozwijany „Show more") +
+ *  „Reuse prompt" (wstawia do panelu Image/Video i przechodzi tam) + „Copy".
+ *  Nie renderuje się, gdy artefakt nie ma promptu (np. wgrane medium). */
+function PromptBar({ art }: { art: HubArtifact }) {
+  const { reusePrompt } = useHub()
+  const [copied, setCopied] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const prompt = artifactPrompt(art)
+  const target = reuseTargetOf(art)
+  if (!prompt) return null
+
+  const long = prompt.length > PROMPT_CLAMP_CHARS
+
+  async function copy(): Promise<void> {
+    if (await copyText(prompt)) {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+      <p
+        className={expanded ? 'text-xs leading-snug text-muted' : 'line-clamp-2 text-xs leading-snug text-muted'}
+        title={long && !expanded ? prompt : undefined}
+      >
+        {prompt}
+      </p>
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="self-start text-[11px] font-medium text-accent hover:underline"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      ) : null}
+      <div className="flex items-center gap-1">
+        {target ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RotateCcw size={14} />}
+            onClick={() => reusePrompt(target, prompt)}
+          >
+            Reuse prompt
+          </Button>
+        ) : null}
+        <IconButton
+          label={copied ? 'Copied' : 'Copy prompt'}
+          size="sm"
+          icon={copied ? <Check size={14} /> : <Copy size={14} />}
+          onClick={copy}
+        />
+      </div>
+    </div>
+  )
 }
 
 /** Przycisk usuwania artefaktu z potwierdzeniem (Popover) — kasuje rekord + plik.
@@ -123,6 +197,7 @@ export function ArtifactCard({
           </span>
         ) : null}
       </div>
+      <PromptBar art={art} />
     </div>
   )
 }

@@ -99,7 +99,8 @@ they're sent **only** to `api.x.ai`. No accounts, no middleman, no telemetry.
 - **🎬 Video** — text→video and image→video generation, plus edit and extend.
 - **🎙️ Voice** — Speak (TTS), Transcribe (STT), Talk (voice conversation), and Live (realtime).
 - **🗂️ History &amp; Gallery** — a searchable artifact &amp; generation history (SQLite + FTS5),
-  scoped to projects; send artifacts between modes.
+  scoped to projects; send artifacts between modes, and reuse the prompt behind any
+  generated image or video with one click.
 - **🧩 Extensions** — MCP servers, slash commands, hooks, skills, and a package marketplace.
 
 ## 🔐 Privacy &amp; security

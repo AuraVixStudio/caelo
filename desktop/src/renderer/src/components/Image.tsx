@@ -51,7 +51,9 @@ export function Image({ conn }: { conn: Conn }) {
     pendingSend,
     setPendingSend,
     imageRefs: images,
-    setImageRefs: setImages
+    setImageRefs: setImages,
+    promptReuse,
+    setPromptReuse
   } = useHub()
 
   const editing = images.length > 0
@@ -77,6 +79,14 @@ export function Image({ conn }: { conn: Conn }) {
   useEffect(() => {
     refreshResults()
   }, [refreshResults, doneCount])
+
+  // „Reuse prompt" z karty artefaktu (galeria / Recent images): wstaw zapisany
+  // prompt do pola i zeruj (panel jest leniwy — konsumujemy po montażu).
+  useEffect(() => {
+    if (promptReuse?.target !== 'Image') return
+    setPrompt(promptReuse.text)
+    setPromptReuse(null)
+  }, [promptReuse, setPromptReuse])
 
   // M11: „Send to → Edit in Image" — podnieś obraz jako referencję (przełącza w edit).
   useEffect(() => {

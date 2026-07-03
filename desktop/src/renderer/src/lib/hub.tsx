@@ -47,6 +47,15 @@ export interface StagedImage {
   uri: string // data-URI (upload/drop) lub https URL (z magistrali Send-to)
 }
 
+/** Prompt „do ponownego użycia" wstawiany do panelu Image/Video z galerii/karty
+ *  artefaktu. Jednorazowy: panel docelowy podnosi `text` do swojego pola prompt
+ *  po (re)montażu i zeruje go. Trzymany w Hub (jak `pendingSend`), bo panele są
+ *  leniwe i odmontowują się przy zmianie zakładki. */
+export interface PromptReuse {
+  target: HubModule // 'Image' | 'Video'
+  text: string
+}
+
 interface HubState {
   /** Przełącz aktywny moduł (App podpina `setActive`). */
   navigate: (m: HubModule) => void
@@ -71,6 +80,12 @@ interface HubState {
   setVideoCommandMode: Dispatch<SetStateAction<'edit' | 'extend' | null>>
   /** Załaduj wideo jako źródło i przejdź do panelu Video w danym trybie (M11). */
   sendVideoToVideo: (v: { name: string; uri: string; mode: 'edit' | 'extend' }) => void
+
+  /** Prompt oczekujący na wstawienie do panelu Image/Video (z „Reuse prompt"). */
+  promptReuse: PromptReuse | null
+  setPromptReuse: Dispatch<SetStateAction<PromptReuse | null>>
+  /** Wstaw prompt do panelu docelowego i od razu tam przejdź (skrót dla „Reuse prompt"). */
+  reusePrompt: (target: HubModule, text: string) => void
 
   // --- Sesja agenta Code (M21): przetrwa zmianę zakładki (panel Code jest leniwy
   // i odmontowuje się — bez tego transkrypt znika i trzeba wracać z listy Sessions). ---
@@ -122,6 +137,7 @@ export function HubProvider({
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([])
   const [composerDraft, setComposerDraft] = useState<string | null>(null)
   const [codeSessionId, setCodeSessionId] = useState<string | null>(null)
+  const [promptReuse, setPromptReuse] = useState<PromptReuse | null>(null)
 
   const reloadProjects = useCallback(() => {
     if (!conn) return
@@ -224,6 +240,12 @@ export function HubProvider({
         setVideoCommandMode(v.mode)
         navigate('Video')
       },
+      promptReuse,
+      setPromptReuse,
+      reusePrompt: (target: HubModule, text: string) => {
+        setPromptReuse({ target, text })
+        navigate(target)
+      },
       projects,
       recentWorkspaces,
       currentProjectId,
@@ -249,6 +271,7 @@ export function HubProvider({
       videoSource,
       videoCommandMode,
       codeSessionId,
+      promptReuse,
       projects,
       recentWorkspaces,
       currentProjectId,

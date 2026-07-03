@@ -4,6 +4,23 @@ All notable changes to **Caelo** are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-07-03
+
+A small usability update for the creative modes: reuse the prompt behind any
+generated image or video without retyping it.
+
+### Added
+- **Reuse a saved prompt.** Every generated image and video already stores the prompt
+  that made it; each artifact card (Gallery, and the "Recent" strips in the Image/Video
+  modes) now surfaces it with a **Reuse prompt** button — one click drops the prompt
+  into the matching mode (Image → Image, Video → Video) and takes you there — plus a
+  **Copy** button. Long prompts are shown truncated with a **Show more** toggle to
+  expand the full text.
+
+### Fixed
+- **Copy prompt** now works reliably in the packaged app: it falls back to a manual copy
+  when the browser Clipboard API is unavailable or blocked.
+
 ## [0.1.1] — 2026-06-23
 
 First update after the initial release — a stabilization pass driven by live
@@ -50,5 +67,6 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[0.1.2]: https://github.com/AuraVixStudio/caelo/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/AuraVixStudio/caelo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/AuraVixStudio/caelo/releases/tag/v0.1.0
