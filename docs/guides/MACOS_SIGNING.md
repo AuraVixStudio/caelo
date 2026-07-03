@@ -33,9 +33,15 @@ Keychain na Macu — bez Maca generujemy go OpenSSL-em. CN/e-mail w CSR są kosm
 ```bash
 openssl genrsa -out developer_id.key 2048
 
-openssl req -new -sha256 -key developer_id.key -out developer_id.csr \
-  -subj "/emailAddress=TWOJ@EMAIL.COM/CN=AuraVix Studio/C=PL"
+# UWAGA (Git Bash/MSYS): bez MSYS_NO_PATHCONV=1 powłoka zamieni "/CN=..." na ścieżkę
+# Windows (np. C:/Program Files/Git/CN=...) i OpenSSL odrzuci subject.
+MSYS_NO_PATHCONV=1 openssl req -new -sha256 -key developer_id.key -out developer_id.csr \
+  -subj "/CN=AuraVix Studio/C=PL"
 ```
+
+> `emailAddress`/`CN` w CSR są kosmetyczne dla Developer ID — Apple i tak nada podmiot
+> `Developer ID Application: <firma> (<TeamID>)`. Możesz dodać `/emailAddress=...` (e-mail
+> Twojego konta Apple Developer), ale nie jest wymagany.
 
 Powstają: `developer_id.key` (**klucz prywatny — pilnuj go**) i `developer_id.csr`.
 
