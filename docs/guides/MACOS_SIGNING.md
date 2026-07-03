@@ -147,20 +147,26 @@ shred -u caelo_p12_base64.txt 2>/dev/null || rm -f caelo_p12_base64.txt
 ## Krok 8 — Uruchom build
 
 **Test bez tagu (zalecany pierwszy raz):** GitHub → **Actions → Release → Run workflow**
-(gałąź `main`). Zbudują się Linux + oba macOS.
+(gałąź `main`). Zbudują się Linux + oba macOS, ale **nic nie ląduje w Release** —
+`.dmg`/`.AppImage`/`.deb` (+ `latest*.yml`) pobierzesz z **Artifacts** joba
+(`caelo-build-<os>`). Dobre do sprawdzenia podpisu/notaryzacji bez tworzenia wydania.
 
-**Wydanie na tag:** `git tag v0.1.2 && git push origin v0.1.2` — workflow ruszy na tagu.
-(Windows podpisujesz osobno lokalnie SimplySign — patrz runbook Fazy B; CI buduje tylko
-Linux + macOS.)
+**Wydanie na tag:** `git tag v0.1.3 && git push origin v0.1.3`. Na tagu mac/Linux robią
+`--publish always` → electron-builder **sam wgrywa binaria + feed** `latest-mac.yml`/
+`latest-linux.yml` do Release'u o tym tagu (tworzy **draft**, jeśli nie istnieje). Windows
+dokładasz do tego samego wydania **lokalnie** (podpisany `.exe` + `latest.yml`, SimplySign —
+runbook Fazy B), po czym publikujesz draft.
+
+> ⚠️ **macOS multi-arch a feed:** Intel i Apple Silicon budują się na osobnych runnerach i
+> każdy generuje własny `latest-mac.yml` (opisujący tylko swój `.dmg`). Przy publikacji drugi
+> nadpisuje pierwszy, więc feed auto-update wskaże **jeden** wariant; oba `.dmg` są w Release do
+> pobrania ręcznego. Do pełnego auto-update obu architektur trzeba scalić `latest-mac.yml` (osobny
+> temat — zweryfikuj przy realnym wydaniu na tag).
 
 W logu joba macOS szukaj:
 - `signing` / `Developer ID Application: …` — podpis się powiódł,
 - `notarization successful` (notarytool) — Apple zaakceptowało pakiet,
 - `stapling` — bilet notaryzacji wklejony do `.dmg`.
-
-Gotowe `.dmg` (Intel + Apple Silicon) pobierzesz z **Artifacts** joba (`caelo-unsigned-macos-*`
-— nazwa mówi „unsigned", ale przy ustawionych sekretach artefakt jest **podpisany i
-notaryzowany**; nazwę zostawiamy neutralną, bo bez sekretów faktycznie jest niepodpisany).
 
 ---
 

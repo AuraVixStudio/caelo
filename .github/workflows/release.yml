@@ -4,23 +4,26 @@ name: Release
 # sidecara PyInstaller jest niepraktyczny — każdy OS buduje swój własny sidecar).
 # Wyzwalane TAGIEM `v*` (np. v1.2.0) lub ręcznie.
 #
-# ROAD-TOP2 / Faza B Krok 6.4: ten workflow BUDUJE artefakty, ale ich NIE PUBLIKUJE.
-# Cert Caelo (Asseco SimplySign) jest chmurowy/nieeksportowalny → podpis działa wyłącznie
-# LOKALNIE u usera (SimplySign Desktop), nie na runnerze GitHuba. Podpisane wydanie + feed
-# `latest.yml` (auto-update, M15-8/electron-updater) tworzy user lokalnie
-# (`npm run dist:full` + `electron-builder --publish always`, runbook Krok 6.4). Tutaj
-# `--publish never` + upload-artifact, żeby CI NIE wypchnął niepodpisanego buildu na tag
-# (kolizja z lokalnym wydaniem + serwowanie niepodpisanych binariów przez auto-update).
+# PUBLIKACJA (zależna od wyzwalacza):
+#  • push TAGU `v*`  → mac/Linux robią `--publish always`: electron-builder wgrywa binaria
+#    ORAZ feedy auto-update `latest-mac.yml`/`latest-linux.yml` (SHA512 pod dany build) do
+#    Release'u o tym tagu (tworzy draft, jeśli nie istnieje). Repo jest publiczne, więc
+#    electron-updater pobierze te feedy u end-userów.
+#  • workflow_dispatch (test) → `--publish never` + upload-artifact (nic nie ląduje w Release).
+# Windows NIE jest w matrycy: podpis Authenticode używa CHMUROWEGO certu SimplySign, który
+# istnieje wyłącznie lokalnie u utrzymującego (SimplySign Desktop). Podpisany `.exe` + jego
+# `latest.yml` user buduje i publikuje LOKALNIE (`npm run dist:full` + `gh release upload`
+# / `electron-builder --publish always`) do TEGO SAMEGO Release'u — assety per-OS się sumują.
 #
-# Windows jest platformą główną; mac/Linux budują się „na żądanie" — fail-fast: false,
-# więc brak certów/zależności na jednym OS nie blokuje pozostałych.
+# mac/Linux budują się na osobnych runnerach — fail-fast: false, więc problem na jednym OS
+# nie blokuje pozostałych.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
-  contents: read           # CI tylko buduje/waliduje; podpisane wydania publikuje user lokalnie (Krok 6.4)
+  contents: write          # buildy z tagu publikują binaria + feedy mac/Linux do Release (Windows publikuje user lokalnie)
 
 jobs:
   build:
@@ -107,8 +110,10 @@ jobs:
         working-directory: desktop
         run: npm run build
 
-      # `--publish never` — CI nie publikuje wydania (robi to user lokalnie). `matrix.ebuild`
-      # = platforma+arch (np. `--mac --arm64`); flagi CLI nadpisują arch z konfiga.
+      # `matrix.ebuild` = platforma+arch (np. `--mac --arm64`); flagi CLI nadpisują arch z konfiga.
+      #
+      # Publikacja: TAG → `--publish always` (binaria + feed latest-*.yml do Release), dispatch →
+      # `--publish never` (tylko artefakty, patrz nagłówek). electron-builder czyta GH_TOKEN.
       #
       # Podpis macOS jest OPCJONALNY i sterowany obecnością sekretu MAC_CSC_LINK:
       #  • brak certu → USUWAMY puste zmienne podpisu (inaczej electron-builder bierze pusty
@@ -117,7 +122,14 @@ jobs:
       - name: Build installer (signs + notarizes macOS only if MAC_CSC_LINK secret is set)
         working-directory: desktop
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # electron-builder GitHub publisher (tylko przy --publish always)
         run: |
+          PUBLISH="never"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "Tag build → publishing binaries + auto-update feed to the Release."
+            PUBLISH="always"
+          fi
           EXTRA=""
           if [ -n "$CSC_LINK" ]; then
             echo "Signing certificate present → enabling notarization."
@@ -126,18 +138,19 @@ jobs:
             echo "No signing certificate → building UNSIGNED (dropping empty signing vars)."
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
           fi
-          npx --no-install electron-builder ${{ matrix.ebuild }} $EXTRA --publish never
+          npx --no-install electron-builder ${{ matrix.ebuild }} $EXTRA --publish "$PUBLISH"
 
-      # Artefakty do wglądu/diagnostyki builda (NIE są wydaniem). Pełne, PODPISANE wydanie
-      # Windows publikuje user lokalnie (SimplySign Desktop aktywny) — runbook Krok 6.4.
-      - name: Upload unsigned build artifacts
+      # Kopia artefaktów do wglądu/diagnostyki (dispatch NIE publikuje do Release). Łapiemy też
+      # feedy latest-*.yml, by dało się je podejrzeć/dograć ręcznie. Tag i tak publikuje wprost.
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: caelo-unsigned-${{ matrix.os }}
+          name: caelo-build-${{ matrix.os }}
           path: |
             desktop/dist/*.exe
             desktop/dist/*.dmg
             desktop/dist/*.AppImage
             desktop/dist/*.deb
+            desktop/dist/latest*.yml
           if-no-files-found: ignore
           retention-days: 7
