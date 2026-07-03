@@ -26,6 +26,8 @@ docs/
 | [`guides/API.md`](guides/API.md) | **Referencja API backendu (EN)** — pełna lista **96 tras REST + 6 WS** pogrupowana po domenach, model autoryzacji (Bearer/token w query, fail-closed), handshake, protokoły ramek WS + snippet do regeneracji listy. Dla deweloperów/integratorów. | ✅ |
 | [`guides/PACKAGES.md`](guides/PACKAGES.md) | **Przewodnik po pakietach społeczności (M16, EN)** — format `.caelopkg`, model bezpieczeństwa (zgoda, integralność sha256, brak auto-uruchamiania), registry git-based, publikacja, kuracja i zgłaszanie złośliwych pakietów. | ✅ |
 | [`guides/registry.example.json`](guides/registry.example.json) | **Przykładowy indeks registry** (M16-3) — wzór pliku do hostowania w repo git, na który wskazuje Marketplace → Browse → Registry URL. | ✅ |
+| [`guides/RELEASING.md`](guides/RELEASING.md) | **Runbook wydania (EN)** — jak złożyć release na 3 platformy: bump wersji/CHANGELOG → tag (CI publikuje Linux + podpisany/notaryzowany macOS + feedy) → lokalny podpisany Windows (SimplySign) → publikacja. Zestaw „gotchas" (public repo dla auto-update, multi-arch feed, arch per-runner, MSYS CSR). | ✅ |
+| [`guides/MACOS_SIGNING.md`](guides/MACOS_SIGNING.md) | **Konfiguracja podpisu macOS (EN, jednorazowa)** — na Windows bez Maca: CSR+klucz OpenSSL → cert Developer ID → `.p12` (z pośrednim CA G2) → base64 → 5 sekretów GitHub (`MAC_CSC_LINK`/`MAC_CSC_KEY_PASSWORD`/`APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`). | ✅ |
 
 ## `plans/` — plany i rozpisy
 

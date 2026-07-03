@@ -427,6 +427,17 @@ npm run dist:full      # all of the above in one shot
 machine. Packaged sidecar runs with `sys.frozen=True`, which moves `config.DATA_DIR` to
 `%LOCALAPPDATA%\AI Studio Pro`.
 
+**Cross-platform release (Win + Linux + macOS):** the signing model is **mixed** — Windows is
+signed **locally** (SimplySign cloud cert, can't live on a runner) and uploaded by hand; Linux +
+macOS build in CI ([`.github/workflows/release.yml`](.github/workflows/release.yml)), and on a
+`v*` **tag** publish their binaries + `latest-*.yml` auto-update feeds straight to the Release
+(`--publish always`; `workflow_dispatch` stays `--publish never` = artifacts only). macOS is
+signed with **Developer ID + notarized** when the `MAC_CSC_LINK`/`APPLE_*` secrets are set.
+⚠️ Do NOT pin `arch` under `mac.target` in `electron-builder.yml` — it overrides the per-runner
+CLI flag so every runner builds BOTH arches and the cross-built `.dmg` ships a wrong-arch sidecar.
+Per-release runbook: [`docs/guides/RELEASING.md`](docs/guides/RELEASING.md); one-time macOS cert +
+secrets setup (Windows, no Mac): [`docs/guides/MACOS_SIGNING.md`](docs/guides/MACOS_SIGNING.md).
+
 The legacy customtkinter app has been removed from the repo (kept as an external backup); there is no
 longer a `cd archive; python app.py` fallback here.
 
