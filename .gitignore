@@ -20,6 +20,18 @@ appicon.ico
 # …ale ikona instalatora to ŹRÓDŁO buildu — wymuszamy ją do repo (P3-2).
 !desktop/build/icon.ico
 
+# ── Sekrety podpisu (macOS Developer ID / Windows) — NIGDY do repo ──
+# Klucz prywatny + .p12 + CSR/cert w toku generacji certu Developer ID (docs/guides/
+# MACOS_SIGNING.md). Bezpiecznik na wypadek wygenerowania ich w drzewie repo — i tak
+# generuj je POZA repo i usuń po wgraniu do GitHub Secrets.
+*.p12
+*.pfx
+*.key
+*.csr
+*.cer
+*.p8
+*_base64.txt
+
 # ── Node / Electron (desktop) ──
 node_modules/
 desktop/node_modules/
