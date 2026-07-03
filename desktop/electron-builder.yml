@@ -60,11 +60,13 @@ nsis:
 # (../dist/caelo-core) musi być zbudowany na DOCELOWYM OS (build_sidecar.sh) PRZED
 # electron-builderem. extraResources/main proces są OS-agnostyczne (caelo-core vs .exe).
 mac:
+  # NIE zaszywaj tu `arch: [x64, arm64]` — to nadpisuje flagę CLI, przez co KAŻDY runner
+  # budował OBIE architektury. Sidecar PyInstaller jest natywny dla runnera (arm64 na
+  # macos-14, x64 na macos-13), więc skrzyżowany .dmg dostawał sidecar niewłaściwej arch
+  # (zepsuty). Architekturę wybiera flaga CLI per-runner w release.yml (`--mac --arm64` /
+  # `--mac --x64`); lokalny build też podaj flagę arch (inaczej zbuduje tylko arch hosta).
   target:
     - target: dmg
-      arch:
-        - x64
-        - arm64
   category: public.app-category.developer-tools
   # --- Podpis Developer ID + notaryzacja (Gatekeeper) ---
   # Hardened Runtime + entitlements są WYMAGANE do notaryzacji. entitlementsInherit
