@@ -12,13 +12,13 @@
 <p align="center">
   <a href="https://github.com/AuraVixStudio/caelo/releases/latest"><img src="https://img.shields.io/github/v/release/AuraVixStudio/caelo?style=flat-square&label=download&color=8b5cf6" alt="Latest release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3b82f6?style=flat-square" alt="License" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows-0a7bce?style=flat-square&logo=windows&logoColor=white" alt="Platform" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-0a7bce?style=flat-square" alt="Platform" />
   <a href="https://github.com/AuraVixStudio/caelo/releases"><img src="https://img.shields.io/github/downloads/AuraVixStudio/caelo/total?style=flat-square&color=22c55e&label=downloads" alt="Downloads" /></a>
   <a href="https://github.com/AuraVixStudio/caelo/stargazers"><img src="https://img.shields.io/github/stars/AuraVixStudio/caelo?style=flat-square&color=eab308" alt="Stars" /></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/AuraVixStudio/caelo/releases/latest"><b>⬇️ Download for Windows</b></a>
+  <a href="https://github.com/AuraVixStudio/caelo/releases/latest"><b>⬇️ Download</b></a>
   &nbsp;·&nbsp;
   <a href="https://auravixstudio.github.io/caelo/"><b>🌐 Website</b></a>
   &nbsp;·&nbsp;
@@ -141,9 +141,21 @@ Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 
 ## ⬇️ Install
 
-**For users** — download the signed installer from the
+**For users** — grab the file for your platform from the
 **[latest release](https://github.com/AuraVixStudio/caelo/releases/latest)**, run it, then open
 **Settings** and sign in with your xAI account or paste an API key. That's it.
+
+| Platform | File | Code signing |
+|---|---|---|
+| **Windows** 10/11 (x64) | `Caelo-Setup-<version>.exe` (NSIS installer) | ✅ **Authenticode** — AuraVix Studio (SimplySign), timestamped by Certum |
+| **macOS** Apple Silicon (arm64) | `Caelo-<version>-arm64.dmg` | ✅ **Developer ID + notarized** (passes Gatekeeper) |
+| **Linux** (x64) | `Caelo-<version>.AppImage` · `caelo-desktop_<version>_amd64.deb` | — unsigned (standard for Linux; verify via the release `sha256`) |
+
+> **macOS is Apple Silicon only.** Intel (x64) builds aren't published — GitHub's Intel macOS
+> runners are being retired, and cross-building the bundled Python sidecar isn't reliably
+> verifiable without an Intel Mac (tracked in [`docs/plans/PLAN_OTWARTE.md`](docs/plans/PLAN_OTWARTE.md)).
+> On Apple Silicon, run the `.dmg`; on Linux, the `.AppImage` is portable (`chmod +x` and run) or
+> install the `.deb`.
 
 <details>
 <summary><b>For developers — run from source</b></summary>
@@ -188,7 +200,10 @@ caelo_core\.venv\Scripts\python -m pytest caelo_core\tests -v
 cd desktop && npm run typecheck && npm run lint && npm test
 ```
 
-macOS (dmg) and Linux (AppImage/deb) targets are configured but built on demand on a per-OS runner.
+The command above builds the **Windows** installer locally (signed with the maintainer's
+SimplySign cert). **Linux** (AppImage/deb) and **macOS** (arm64 dmg, signed with Developer ID +
+notarized) are built in CI on their own runners and published to the release on a `v*` tag — see
+[`docs/guides/RELEASING.md`](docs/guides/RELEASING.md).
 
 </details>
 
