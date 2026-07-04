@@ -146,8 +146,12 @@ shred -u caelo_p12_base64.txt 2>/dev/null || rm -f caelo_p12_base64.txt
 
 ## Krok 8 — Uruchom build
 
+> **macOS = arm64-only** (Apple Silicon, runner `macos-14`). Intel `macos-13` jest wygaszany
+> przez GitHub (kolejka nie rusza godzinami) i usunięty z matrycy — szczegóły i ścieżka
+> Rosetta w [`RELEASING.md`](RELEASING.md) („Gotchas") oraz `PLAN_OTWARTE.md` (J1-x64).
+
 **Test bez tagu (zalecany pierwszy raz):** GitHub → **Actions → Release → Run workflow**
-(gałąź `main`). Zbudują się Linux + oba macOS, ale **nic nie ląduje w Release** —
+(gałąź `main`). Zbudują się Linux + macOS arm64, ale **nic nie ląduje w Release** —
 `.dmg`/`.AppImage`/`.deb` (+ `latest*.yml`) pobierzesz z **Artifacts** joba
 (`caelo-build-<os>`). Dobre do sprawdzenia podpisu/notaryzacji bez tworzenia wydania.
 
@@ -157,11 +161,9 @@ shred -u caelo_p12_base64.txt 2>/dev/null || rm -f caelo_p12_base64.txt
 dokładasz do tego samego wydania **lokalnie** (podpisany `.exe` + `latest.yml`, SimplySign —
 runbook Fazy B), po czym publikujesz draft.
 
-> ⚠️ **macOS multi-arch a feed:** Intel i Apple Silicon budują się na osobnych runnerach i
-> każdy generuje własny `latest-mac.yml` (opisujący tylko swój `.dmg`). Przy publikacji drugi
-> nadpisuje pierwszy, więc feed auto-update wskaże **jeden** wariant; oba `.dmg` są w Release do
-> pobrania ręcznego. Do pełnego auto-update obu architektur trzeba scalić `latest-mac.yml` (osobny
-> temat — zweryfikuj przy realnym wydaniu na tag).
+> Obecnie macOS jest **arm64-only**, więc powstaje **jeden** `.dmg` + jeden `latest-mac.yml`
+> (bez kolizji feedów). Gdyby wrócił Intel/x64, uważaj na kolizję `latest-mac.yml` — patrz
+> [`RELEASING.md`](RELEASING.md).
 
 W logu joba macOS szukaj:
 - `signing` / `Developer ID Application: …` — podpis się powiódł,

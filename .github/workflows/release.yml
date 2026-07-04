@@ -44,20 +44,21 @@ jobs:
       # MAC_CSC_LINK/… daje czysty NIEPODPISANY .dmg (build zielony), a po dodaniu certu
       # Developer ID (.p12 → MAC_CSC_LINK/MAC_CSC_KEY_PASSWORD) + danych notaryzacji
       # (APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID) krok budowy dokłada
-      # `-c.mac.notarize=true` → podpis + notaryzacja Gatekeeper. Intelowe runnery bywają
-      # długo w kolejce. Konfiguracja mac: (electron-builder.yml), entitlements i logika
-      # podpisu są na miejscu.
+      # `-c.mac.notarize=true` → podpis + notaryzacja Gatekeeper. Konfiguracja mac:
+      # (electron-builder.yml), entitlements i logika podpisu są na miejscu.
+      #
+      # macOS = ARM64-ONLY (Apple Silicon). Intelowy runner `macos-13` GitHub WYGASZA —
+      # kolejka potrafi nie ruszyć godzinami (2026-07-03: job wisiał 10h i nie wystartował),
+      # więc go NIE trzymamy (blokowałby każde wydanie). x64 na macos-14 wymagałby budowy
+      # sidecara PyInstaller pod Rosettą (`arch -x86_64`) — nie da się tego zweryfikować bez
+      # Intelowego Maca. Odłożone jako osobne zadanie (docs/plans/PLAN_OTWARTE.md).
       matrix:
         include:
           - os: ubuntu-latest
             arch: x64
             sidecar: bash build_sidecar.sh
             ebuild: --linux --x64
-          - os: macos-13          # Intel
-            arch: x64
-            sidecar: bash build_sidecar.sh
-            ebuild: --mac --x64
-          - os: macos-14          # Apple Silicon
+          - os: macos-14          # Apple Silicon (arm64) — jedyny wspierany target macOS
             arch: arm64
             sidecar: bash build_sidecar.sh
             ebuild: --mac --arm64

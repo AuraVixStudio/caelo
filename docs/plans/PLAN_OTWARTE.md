@@ -106,7 +106,15 @@
     [`docs/guides/registry.starter.json`](../guides/registry.starter.json) jako `registry.json` na `main` (przewodnik:
     [`docs/guides/registry.README.md`](../guides/registry.README.md)). Domyślny URL już wskazuje na `AuraVixStudio/caelo-packages`
     (`config.PACKAGES_REGISTRY_URL`, commit `182bd1b`); do czasu utworzenia repo Browse = 404, ale import-only/BYO działa.
-- [ ] **J — Cross-platform** P3 ⬜ (gdy dostęp do mac/Linux) — J1 build dmg/AppImage/deb, J2 PTY, J3 tree-kill POSIX.
+- [~] **J — Cross-platform** P3 🟡 **CI-buildy zrobione 2026-07-03** — J1 build dmg/AppImage/deb ✅ na GitHub Actions
+  ([`release.yml`](../../.github/workflows/release.yml)): **Linux** AppImage+deb ✅, **macOS arm64** podpisany Developer ID +
+  notaryzowany ✅ (v0.1.2). Podpis mac: [`docs/guides/MACOS_SIGNING.md`](../guides/MACOS_SIGNING.md); proces wydania:
+  [`docs/guides/RELEASING.md`](../guides/RELEASING.md). **Otwarte:**
+  - [ ] **J1-x64 — macOS Intel (x64)** ⬜ — Intelowy runner `macos-13` GitHub WYGASZA (kolejka nie rusza godzinami →
+    usunięty z matrycy). Alternatywa: build x64 na `macos-14` z **sidecarem PyInstaller pod Rosettą** (`arch -x86_64`
+    + x86_64 Python), bo PyInstaller nie cross-kompiluje. ⚠️ Wymaga **weryfikacji na realnym Intelowym Macu** (albo
+    lipo→universal2, też fragile) — dlatego odłożone. macOS jest na razie **arm64-only**.
+  - [ ] **J2/J3 — PTY + tree-kill POSIX na żywo** ⬜ — kod jest (stdlib `pty`, POSIX tree-kill), brak potwierdzenia LIVE na mac/Linux.
 - [x] **K — Terminal** P3 ✅ **2026-06-23** — K1 pywinpty 3.0.3 + scrubbed env potwierdzony (`echo %XAI_API_KEY%`/
   `%CAELO_CORE_TOKEN%` → niezrozwinięte = sekrety nie wyciekają przez WS terminala).
 

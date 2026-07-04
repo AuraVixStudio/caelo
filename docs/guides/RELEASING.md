@@ -32,9 +32,9 @@ The [`Release`](../../.github/workflows/release.yml) workflow runs on the tag an
 
 - **Linux** (`ubuntu-latest`) → `Caelo-x.y.z.AppImage` + `caelo-desktop_x.y.z_amd64.deb`
   (unsigned — normal for Linux) + `latest-linux.yml`.
-- **macOS** (`macos-13` Intel → `-x64.dmg`, `macos-14` Apple Silicon → `-arm64.dmg`),
+- **macOS — arm64 only** (`macos-14` Apple Silicon → `Caelo-x.y.z-arm64.dmg`),
   **signed with Developer ID + notarized** when the `MAC_CSC_LINK`/`APPLE_*` secrets are set,
-  + `latest-mac.yml`.
+  + `latest-mac.yml`. (Intel/x64 is not built — see the gotcha below.)
 
 Because it's a **tag** build, each mac/Linux job runs `electron-builder --publish always` and
 uploads to a Release for the tag (created as a **draft** if it doesn't exist yet). A
@@ -81,11 +81,15 @@ created the Release yourself first with `gh release create`, it's already publis
 
 - **Repo must be public for end-user auto-update.** `electron-updater` can't read `latest*.yml`
   from a private repo without auth. Public since 2026-07-03.
-- **macOS multi-arch feed collision.** Intel and Apple Silicon build on separate runners and
-  each publishes its own `latest-mac.yml` (referencing only its arch); the second publish
-  overwrites the first, so the feed ends up pointing at **one** arch. Both `.dmg` are in the
-  Release for manual download, but true auto-update for *both* arches needs the two
-  `latest-mac.yml` merged (open follow-up). Windows and Linux (single arch each) are fine.
+- **macOS is arm64-only (no Intel/x64).** GitHub is retiring the Intel `macos-13` runner —
+  in practice the job can sit queued for hours and never start (10 h, 2026-07-03), so it's
+  dropped from the matrix (it would hang every release). Building x64 on the arm64 `macos-14`
+  runner isn't a simple flag: the **PyInstaller sidecar can't cross-compile**, so a `--x64`
+  build there ships an **arm64 sidecar** (broken on Intel). A real x64 build needs the sidecar
+  built under **Rosetta** (`arch -x86_64` + x86_64 Python) — doable but **unverifiable without
+  an Intel Mac**, so it's deferred (`PLAN_OTWARTE.md` J1-x64). If Intel is ever re-added,
+  mind the **multi-arch feed collision**: each runner publishes its own `latest-mac.yml`
+  (its arch only) and the second overwrites the first — the two would need merging.
 - **Don't pin `arch` under `mac.target` in `electron-builder.yml`.** It overrides the per-runner
   CLI flag (`--mac --arm64` / `--x64`), making **every** runner build **both** arches — and the
   cross-built `.dmg` then ships a sidecar of the wrong architecture (broken). Arch must come
