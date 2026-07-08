@@ -10,7 +10,9 @@ How a versioned Caelo release is assembled across three platforms. The signing m
   **and** the `latest-*.yml` auto-update feeds straight to the tag's Release.
 
 One-time macOS Developer ID cert + GitHub secrets setup lives in
-[`MACOS_SIGNING.md`](MACOS_SIGNING.md). This doc is the per-release checklist.
+[`MACOS_SIGNING.md`](MACOS_SIGNING.md). To build, sign and notarize the macOS `.dmg`
+**locally on an Apple Silicon Mac** (instead of CI), see
+[`MACOS_LOCAL_BUILD.md`](MACOS_LOCAL_BUILD.md). This doc is the per-release checklist.
 
 ---
 

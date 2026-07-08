@@ -4,6 +4,27 @@ All notable changes to **Caelo** are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-07-08
+
+A creative-mode pricing/quality update, plus sturdier image inputs — and the first
+macOS build produced and signed on Apple Silicon.
+
+### Added
+- **1080p video** on **`grok-imagine-video-1.5`**. The Video mode now offers 480p / 720p /
+  1080p when the 1.5 model is selected (the base `grok-imagine-video` still tops out at 720p).
+
+### Changed
+- **Accurate video cost estimates.** Video is now priced **per resolution** to match xAI's
+  tariff — 1.5: $0.08 / $0.14 / $0.25 per second at 480p / 720p / 1080p; base: $0.05 / $0.07 —
+  instead of a single flat per-model rate.
+
+### Fixed
+- **Oversized image inputs no longer fail.** Reference images (Image mode) and the video first
+  frame are now automatically compressed to WebP at the highest quality that still fits the API
+  limit, instead of being rejected.
+- **Readable errors.** Validation errors from the backend are shown as plain text instead of
+  the unhelpful "[object Object]".
+
 ## [0.1.2] — 2026-07-03
 
 A small usability update for the creative modes: reuse the prompt behind any
@@ -67,6 +88,7 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[0.1.3]: https://github.com/AuraVixStudio/caelo/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/AuraVixStudio/caelo/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/AuraVixStudio/caelo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/AuraVixStudio/caelo/releases/tag/v0.1.0
