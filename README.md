@@ -151,9 +151,9 @@ Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 | **macOS** Apple Silicon (arm64) | `Caelo-<version>-arm64.dmg` | ✅ **Developer ID + notarized** (passes Gatekeeper) |
 | **Linux** (x64) | `Caelo-<version>.AppImage` · `caelo-desktop_<version>_amd64.deb` | — unsigned (standard for Linux; verify via the release `sha256`) |
 
-> **macOS is Apple Silicon only.** Intel (x64) builds aren't published — GitHub's Intel macOS
-> runners are being retired, and cross-building the bundled Python sidecar isn't reliably
-> verifiable without an Intel Mac (tracked in [`docs/plans/PLAN_OTWARTE.md`](docs/plans/PLAN_OTWARTE.md)).
+> **macOS is Apple Silicon only.** The `.dmg` is built and notarized on an Apple Silicon Mac.
+> Intel (x64) builds aren't published — there's no Intel Mac to build and verify the native
+> Python sidecar (tracked in [`docs/plans/PLAN_OTWARTE.md`](docs/plans/PLAN_OTWARTE.md)).
 > On Apple Silicon, run the `.dmg`; on Linux, the `.AppImage` is portable (`chmod +x` and run) or
 > install the `.deb`.
 
@@ -201,9 +201,10 @@ cd desktop && npm run typecheck && npm run lint && npm test
 ```
 
 The command above builds the **Windows** installer locally (signed with the maintainer's
-SimplySign cert). **Linux** (AppImage/deb) and **macOS** (arm64 dmg, signed with Developer ID +
-notarized) are built in CI on their own runners and published to the release on a `v*` tag — see
-[`docs/guides/RELEASING.md`](docs/guides/RELEASING.md).
+SimplySign cert). **macOS** (arm64 dmg, Developer ID + notarized) is likewise built **locally on
+an Apple Silicon Mac** — see [`docs/guides/MACOS_LOCAL_BUILD.md`](docs/guides/MACOS_LOCAL_BUILD.md).
+**Linux** (AppImage/deb) is built in CI (a `v*` tag, or a manual workflow run). Per-release
+assembly — see [`docs/guides/RELEASING.md`](docs/guides/RELEASING.md).
 
 </details>
 

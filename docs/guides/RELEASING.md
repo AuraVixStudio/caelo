@@ -26,6 +26,15 @@ Commit and push to `main`.
 
 ## 2. Tag the release → CI builds & publishes Linux + macOS
 
+> **Current practice (since v0.1.3): macOS is built LOCALLY** on an Apple Silicon Mac
+> ([`MACOS_LOCAL_BUILD.md`](MACOS_LOCAL_BUILD.md)), not in CI — so releases are assembled by
+> hand from a **draft**: build Windows + macOS locally, get Linux from a `workflow_dispatch`
+> run's artifacts, `gh release upload` all of them to the draft, then publish. ⚠️ Publishing
+> the draft creates the `vX.Y.Z` tag, which re-triggers this workflow — **cancel that run**
+> (`gh run cancel <id>`) so `--publish always` doesn't overwrite the locally-built macOS `.dmg`.
+> The tag → CI path below still works (secrets are set) and remains a valid fallback for
+> Linux + macOS if you'd rather not build macOS locally.
+
 ```bash
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
