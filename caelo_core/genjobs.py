@@ -68,28 +68,44 @@ def _strip_blobs(params: dict) -> dict:
     return out
 
 # --- szacunek kosztu wg cennika xAI (transparentność BYO-key) -----------------
-# Stawki PER-MODEL wg oficjalnego cennika xAI (https://docs.x.ai/developers/pricing,
-# zweryfikowane 2026-06-07). Obraz rozliczany za sztukę, wideo za sekundę; "quality"
-# i preview są droższe. Służą do pokazania userowi rzędu wielkości jego wydatków
-# (BYO-key), nie do rozliczeń — faktyczne zużycie potwierdza konto xAI.
+# Stawki PER-MODEL wg oficjalnego cennika xAI (https://docs.x.ai/developers/models,
+# zweryfikowane 2026-07-08). Obraz rozliczany za sztukę, wideo za sekundę WYJŚCIA —
+# i stawka wideo zależy od ROZDZIELCZOŚCI (480p/720p/1080p). Służą do pokazania
+# userowi rzędu wielkości jego wydatków (BYO-key), nie do rozliczeń — faktyczne
+# zużycie potwierdza konto xAI.
 IMAGE_COST_PER_IMAGE = {
     "grok-imagine-image": 0.02,          # $0.02 / image (standard, domyślny)
     "grok-imagine-image-quality": 0.05,  # $0.05 / image (wyższa jakość)
 }
+# Stawka $/sek wg (model → rozdzielczość). 1.5 obsługuje 1080p, bazowy tylko do 720p.
 VIDEO_COST_PER_SECOND = {
-    "grok-imagine-video": 0.05,              # $0.050 / sec
-    "grok-imagine-video-1.5": 0.08,          # $0.080 / sec (domyślny)
+    "grok-imagine-video": {"480p": 0.05, "720p": 0.07},
+    "grok-imagine-video-1.5": {"480p": 0.08, "720p": 0.14, "1080p": 0.25},
 }
 # Stawka, gdy model nieznany/niepodany → model domyślny z config.py
-# (DEFAULT_IMAGE_MODEL = grok-imagine-image, DEFAULT_VIDEO_MODEL = …-video-1.5).
+# (DEFAULT_IMAGE_MODEL = grok-imagine-image, DEFAULT_VIDEO_MODEL = …-video-1.5 @ 480p).
 DEFAULT_IMAGE_COST_PER_IMAGE = 0.02
 DEFAULT_VIDEO_COST_PER_SECOND = 0.08
 
 
+def video_rate_per_second(model: str, resolution: Optional[str]) -> float:
+    """Stawka $/sek dla (model, rozdzielczość) z fallbackami: nieznany model →
+    `DEFAULT_VIDEO_COST_PER_SECOND`; nieznana/niepodana rozdzielczość → stawka 480p
+    danego modelu. Czysta funkcja."""
+    tiers = VIDEO_COST_PER_SECOND.get(model or "")
+    if not tiers:
+        return DEFAULT_VIDEO_COST_PER_SECOND
+    res = str(resolution or "").lower()
+    if res in tiers:
+        return tiers[res]
+    return tiers.get("480p", DEFAULT_VIDEO_COST_PER_SECOND)
+
+
 def estimate_cost(kind: str, op: str, params: dict) -> float:
     """Zgrubny szacunek kosztu zadania (USD) z parametrów. Czysta funkcja.
-    Stawka zależy od `params["model"]` (cennik xAI); nieznany/niepodany model →
-    stawka modelu domyślnego.
+    Stawka zależy od `params["model"]` (cennik xAI); dla wideo dodatkowo od
+    `params["resolution"]` (480p/720p/1080p). Nieznany/niepodany model → stawka
+    modelu domyślnego; nieznana rozdzielczość → stawka 480p danego modelu.
 
     ROAD-3.6-d: wideo rozliczane jest za **długość WYJŚCIA**, nie za żądany
     `duration`. `text2video`/`img2video` produkują klip o długości `duration`,
@@ -104,7 +120,7 @@ def estimate_cost(kind: str, op: str, params: dict) -> float:
             rate = IMAGE_COST_PER_IMAGE.get(model, DEFAULT_IMAGE_COST_PER_IMAGE)
             return round(rate * max(1, n), 4)
         if kind == "video":
-            rate = VIDEO_COST_PER_SECOND.get(model, DEFAULT_VIDEO_COST_PER_SECOND)
+            rate = video_rate_per_second(model, params.get("resolution"))
             dur = int(params.get("duration", 6) or 6)
             src = int(params.get("source_duration", 0) or 0)
             if op == "edit":

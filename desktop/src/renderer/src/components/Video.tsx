@@ -12,10 +12,11 @@ import {
   VIDEO_DURATION_MAX,
   VIDEO_DURATION_MIN,
   VIDEO_RATIOS,
-  VIDEO_RESOLUTIONS
+  videoResolutionsFor
 } from '../lib/constants'
 import { cn } from '../lib/cn'
 import { fileToDataUri } from '../lib/files'
+import { compressImageIfNeeded } from '../lib/imageCompress'
 import { ArtifactCard } from './ArtifactCard'
 import { GenQueue } from './GenQueue'
 import { Button } from './ui/Button'
@@ -79,6 +80,15 @@ export function Video({ conn }: { conn: Conn }) {
 
   const needsSource = mode === 'edit' || mode === 'extend'
 
+  // Rozdzielczości zależą od modelu: 1080p obsługuje tylko 1.5.
+  const resolutions = videoResolutionsFor(model)
+
+  // Po zmianie modelu na bazowy (bez 1080p) zejdź na najwyższą obsługiwaną.
+  useEffect(() => {
+    if (!resolutions.includes(resolution)) setResolution(resolutions[resolutions.length - 1])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model])
+
   // Edit/Extend nie działają na modelach 1.5 (grok-imagine-video-1.5 obsługuje tylko
   // image→video → 400 na /videos/extensions); tylko bazowy grok-imagine-video.
   // Po wejściu w te tryby wybieramy pierwszy model bez "1.5". Ręczny wybór nie jest nadpisywany.
@@ -135,7 +145,8 @@ export function Video({ conn }: { conn: Conn }) {
       if (f) setSource({ name: f.name, uri: await fileToDataUri(f) })
     } else {
       const f = list.find((x) => x.type.startsWith('image/'))
-      if (f) setImage({ name: f.name, uri: await fileToDataUri(f) })
+      // Duży kadr startowy jest automatycznie kompresowany do WebP (limit API).
+      if (f) setImage({ name: f.name, uri: (await compressImageIfNeeded(f)).uri })
     }
   }
 
@@ -316,7 +327,7 @@ export function Video({ conn }: { conn: Conn }) {
               </Field>
               <Field label="Resolution" className="w-28">
                 <Select size="sm" value={resolution} onChange={(e) => setResolution(e.target.value)}>
-                  {VIDEO_RESOLUTIONS.map((r) => (
+                  {resolutions.map((r) => (
                     <option key={r} value={r}>
                       {r}
                     </option>

@@ -16,7 +16,14 @@ export const IMAGE_MODELS = ['grok-imagine-image', 'grok-imagine-image-quality']
 // Maks. liczba obrazów referencyjnych w edycji (limit API).
 export const EDIT_MAX_IMAGES = 3
 
-export const VIDEO_RESOLUTIONS = ['480p', '720p']
+// Pełny zbiór; 1080p obsługuje tylko model 1.5 (bazowy kończy się na 720p).
+// Źródło prawdy: caelo_core/config.py -> VIDEO_RESOLUTIONS(_BY_MODEL).
+export const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p']
+
+// Rozdzielczości dostępne dla danego modelu wideo.
+export function videoResolutionsFor(model: string): string[] {
+  return model.includes('1.5') ? ['480p', '720p', '1080p'] : ['480p', '720p']
+}
 
 // 'Original' = nie wysyłaj aspect_ratio (zachowaj kadr źródłowy / domyślny API).
 export const VIDEO_RATIOS = ['Original', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']

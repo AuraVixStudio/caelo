@@ -16,7 +16,7 @@ import {
   IMAGE_VARIANTS,
   RESOLUTIONS
 } from '../lib/constants'
-import { fileToDataUri } from '../lib/files'
+import { compressImageIfNeeded } from '../lib/imageCompress'
 import { ArtifactCard } from './ArtifactCard'
 import { GenQueue } from './GenQueue'
 import { Badge } from './ui/Badge'
@@ -103,9 +103,17 @@ export function Image({ conn }: { conn: Conn }) {
 
   async function addFiles(files: FileList | null): Promise<void> {
     if (!files) return
+    setError(null)
     const imgs = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    // Duże obrazy są automatycznie kompresowane do WebP, by zmieściły się w limicie API.
     const loaded = await Promise.all(
-      imgs.map(async (f) => ({ name: f.name, uri: await fileToDataUri(f) }))
+      imgs.map(async (f) => {
+        const r = await compressImageIfNeeded(f)
+        if (!r.fitsBudget) {
+          setError(`"${f.name}" is too large and could not be compressed enough — try a smaller image.`)
+        }
+        return { name: f.name, uri: r.uri }
+      })
     )
     setImages((prev) => [...prev, ...loaded].slice(0, EDIT_MAX_IMAGES))
   }

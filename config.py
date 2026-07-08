@@ -438,4 +438,10 @@ FONTS = {
 # --- Default Settings ---
 ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20"]
 RESOLUTIONS = ["1k", "2k"]
-VIDEO_RESOLUTIONS = ["480p", "720p"]
+# Wideo: 1080p doszło w modelu 1.5 (docs x.ai 2026-07). Lista domyślna = pełny zbiór;
+# rozdzielczości zależą od modelu — bazowy grok-imagine-video kończy się na 720p.
+VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"]
+VIDEO_RESOLUTIONS_BY_MODEL = {
+    "grok-imagine-video-1.5": ["480p", "720p", "1080p"],
+    "grok-imagine-video": ["480p", "720p"],
+}

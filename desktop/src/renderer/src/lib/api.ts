@@ -133,6 +133,42 @@ export type ApiInit = RequestInit & { timeoutMs?: number }
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
+/**
+ * FastAPI `detail` bywa stringiem, tablicą błędów walidacji ([{loc,msg,type}]) lub
+ * obiektem — spłaszcz do czytelnego tekstu. Bez tego 422 renderował się jako
+ * „[object Object]" (String() na tablicy/obiekcie).
+ */
+export function formatDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) => {
+        if (typeof d === 'string') return d
+        if (d && typeof d === 'object') {
+          const o = d as { msg?: unknown; loc?: unknown }
+          const loc = Array.isArray(o.loc)
+            ? o.loc.filter((x) => x !== 'body' && x !== 'query' && x !== 'path').join('.')
+            : ''
+          const msg = typeof o.msg === 'string' ? o.msg : JSON.stringify(d)
+          return loc ? `${loc}: ${msg}` : msg
+        }
+        return String(d)
+      })
+      .filter(Boolean)
+    if (msgs.length) return msgs.join('; ')
+  }
+  if (detail && typeof detail === 'object') {
+    const o = detail as { msg?: unknown }
+    if (typeof o.msg === 'string') return o.msg
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(detail)
+}
+
 /** Łączy sygnały (timeout + opcjonalny sygnał wywołującego) — pierwszy abort wygrywa. */
 function combineSignals(signals: AbortSignal[]): AbortSignal {
   if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals)
@@ -176,7 +212,7 @@ async function api<T>(conn: Conn, path: string, init?: ApiInit): Promise<T> {
     let detail = `HTTP ${res.status}`
     try {
       const body = await res.json()
-      if (body?.detail) detail = String(body.detail)
+      if (body?.detail !== undefined && body?.detail !== null) detail = formatDetail(body.detail)
     } catch {
       /* ignore */
     }

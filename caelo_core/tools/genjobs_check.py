@@ -687,6 +687,35 @@ def _unit_cost_source_duration(checks: list) -> None:
                    estimate_cost("video", "text2video", {"duration": 6}) == round(rate * 6, 4)))
 
 
+def _unit_cost_resolution(checks: list) -> None:
+    """Cennik wideo per-ROZDZIELCZOŚĆ (docs x.ai 2026-07): stawka $/sek zależy od
+    (model, resolution). 1.5 obsługuje 1080p; bazowy tylko do 720p. Nieznana
+    rozdzielczość → stawka 480p danego modelu."""
+    from caelo_core.genjobs import estimate_cost, video_rate_per_second
+
+    # Stawki wg cennika
+    checks.append(("cost: 1.5 @ 1080p = $0.25/s",
+                   video_rate_per_second("grok-imagine-video-1.5", "1080p") == 0.25))
+    checks.append(("cost: 1.5 @ 720p = $0.14/s",
+                   video_rate_per_second("grok-imagine-video-1.5", "720p") == 0.14))
+    checks.append(("cost: base @ 720p = $0.07/s",
+                   video_rate_per_second("grok-imagine-video", "720p") == 0.07))
+    checks.append(("cost: base @ 480p = $0.05/s",
+                   video_rate_per_second("grok-imagine-video", "480p") == 0.05))
+
+    # Nieznana/brak rozdzielczości → stawka 480p danego modelu (bez crasha)
+    checks.append(("cost: base @ 1080p (unsupported) falls back to base 480p",
+                   video_rate_per_second("grok-imagine-video", "1080p") == 0.05))
+    checks.append(("cost: 1.5 without resolution falls back to 1.5 480p",
+                   video_rate_per_second("grok-imagine-video-1.5", None) == 0.08))
+
+    # end-to-end przez estimate_cost: 1.5 @ 1080p, 6 s → 0.25*6
+    checks.append(("cost: estimate text2video 1.5@1080p 6s = 1.50",
+                   estimate_cost("video", "text2video",
+                                 {"model": "grok-imagine-video-1.5",
+                                  "resolution": "1080p", "duration": 6}) == round(0.25 * 6, 4)))
+
+
 def main() -> int:
     import logging
     # Wycisz logger silnika: testy CELOWO wywołują błędy/anulowania (handled),
@@ -701,6 +730,7 @@ def main() -> int:
     _unit_clear(checks)
     _unit_blob_stripping(checks)
     _unit_cost_source_duration(checks)
+    _unit_cost_resolution(checks)
     _unit_clear_keeps_active(checks)
     _unit_backend_image_executor(checks)
     _unit_backend_video_executor(checks)
