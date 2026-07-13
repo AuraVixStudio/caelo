@@ -321,6 +321,7 @@ OAUTH_REDIRECT_PATH = "/callback"
 # --- Modele czatu (lista zapasowa, gdy /v1/models się nie powiedzie) ---
 # "Grok Build" = wybór modelu grok-build-0.1.
 DEFAULT_CHAT_MODELS = [
+    "grok-4.5",
     "grok-4.3",
     "grok-4.20-0309-non-reasoning",
     "grok-4.20-0309-reasoning",
@@ -329,7 +330,7 @@ DEFAULT_CHAT_MODELS = [
     "grok-4",
     "grok-3",
 ]
-DEFAULT_CHAT_MODEL = "grok-4.3"
+DEFAULT_CHAT_MODEL = "grok-4.5"
 
 # Przybliżony rozmiar okna kontekstowego modelu (do miernika UI agenta). To SZACUNEK
 # (xAI nie udostępnia tego stabilnie per-model) — używany tylko do paska „X/Y (Z%)".
@@ -338,10 +339,13 @@ _CONTEXT_WINDOW_DEFAULT = 256_000
 
 def context_window_for(model: str) -> int:
     """Przybliżony rozmiar okna kontekstowego (tokeny) dla miernika UI. Szacunek —
-    rodzina grok-3 ma mniejsze okno; grok-4.x / grok-build / nieznane → duże okno."""
+    rodzina grok-3 ma mniejsze okno; grok-4.5 = 500k (docs); grok-4.x / grok-build /
+    nieznane → duże okno."""
     m = (model or "").lower()
     if m.startswith("grok-3"):
         return 131_072
+    if m.startswith("grok-4.5"):
+        return 500_000
     return _CONTEXT_WINDOW_DEFAULT
 
 # --- Modele obrazu (zakładka Image: generowanie + edycja) ---

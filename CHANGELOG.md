@@ -4,6 +4,22 @@ All notable changes to **Caelo** are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] — 2026-07-13
+
+Adds xAI's new flagship model, **Grok 4.5**.
+
+### Added
+- **Grok 4.5** (`grok-4.5`) is now in the chat model list and is the new default. Per xAI it is
+  the most intelligent and fastest model, trained for coding, agentic tasks, and knowledge work
+  (knowledge cutoff February 1, 2026). It supports adjustable `reasoning_effort` (low / medium /
+  high, default high) — the effort selector works with it out of the box.
+
+### Changed
+- **Default chat model is now `grok-4.5`** (was `grok-4.3`). Existing per-session and saved model
+  choices are unaffected; the live model list from the API still takes precedence over this
+  built-in fallback list.
+- The context-window meter now estimates **500k tokens** for `grok-4.5`.
+
 ## [0.1.3] — 2026-07-08
 
 A creative-mode pricing/quality update, plus sturdier image inputs — and the first

@@ -5,9 +5,9 @@
 // pewno, że NIE wspierają effortu (xAI zwraca błąd); nowe/nieznane → `true` (brak fałszywych
 // ostrzeżeń; realną niezgodność wychwyci fallback backendu).
 //
-// Wsparcie (docs.x.ai, VI 2026): grok-4.3, grok-4.20-*-reasoning, grok-4.20-multi-agent,
-// rodzina grok-3-mini. Brak wsparcia (4xx): grok-4, grok-build-*, grok-3 (nie-mini),
-// warianty *-non-reasoning.
+// Wsparcie (docs.x.ai): grok-4.5 (low/medium/high, domyślnie high), grok-4.3,
+// grok-4.20-*-reasoning, grok-4.20-multi-agent, rodzina grok-3-mini. Brak wsparcia (4xx):
+// grok-4, grok-build-*, grok-3 (nie-mini), warianty *-non-reasoning.
 export function modelSupportsEffort(model: string): boolean {
   const m = (model || '').toLowerCase().trim()
   if (!m) return true
