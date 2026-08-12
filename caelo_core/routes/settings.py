@@ -35,7 +35,7 @@ class SettingsPatch(BaseModel):
     code_model: Optional[str] = None
     system_prompt: Optional[str] = None
     chat_temperature: Optional[float] = None
-    # M19-B9: domyślny reasoning_effort czatu / agenta (low|medium|high). Walidowane
+    # M19-B9: domyślny reasoning_effort czatu / agenta (low|medium|high|xhigh). Walidowane
     # w put_settings (śmieć → pominięte), by w pliku ustawień nie wylądowała zła wartość.
     chat_effort: Optional[str] = None
     code_effort: Optional[str] = None

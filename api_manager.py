@@ -4,7 +4,9 @@ import io
 import json
 import time
 from PIL import Image
-from config import API_BASE, DEFAULT_VIDEO_MODEL, DEFAULT_IMAGE_MODEL
+from config import (API_BASE, DEFAULT_VIDEO_MODEL, DEFAULT_IMAGE_MODEL,
+                    IMAGE_QUALITY_LEVELS, MAX_VIDEO_REFERENCE_IMAGES,
+                    image_model_supports_quality)
 
 # Timeouty HTTP do xAI (P1-4) — sekundy. Bez nich zawieszone połączenie blokuje
 # wątek z puli serwera (dużo takich = zamrożony sidecar). Wartości dobrane do typu
@@ -13,6 +15,21 @@ from config import API_BASE, DEFAULT_VIDEO_MODEL, DEFAULT_IMAGE_MODEL
 TIMEOUT_IMAGE = 180        # generacja/edycja obrazu
 TIMEOUT_VIDEO_JOB = 120    # POST tworzący/edytujący/przedłużający zadanie wideo (-> request_id)
 TIMEOUT_POLL = 30          # GET statusu zadania wideo
+
+def _apply_quality(payload, quality):
+    """Dołóż `quality` (low|medium) TYLKO gdy model faktycznie go przyjmuje.
+    xAI dokumentuje ten parametr wyłącznie dla `grok-imagine-image-2.0`; wysłanie go
+    do innego modelu kończy się 4xx, więc po cichu go pomijamy zamiast psuć żądanie."""
+    q = (quality or "").strip().lower()
+    if q in IMAGE_QUALITY_LEVELS and image_model_supports_quality(payload.get("model", "")):
+        payload["quality"] = q
+
+
+def _reference_images_payload(reference_images):
+    """Lista URI/URL → format `reference_images` xAI ([{"url": …}], maks. 3)."""
+    refs = [r for r in (reference_images or []) if r]
+    return [{"url": r} for r in refs[:MAX_VIDEO_REFERENCE_IMAGES]]
+
 
 def get_headers(api_key):
     return {
@@ -24,7 +41,7 @@ class APIManager:
     def __init__(self, api_key_provider):
         self.get_api_key = api_key_provider
 
-    def generate_image(self, prompt, n, ratio, resolution, model=None):
+    def generate_image(self, prompt, n, ratio, resolution, model=None, quality=None):
         api_key = self.get_api_key()
         payload = {
             "model": model or DEFAULT_IMAGE_MODEL,
@@ -34,7 +51,8 @@ class APIManager:
         }
         if ratio != "auto":
             payload["aspect_ratio"] = ratio
-            
+        _apply_quality(payload, quality)
+
         r = requests.post(f"{API_BASE}/images/generations", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_IMAGE)
         r.raise_for_status()
         return [item["url"] for item in r.json()["data"]]
@@ -74,7 +92,12 @@ class APIManager:
         return [item["url"] for item in r.json().get("data", [])]
 
     def create_video_job(self, prompt, duration, resolution, ratio, image_path=None,
-                          model=None, image_data_uri=None):
+                          model=None, image_data_uri=None, reference_images=None):
+        """Zadanie wideo (/videos/generations). `image_data_uri`/`image_path` = kadr
+        STARTOWY (image→video). `reference_images` (do 3, docs 2026-08, model 1.5) to
+        co innego: przenoszą postać/ubranie/przedmiot do klipu NIE blokując pierwszej
+        klatki — w promptcie odwołujesz się do nich tagami <IMAGE_1>…<IMAGE_3>.
+        Oba mogą wystąpić razem."""
         api_key = self.get_api_key()
         payload = {
             "model": model or DEFAULT_VIDEO_MODEL,
@@ -98,6 +121,10 @@ class APIManager:
             img.save(buffered, format="JPEG")
             b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
             payload["image"] = {"url": f"data:image/jpeg;base64,{b64}"}
+
+        refs = _reference_images_payload(reference_images)
+        if refs:
+            payload["reference_images"] = refs
 
         r = requests.post(f"{API_BASE}/videos/generations", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_VIDEO_JOB)
         # Pokaz tresc bledu 4xx (jak edit_image) — generyczne "400 Bad Request" nie
@@ -246,7 +273,8 @@ class APIManager:
         r.encoding = "utf-8"
         return r.json()["choices"][0]["message"]
 
-    def edit_image_b64(self, prompt, data_uris, n=1, ratio="auto", resolution="1k", model=None):
+    def edit_image_b64(self, prompt, data_uris, n=1, ratio="auto", resolution="1k",
+                       model=None, quality=None):
         """Edycja obrazu z gotowych data-URI (np. z załączników czatu), bez ścieżek plików."""
         api_key = self.get_api_key()
         images_list = [{"url": uri, "type": "image_url"} for uri in data_uris]
@@ -259,6 +287,7 @@ class APIManager:
             "resolution": resolution,
             "response_format": "url",
         }
+        _apply_quality(payload, quality)
         r = requests.post(f"{API_BASE}/images/edits", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_IMAGE)
         if r.status_code in (400, 422):
             raise Exception(f"API Error: {r.text[:500]}")

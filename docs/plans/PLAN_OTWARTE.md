@@ -23,7 +23,7 @@
 | # | Blok | Priorytet | Kto | Skrót |
 |---|---|---|---|---|
 | 1 | **Publikacja (Faza B)** | P1 | 👤+🤖 | ✅ **DOMKNIĘTA 2026-06-17** — remote+CI+gitleaks+pytest+podpisany release `v0.1.0`; zostaje tylko public repo → auto-update end-user |
-| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/**D**/E/F/**G**(G1–G7)/**H**/**I**/**K** · zostaje tylko: **J** (cross-platform mac/Linux — wymaga maszyny mac/Linux) |
+| 2 | **Weryfikacja LIVE** | P1/P2 | 👤 | ✅ A/B/C/**D**/E/F/**G**(G1–G7)/**H**/**I**/**K** · zostaje: **J** (cross-platform mac/Linux) + **L** (fala modeli 2026-08: grok-4.6/xhigh, referencje wideo, image 2.0) |
 | 3 | **Nowe funkcje TOP-10** | P2/P3 | 🤖 | TOP7 rewind czatu, TOP8 inline Ctrl-K, TOP9 auto-pamięć usera, TOP10 background-agents |
 | 4 | **Motywy inżynierskie 4.1** | P2/P3 | 🤖 | odporność (4.1-c), wydajność (4.1-b), API total/cost (4.1-e), /genjobs WS-push (4.1-f) |
 | 5 | **Strategiczne / długoterminowe** | P2/P3 | 🤖+👤 | ROAD-4.2-a (inni dostawcy LLM), spike B0 (`cli-chat-proxy`), ROAD-4.2-b |
@@ -74,7 +74,8 @@
 > **Pełny runbook z krokami/pułapkami:** [`PLAN_WERYFIKACJI_LIVE.md`](PLAN_WERYFIKACJI_LIVE.md)
 > (tabela wyników na górze). Status zaliczone (LIVE): **A** (auth) · **B** (czat) · **C** (Image/Video) ·
 > **D** (głos) · **E** (agent) · **F** (subagenci) · **G-rdzeń** (MCP/headless/LSP) · **H** (funkcje-widma — zdecydowane) ·
-> **I** (pakiety) · **K** (terminal) · **G** (G1–G7, w tym G4 remote-MCP + G7 ACP). Zostaje tylko: **J** (mac/Linux).
+> **I** (pakiety) · **K** (terminal) · **G** (G1–G7, w tym G4 remote-MCP + G7 ACP). Zostaje: **J** (mac/Linux)
+> i **L** (fala modeli 2026-08 — dodana w v0.1.5, jeszcze bez potwierdzenia na żywym API).
 > Po każdym teście: zaktualizuj tabelę wyników i skoryguj „zrobione (mock)" → realny status w docs.
 
 - [x] **E — Agent kodowania** P1 ✅ **CAŁA SEKCJA (2026-06-17)** — E1–E10 zaliczone na żywo (E5 checkpointy/undo,
@@ -117,6 +118,15 @@
   - [ ] **J2/J3 — PTY + tree-kill POSIX na żywo** ⬜ — kod jest (stdlib `pty`, POSIX tree-kill), brak potwierdzenia LIVE na mac/Linux.
 - [x] **K — Terminal** P3 ✅ **2026-06-23** — K1 pywinpty 3.0.3 + scrubbed env potwierdzony (`echo %XAI_API_KEY%`/
   `%CAELO_CORE_TOKEN%` → niezrozwinięte = sekrety nie wyciekają przez WS terminala).
+- [ ] **L — Fala modeli 2026-08 (v0.1.5)** P2 ⬜ 👤 — kod + selfchecki zielone (mock), brak potwierdzenia na żywo:
+  - [ ] **L1 grok-4.6** — realna tura czatu na nowym domyślnym modelu; sprawdź `xhigh` (czy xAI go przyjmuje,
+    czy leci 400 → ponowienie bez effortu) i licznik okna 500k.
+  - [ ] **L2 reference-to-video** — `grok-imagine-video-1.5` + 1–3 referencje z tagami `<IMAGE_1>…` w promptcie;
+    potwierdź, że postać/ubranie faktycznie wchodzi do klipu i że pierwsza klatka NIE jest zablokowana
+    (test razem z „First frame" — oba pola naraz).
+  - [ ] **L3 grok-imagine-image-2.0** — generacja + `quality` low vs medium; potwierdź, że inne modele
+    faktycznie odrzucają `quality` (nasz filtr jest po stronie klienta) i zweryfikuj stawkę $0.04/szt.
+    na koncie xAI (jak przy TTS — nasz koszt to szacunek).
 
 ---
 

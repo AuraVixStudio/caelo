@@ -70,7 +70,9 @@ export interface ModelsResp {
 }
 
 // M19-B9: poziom reasoning_effort dla modeli rozumujących ('' = Auto/dziedzicz).
-export type ReasoningEffort = '' | 'low' | 'medium' | 'high'
+// '' = Auto (use the saved default). 'xhigh' arrived with grok-4.6 and is offered
+// only for models that document it — see lib/modelCaps.ts.
+export type ReasoningEffort = '' | 'low' | 'medium' | 'high' | 'xhigh'
 
 export interface SettingsResp {
   chat_model: string
@@ -348,6 +350,7 @@ export interface ImageJobBody {
   resolution: string
   model?: string
   images?: string[] // data-URI (edit/variation, up to 3)
+  quality?: 'low' | 'medium' // grok-imagine-image-2.0 only (ignored elsewhere)
 }
 
 export interface VideoGenJobBody {
@@ -359,6 +362,10 @@ export interface VideoGenJobBody {
   model?: string
   image?: string // data-URI: first frame for img2video
   video?: string // https URL or data:video — source for edit/extend
+  // Reference-to-video (grok-imagine-video-1.5, up to 3): carries a character, outfit
+  // or object into the clip WITHOUT locking the first frame. Referenced in the prompt
+  // as <IMAGE_1>…<IMAGE_3>. Orthogonal to `image` — both may be sent together.
+  reference_images?: string[]
 }
 
 // Submit returns immediately with the queued job; the worker runs it server-side.
@@ -875,16 +882,23 @@ export interface McpTool {
   readonly: boolean
 }
 
+// 'stdio' = a local subprocess. 'http' = a local Streamable HTTP server that WE
+// call (loopback; the same permission gate as stdio). 'remote' = native remote
+// MCP, executed on xAI's side — which is why a loopback address is useless
+// there: xAI's cloud cannot reach this machine.
+export type McpTransportKind = 'stdio' | 'http' | 'remote'
+
 export interface McpServerInfo {
   id: string
   name: string
-  transport: 'stdio' | 'remote'
+  transport: McpTransportKind
   enabled: boolean
   status?: string // stopped | starting | ready | error | remote
   error?: string
   command?: string[]
   cwd?: string | null
   env_keys?: string[]
+  header_keys?: string[] // http: names only — values are secrets, like env
   url?: string
   server_label?: string
   has_authorization?: boolean
@@ -898,12 +912,13 @@ export interface McpServerInfo {
 export interface McpServerInput {
   id?: string
   name?: string
-  transport: 'stdio' | 'remote'
+  transport: McpTransportKind
   command?: string[]
   cwd?: string | null
   env?: Record<string, string>
   url?: string
   authorization?: string
+  headers?: Record<string, string>
   server_label?: string
   enabled?: boolean
 }
@@ -926,7 +941,7 @@ export const stopMcpServer = (c: Conn, id: string): Promise<{ server: McpServerI
 export interface McpCatalogInput {
   key: string
   label: string
-  target: 'arg' | 'env'
+  target: 'arg' | 'env' | 'auth' // 'auth' → Authorization: Bearer <value> (http)
   env_key?: string // dla target === 'env'
   placeholder?: string
   required?: boolean
@@ -937,7 +952,7 @@ export interface McpCatalogEntry {
   name: string
   description: string
   category: string
-  transport: 'stdio' | 'remote'
+  transport: McpTransportKind
   command?: string[]
   env?: Record<string, string>
   url?: string

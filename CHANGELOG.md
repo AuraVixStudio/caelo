@@ -4,6 +4,48 @@ All notable changes to **Caelo** are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] — 2026-08-12
+
+Picks up xAI's August model wave — **Grok 4.6**, **reference-to-video**, and
+**Grok Imagine Image 2.0** — and adds a third way to connect an MCP server:
+a **local HTTP** one, with DAZ Studio 6 (SceneAgent MCP) in the catalogue.
+
+### Added
+- **Grok 4.6** (`grok-4.6`) is in the chat model list and is the new default. 500k context,
+  vision, function calling, live web/X search, and a new **`xHigh`** reasoning level on top of
+  low / medium / high. The context meter estimates 500k for it.
+- **xHigh reasoning effort.** The effort selector offers it **only on models that document it**
+  (today: `grok-4.6`) — picking a level a model doesn't know would silently fall back to its
+  default, so the menu hides it instead, and warns if a previously chosen xHigh no longer applies
+  after a model switch.
+- **Reference images for video** (reference-to-video, `grok-imagine-video-1.5`). Attach up to
+  **3** images in the Video panel to carry a character, outfit, or object into the clip and refer
+  to them in the prompt as `<IMAGE_1>`…`<IMAGE_3>`. Unlike a first frame, they do **not** fix the
+  opening shot — both can be used together. The tray only appears on models that accept them,
+  and the references survive a tab switch like the other staged media.
+- **Grok Imagine Image 2.0** (`grok-imagine-image-2.0`) in the image model list, with its
+  **Quality** control (low / medium, xAI's default is medium). The control is shown only for 2.0 —
+  it is the only model that accepts the parameter, and other models reject the whole request.
+- **Local HTTP MCP servers** (`transport: "http"`). Beside stdio (a local process) and remote
+  (executed on xAI's side), Caelo can now call a Streamable-HTTP MCP server **running on this
+  machine**, with its tools going through the same permission gate as a local process. Server
+  tokens are stored like other MCP secrets — the renderer only ever sees whether one is set, never
+  its value — and a token is refused over plain `http://` to a non-loopback host.
+- **DAZ Studio 6 in the MCP catalogue**, as two entries because the two editions differ in
+  transport: **SceneAgent MCP (Pro)** over stdio — its bridge path is read from the installer's
+  registry key and verified on disk, so the entry stays one-click — and **SceneAgent MCP
+  (Plugin Edition)** over loopback HTTP, which takes the access token from the plugin's pane.
+
+### Changed
+- **Default chat model is now `grok-4.6`** (was `grok-4.5`). Saved per-session and per-setting
+  choices are untouched, and the live model list from the API still wins over the built-in fallback.
+- **Image cost estimates know 2.0** ($0.04 per image — twice the standard model, half of quality).
+  The **default image model stays `grok-imagine-image`**: 2.0 is a deliberate choice, not a silent
+  price increase.
+- Servers imported from `~/.claude.json` with a **loopback** URL now arrive as local `http`
+  servers instead of remote ones — xAI's cloud cannot reach this machine, so the old mapping
+  produced a server that looked configured but could never run.
+
 ## [0.1.4] — 2026-07-13
 
 Adds xAI's new flagship model, **Grok 4.5**.

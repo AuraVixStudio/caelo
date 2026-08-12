@@ -159,6 +159,11 @@ Generate and edit images via a unified job queue (M11).
 - **Variation** — produce variations of a reference.
 - Up to **3 reference images** can be staged.
 
+**Models.** `grok-imagine-image` (standard, the default), **`grok-imagine-image-2.0`** (newer
+generation), and `grok-imagine-image-quality`. They differ in price per image, so the model stays
+your choice — the estimate updates with it. Picking **2.0** reveals a **Quality** control
+(low / medium); no other model accepts it, so the control is hidden for them.
+
 **How it works.** Submitting creates a **job** in the queue (queued → running → done/failed).
 A **cost estimate** is shown before you run. Finished images are saved and registered as
 **artifacts** (visible in **Gallery** and **History**), scoped to the active project. You can
@@ -175,6 +180,12 @@ you can keep working.
 - **Text → video** and **Image → video** (stage a source image / first frame).
 - **Edit** an existing video, or **Extend** it (add duration).
 - Set duration, resolution, and aspect ratio where applicable.
+
+**Reference images** (on `grok-imagine-video-1.5`). Attach up to **3** images to carry a
+character, an outfit, or an object into the clip, and point at them in the prompt as
+`<IMAGE_1>`, `<IMAGE_2>`, `<IMAGE_3>`. This is *not* the same as a first frame: references do not
+fix the opening shot, and you can use both together. On models that don't accept them the tray is
+disabled and says so, rather than dropping them silently.
 
 **How it works.** Like Image: a queued job with a cost estimate, cancel/retry, and the result
 saved as a project artifact. Because video can take minutes, the job stays "running" until the
@@ -259,7 +270,12 @@ Make the hub programmable. Tools added here serve **both** Chat and the agent. T
 
 - **Authentication** — Sign in with xAI (OAuth) or paste an **API key** (stored locally; only a
   `has_api_key` flag is ever returned). Sign out.
-- **Models** — choose the **chat** model and the **code/agent** model.
+- **Models** — choose the **chat** model and the **code/agent** model. The default chat model is
+  **`grok-4.6`** (500k context, vision, live search).
+- **Reasoning effort** — the gauge next to the chat and agent composers overrides how hard the
+  model thinks for the next turn (Auto / Low / Medium / High, plus **xHigh** on `grok-4.6`). Only
+  levels the selected model actually supports are offered; if one isn't, the selector says so and
+  the model's own default is used.
 - **System prompt** and **temperature** for chat.
 - **Live search defaults** — default search mode and sources for Chat.
 - **Voice defaults** — default voice and language.

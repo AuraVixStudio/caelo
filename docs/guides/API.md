@@ -83,6 +83,17 @@ Unified async queue for image & video (statuses: queued → running → done/fai
 | `POST` | `/genjobs/{job_id}/cancel` | Cancel a queued/running job. |
 | `POST` | `/genjobs/{job_id}/retry` | Retry a failed job. |
 
+**Model-scoped body fields** (both are rejected by models that don't document them, so the
+renderer hides the controls and the backend drops the field rather than break the call):
+
+- `quality` (`low` | `medium`) on `/genjobs/image` — **`grok-imagine-image-2.0` only**; xAI's
+  default is `medium`.
+- `reference_images` (≤3 data-URIs) on `/genjobs/video` — **`grok-imagine-video-1.5` only**, and
+  only for `text2video` / `img2video` (`edit` / `extend` reject it with 422). Distinct from
+  `image`, which is the first frame: references carry a character/object into the clip without
+  locking the opening shot and are addressed in the prompt as `<IMAGE_1>`…`<IMAGE_3>`. Like other
+  data-URI fields they are stripped from `GET /genjobs` responses (P1-D).
+
 ## Voice (M12)
 
 | Method | Path | Description |

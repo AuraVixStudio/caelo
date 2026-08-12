@@ -11,7 +11,18 @@ export const IMAGE_VARIANTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 // Fallback listy modeli obrazu, gdy /models jeszcze nie odpowiedziało
 // (źródło prawdy: caelo_core/config.py -> IMAGE_MODELS).
-export const IMAGE_MODELS = ['grok-imagine-image', 'grok-imagine-image-quality']
+export const IMAGE_MODELS = [
+  'grok-imagine-image',
+  'grok-imagine-image-2.0',
+  'grok-imagine-image-quality'
+]
+
+// Parametr `quality` przyjmuje WYŁĄCZNIE grok-imagine-image-2.0 (docs.x.ai); inne
+// modele zwracają 4xx, więc backend go dla nich pomija, a UI nie pokazuje pola.
+export const IMAGE_QUALITY_LEVELS = ['low', 'medium']
+export function imageModelSupportsQuality(model: string): boolean {
+  return model === 'grok-imagine-image-2.0'
+}
 
 // Maks. liczba obrazów referencyjnych w edycji (limit API).
 export const EDIT_MAX_IMAGES = 3
@@ -23,6 +34,14 @@ export const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p']
 // Rozdzielczości dostępne dla danego modelu wideo.
 export function videoResolutionsFor(model: string): string[] {
   return model.includes('1.5') ? ['480p', '720p', '1080p'] : ['480p', '720p']
+}
+
+// Reference-to-video: do 3 obrazów przenoszących postać/ubranie/przedmiot do klipu
+// (BEZ blokowania pierwszej klatki — to osobna rzecz niż „First frame"). Obsługuje
+// je tylko grok-imagine-video-1.5. Źródło prawdy: config.py -> VIDEO_REFERENCE_MODELS.
+export const VIDEO_MAX_REFERENCE_IMAGES = 3
+export function videoModelSupportsReferences(model: string): boolean {
+  return model.includes('1.5')
 }
 
 // 'Original' = nie wysyłaj aspect_ratio (zachowaj kadr źródłowy / domyślny API).

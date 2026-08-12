@@ -11,7 +11,9 @@ import {
   VIDEO_DURATION_DEFAULT,
   VIDEO_DURATION_MAX,
   VIDEO_DURATION_MIN,
+  VIDEO_MAX_REFERENCE_IMAGES,
   VIDEO_RATIOS,
+  videoModelSupportsReferences,
   videoResolutionsFor
 } from '../lib/constants'
 import { cn } from '../lib/cn'
@@ -61,6 +63,8 @@ export function Video({ conn }: { conn: Conn }) {
     setPendingSend,
     videoFrame: image,
     setVideoFrame: setImage,
+    videoRefs: refs,
+    setVideoRefs: setRefs,
     videoSource: source,
     setVideoSource: setSource,
     videoCommandMode,
@@ -79,6 +83,11 @@ export function Video({ conn }: { conn: Conn }) {
   }, [modelsResp])
 
   const needsSource = mode === 'edit' || mode === 'extend'
+  // Reference-to-video: tylko przy generowaniu i tylko na modelu 1.5.
+  const canUseRefs = !needsSource && videoModelSupportsReferences(model)
+  // Referencje zostają w Hub po zmianie modelu — pokazujemy je wtedy z ostrzeżeniem
+  // zamiast chować, bo ukryta taca = cicha strata tego, co user załadował.
+  const showRefs = !needsSource && (canUseRefs || refs.length > 0)
 
   // Rozdzielczości zależą od modelu: 1080p obsługuje tylko 1.5.
   const resolutions = videoResolutionsFor(model)
@@ -155,6 +164,21 @@ export function Video({ conn }: { conn: Conn }) {
     e.target.value = ''
   }
 
+  // Obrazy referencyjne (do 3) — kompresowane jak kadr startowy, bo lecą tą samą
+  // drogą data-URI i podlegają temu samemu limitowi API.
+  async function addRefFiles(files: FileList | null): Promise<void> {
+    const imgs = Array.from(files ?? []).filter((f) => f.type.startsWith('image/'))
+    const loaded = await Promise.all(
+      imgs.map(async (f) => ({ name: f.name, uri: (await compressImageIfNeeded(f)).uri }))
+    )
+    setRefs((prev) => [...prev, ...loaded].slice(0, VIDEO_MAX_REFERENCE_IMAGES))
+  }
+
+  function onPickRefs(e: ChangeEvent<HTMLInputElement>): void {
+    void addRefFiles(e.target.files)
+    e.target.value = ''
+  }
+
   function onDrop(e: DragEvent<HTMLDivElement>): void {
     e.preventDefault()
     void addFile(e.dataTransfer.files)
@@ -191,7 +215,10 @@ export function Video({ conn }: { conn: Conn }) {
         resolution,
         aspect_ratio: ratio,
         model: model || undefined,
-        image: image?.uri
+        image: image?.uri,
+        // Referencje wysyłamy tylko, gdy model je obsługuje — inaczej xAI odrzuci
+        // całe żądanie zamiast je zignorować.
+        reference_images: canUseRefs && refs.length ? refs.map((r) => r.uri) : undefined
       })
     }
   }
@@ -276,6 +303,70 @@ export function Video({ conn }: { conn: Conn }) {
           </span>
         )}
       </div>
+
+      {/* Reference-to-video (1.5): up to 3 images carried into the clip without
+          locking the first frame — referenced in the prompt as <IMAGE_1>… */}
+      {showRefs ? (
+        <div className="mb-4 rounded-xl border border-border bg-surface/40 p-3">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-muted">
+              Reference images · {refs.length}/{VIDEO_MAX_REFERENCE_IMAGES}
+            </span>
+            <label
+              className={cn(
+                'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-medium transition-colors hover:border-border-strong',
+                (!canUseRefs || refs.length >= VIDEO_MAX_REFERENCE_IMAGES) &&
+                  'pointer-events-none opacity-50'
+              )}
+            >
+              <ImagePlus size={13} /> Add reference
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={onPickRefs}
+                disabled={!canUseRefs || refs.length >= VIDEO_MAX_REFERENCE_IMAGES}
+                hidden
+              />
+            </label>
+            {!canUseRefs ? (
+              <span className="text-xs text-warn">
+                {model} does not take reference images — they will not be sent. Switch to
+                grok-imagine-video-1.5 to use them.
+              </span>
+            ) : null}
+          </div>
+          {refs.length ? (
+            <div className="flex flex-wrap gap-3">
+              {refs.map((r, i) => (
+                <div className="relative h-20 w-20" key={`${r.name}-${i}`}>
+                  <img
+                    src={r.uri}
+                    alt={r.name}
+                    className="h-full w-full rounded-lg border border-border object-cover"
+                  />
+                  <span className="absolute bottom-0 left-0 rounded-br-lg rounded-tl-lg bg-black/70 px-1 text-[10px] font-medium text-white">
+                    &lt;IMAGE_{i + 1}&gt;
+                  </span>
+                  <button
+                    onClick={() => setRefs((prev) => prev.filter((_, x) => x !== i))}
+                    aria-label={`Remove reference image ${i + 1}`}
+                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-error text-white shadow-sm"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted">
+              Optional: add up to {VIDEO_MAX_REFERENCE_IMAGES} images to carry a character,
+              outfit, or object into the clip — unlike a first frame, they do not fix the
+              opening shot. Refer to them in the prompt as &lt;IMAGE_1&gt;.
+            </p>
+          )}
+        </div>
+      ) : null}
 
       <Card>
         <Textarea

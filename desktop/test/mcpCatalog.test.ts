@@ -68,3 +68,45 @@ describe('TOP4 — commandPreview', () => {
     )
   })
 })
+
+// 28c/28d: transport `http` (lokalny serwer MCP wołany przez nas) + input `auth`.
+const PLUGIN: McpCatalogEntry = {
+  id: 'sceneagent-mcp-plugin',
+  name: 'SceneAgent MCP (Plugin Edition)',
+  description: 'd',
+  category: '3D',
+  transport: 'http',
+  url: 'http://127.0.0.1:8772/mcp',
+  inputs: [{ key: 'token', label: 'Access token', target: 'auth', required: true, secret: true }]
+}
+
+describe('28c/28d — http w katalogu', () => {
+  it('input auth składa nagłówek Bearer i nie rusza command', () => {
+    const out = resolveCatalogEntry(PLUGIN, { token: 'abc123' })
+    expect(out.transport).toBe('http')
+    expect(out.url).toBe('http://127.0.0.1:8772/mcp')
+    expect(out.authorization).toBe('Bearer abc123')
+    expect(out.command).toBeUndefined()
+    expect(out.enabled).toBe(false)
+  })
+
+  it('nie dubluje prefiksu, gdy user wkleił go razem z tokenem', () => {
+    expect(resolveCatalogEntry(PLUGIN, { token: 'Bearer abc123' }).authorization).toBe(
+      'Bearer abc123'
+    )
+    expect(resolveCatalogEntry(PLUGIN, { token: 'bearer abc123' }).authorization).toBe(
+      'bearer abc123'
+    )
+  })
+
+  it('bez tokenu nie wysyła pustego nagłówka', () => {
+    expect(resolveCatalogEntry(PLUGIN, {}).authorization).toBeUndefined()
+    expect(missingRequired(PLUGIN, {})).toEqual(['token'])
+  })
+
+  it('podgląd pokazuje adres, NIGDY tokenu — consent dotyczy tego, co wywołamy', () => {
+    const preview = commandPreview(PLUGIN, { token: 'super-secret' })
+    expect(preview).toBe('http://127.0.0.1:8772/mcp')
+    expect(preview).not.toContain('super-secret')
+  })
+})

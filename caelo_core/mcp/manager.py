@@ -22,12 +22,16 @@ import re
 import threading
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import config  # type: ignore
 
 from caelo_core.mcp.client import (
+    LOOPBACK_HOSTS,
+    HttpTransport,
     McpClient,
     McpError,
+    McpTransport,
     StdioTransport,
     flatten_tool_result,
 )
@@ -36,7 +40,13 @@ log = logging.getLogger(__name__)
 
 _NAME_OK = re.compile(r"[^a-zA-Z0-9_-]")
 MAX_FN_NAME = 64  # limit nazwy funkcji w function-calling (xAI/OpenAI)
-VALID_TRANSPORTS = ("stdio", "remote")  # "http" (lokalny Streamable HTTP) — odłożony (hybryda)
+#: `stdio` — podproces tutaj. `http` — lokalny Streamable HTTP, wołany PRZEZ NAS
+#: (bramka uprawnień działa tak samo jak dla stdio). `remote` — native remote MCP,
+#: wykonywane po stronie xAI, więc adres pętli zwrotnej jest tam bezużyteczny.
+VALID_TRANSPORTS = ("stdio", "remote", "http")
+
+#: Transporty, które startujemy i zatrzymujemy na tej maszynie.
+LOCAL_TRANSPORTS = ("stdio", "http")
 
 
 def _slug(text: str) -> str:
@@ -82,27 +92,47 @@ class McpServer:
             # Native remote MCP (B3) — nie startuje lokalnie; obsługą zajmuje się xAI.
             self.status = "remote"
             return
-        if self.transport != "stdio":
+        if self.transport not in LOCAL_TRANSPORTS:
             self.status = "error"
             self.error = f"transport '{self.transport}' is not supported locally yet"
             return
-        command = self.cfg.get("command") or []
-        if not command:
-            self.status = "error"
-            self.error = "stdio server has no command"
-            return
-        self.status = "starting"
-        self.error = ""
-        # Faza-G (LIVE): bez jawnego `cwd` startuj w korzeniu workspace (a NIE w CWD sidecara,
-        # którym jest przypadkowy katalog uruchomienia). Inaczej serwery jak filesystem
-        # rozwiązują ścieżki WZGLĘDNE poza dozwolonym katalogiem → "access denied", a model
-        # marnuje turę na recovery ścieżką absolutną. Jawny `cfg["cwd"]` ma pierwszeństwo.
-        cwd = self.cfg.get("cwd") or default_cwd
-        client = McpClient(
-            StdioTransport(command, cwd=cwd or None,
-                           env=self.cfg.get("env") or None),
-            name=self.id,
-        )
+
+        transport: McpTransport
+        if self.transport == "http":
+            url = self.cfg.get("url") or ""
+            if not url:
+                self.status = "error"
+                self.error = "http server has no url"
+                return
+            self.status = "starting"
+            self.error = ""
+            try:
+                transport = HttpTransport(
+                    url,
+                    authorization=self.cfg.get("authorization") or None,
+                    headers=self.cfg.get("headers") or None,
+                )
+            except McpError as exc:
+                self.status = "error"
+                self.error = str(exc)[:300]
+                return
+        else:
+            command = self.cfg.get("command") or []
+            if not command:
+                self.status = "error"
+                self.error = "stdio server has no command"
+                return
+            self.status = "starting"
+            self.error = ""
+            # Faza-G (LIVE): bez jawnego `cwd` startuj w korzeniu workspace (a NIE w CWD sidecara,
+            # którym jest przypadkowy katalog uruchomienia). Inaczej serwery jak filesystem
+            # rozwiązują ścieżki WZGLĘDNE poza dozwolonym katalogiem → "access denied", a model
+            # marnuje turę na recovery ścieżką absolutną. Jawny `cfg["cwd"]` ma pierwszeństwo.
+            cwd = self.cfg.get("cwd") or default_cwd
+            transport = StdioTransport(command, cwd=cwd or None,
+                                       env=self.cfg.get("env") or None)
+
+        client = McpClient(transport, name=self.id)
         try:
             client.connect()
             self.tools = client.list_tools()
@@ -222,8 +252,8 @@ class McpManager:
             raise ValueError(f"transport must be one of {VALID_TRANSPORTS}")
         if transport == "stdio" and not (cfg.get("command") or []):
             raise ValueError("stdio server requires a non-empty 'command' (argv list)")
-        if transport == "remote" and not cfg.get("url"):
-            raise ValueError("remote server requires a 'url'")
+        if transport in ("remote", "http") and not cfg.get("url"):
+            raise ValueError(f"{transport} server requires a 'url'")
         clean = {
             "id": sid,
             "name": cfg.get("name") or sid,
@@ -237,6 +267,22 @@ class McpManager:
             clean["command"] = [str(x) for x in (cmd or [])]
             clean["cwd"] = cfg.get("cwd") or None
             clean["env"] = {str(k): str(v) for k, v in (cfg.get("env") or {}).items()}
+        elif transport == "http":
+            clean["url"] = str(cfg.get("url"))
+            if cfg.get("authorization"):
+                clean["authorization"] = str(cfg["authorization"])
+            # Nagłówki własne serwera (jak `env` przy stdio: świadomie podane przez
+            # usera). Maskowane razem z `authorization` — patrz `public_config`.
+            headers = cfg.get("headers")
+            if isinstance(headers, dict) and headers:
+                clean["headers"] = {str(k): str(v) for k, v in headers.items()}
+            # Odrzuć TU, a nie przy starcie: wpis, którego nie da się wystartować,
+            # nie powinien w ogóle wejść do configu. `ValueError`, bo tego oczekuje
+            # trasa REST (→ 400); `McpError` przeleciałby jako 500.
+            try:
+                HttpTransport(clean["url"], authorization=clean.get("authorization"))
+            except McpError as exc:
+                raise ValueError(str(exc)) from exc
         else:  # remote
             clean["url"] = str(cfg.get("url"))
             if cfg.get("authorization"):
@@ -315,11 +361,12 @@ class McpManager:
         return self.status(sid)
 
     def start_enabled(self) -> None:
-        """Wystartuj wszystkie włączone serwery stdio (np. po starcie sidecara, jeśli
+        """Wystartuj wszystkie włączone serwery lokalne (np. po starcie sidecara, jeśli
         user wcześniej je włączył). Błędy izolowane per serwer."""
         for sid in list(self._servers):
             srv = self._servers.get(sid)
-            if srv and srv.enabled and srv.transport == "stdio" and not srv.is_ready():
+            if srv and srv.enabled and srv.transport in LOCAL_TRANSPORTS \
+                    and not srv.is_ready():
                 try:
                     self.start_server(sid)
                 except Exception:  # noqa: BLE001
@@ -467,6 +514,14 @@ class McpManager:
             out["cwd"] = cfg.get("cwd") or None
             # Maskuj wartości env — zwracamy tylko klucze (sekrety nie wracają do UI).
             out["env_keys"] = sorted((cfg.get("env") or {}).keys())
+        elif srv.transport == "http":
+            out["url"] = cfg.get("url")
+            out["has_authorization"] = bool(cfg.get("authorization"))
+            # Te same zasady co dla `env`: klucze tak, wartości nie. Nagłówek bywa
+            # drugim miejscem na token i maskowanie tylko `authorization` byłoby
+            # zabezpieczeniem, które omija się jedną linijką configu.
+            out["header_keys"] = sorted((cfg.get("headers") or {}).keys())
+            # `server_label` jest pojęciem xAI (native remote MCP) i tu nie znaczy nic.
         else:
             out["url"] = cfg.get("url")
             out["server_label"] = cfg.get("server_label") or srv.id
@@ -543,6 +598,16 @@ def _claude_server_to_cfg(sid: str, name: str, spec: dict, source: str) -> Optio
     url = spec.get("url")
     stype = str(spec.get("type") or "").lower()
     if url and stype in ("", "sse", "http", "streamable-http", "remote"):
+        # Adres pętli zwrotnej → transport LOKALNY, nigdy `remote`. Native remote
+        # MCP wykonuje xAI po swojej stronie, a chmura nie zobaczy `127.0.0.1`
+        # tej maszyny — wpis zmapowany na `remote` wyglądałby na skonfigurowany i
+        # nie mógłby zadziałać nigdy. Tak wchodzą m.in. lokalne serwery, które
+        # użytkownik ma w `~/.claude.json`.
+        if _is_loopback_url(str(url)):
+            cfg = {**base, "transport": "http", "url": str(url)}
+            if spec.get("authorization"):
+                cfg["authorization"] = str(spec["authorization"])
+            return cfg
         cfg = {
             **base,
             "transport": "remote",
@@ -553,6 +618,13 @@ def _claude_server_to_cfg(sid: str, name: str, spec: dict, source: str) -> Optio
             cfg["authorization"] = str(spec["authorization"])
         return cfg
     return None
+
+
+def _is_loopback_url(url: str) -> bool:
+    try:
+        return (urlparse(url).hostname or "").lower() in LOOPBACK_HOSTS
+    except ValueError:
+        return False
 
 
 def _is_readonly(tool: dict) -> bool:

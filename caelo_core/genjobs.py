@@ -44,7 +44,7 @@ VIDEO_OPS = ("text2video", "img2video", "edit", "extend")
 # P1-D: klucze `params`, które mogą nieść base64 data-URI (obraz: refs `images` /
 # pojedynczy `image`; wideo: `video`/`image`). Te bloby (do 12 MB obraz, 64 MB wideo)
 # rozdmuchują `GET /genjobs` do dziesiątek MB na każdy tick pollingu → reset połączenia.
-_BLOB_PARAM_KEYS = ("images", "image", "video")
+_BLOB_PARAM_KEYS = ("images", "image", "video", "reference_images")
 
 
 def _strip_blobs(params: dict) -> dict:
@@ -75,6 +75,7 @@ def _strip_blobs(params: dict) -> dict:
 # zużycie potwierdza konto xAI.
 IMAGE_COST_PER_IMAGE = {
     "grok-imagine-image": 0.02,          # $0.02 / image (standard, domyślny)
+    "grok-imagine-image-2.0": 0.04,      # $0.04 / image (2. generacja, docs 2026-08)
     "grok-imagine-image-quality": 0.05,  # $0.05 / image (wyższa jakość)
 }
 # Stawka $/sek wg (model → rozdzielczość). 1.5 obsługuje 1080p, bazowy tylko do 720p.

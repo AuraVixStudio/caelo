@@ -1,9 +1,11 @@
 """Trasy REST menedżera serwerów MCP (M14-B1/F1).
 
-Dodaj/usuń/włącz serwer (stdio lub remote-xAI), wystartuj/zatrzymaj, podejrzyj
-status i odkryte narzędzia. Start serwera stdio = uruchomienie dowolnej komendy →
-osobny, jawny endpoint `start` (UI pyta o zgodę, jak run_command). Sekrety
-(`authorization`, wartości `env`) NIE wracają do renderera (manager je maskuje).
+Dodaj/usuń/włącz serwer (stdio, lokalny http lub remote-xAI), wystartuj/zatrzymaj,
+podejrzyj status i odkryte narzędzia. Start serwera stdio = uruchomienie dowolnej
+komendy → osobny, jawny endpoint `start` (UI pyta o zgodę, jak run_command); dla
+`http` start nie uruchamia procesu, tylko nawiązuje sesję z lokalnym serwerem.
+Sekrety (`authorization`, wartości `env` i `headers`) NIE wracają do renderera
+(manager je maskuje).
 
 Fail-closed na tokenie (router montowany pod `require_token` w server.py).
 """
@@ -24,12 +26,13 @@ router = APIRouter(prefix="/mcp", tags=["mcp"])
 class McpServerReq(BaseModel):
     id: Optional[str] = None
     name: Optional[str] = None
-    transport: str = "stdio"               # "stdio" | "remote"
+    transport: str = "stdio"               # "stdio" | "http" | "remote"
     command: Optional[list[str]] = None    # stdio: argv
     cwd: Optional[str] = None
     env: dict[str, str] = Field(default_factory=dict)
-    url: Optional[str] = None              # remote: server_url
-    authorization: Optional[str] = None    # remote: nagłówek auth
+    url: Optional[str] = None              # http/remote: adres serwera
+    authorization: Optional[str] = None    # http/remote: nagłówek auth
+    headers: dict[str, str] = Field(default_factory=dict)  # http: nagłówki własne
     server_label: Optional[str] = None
     enabled: bool = True
 

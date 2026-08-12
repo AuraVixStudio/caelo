@@ -72,6 +72,10 @@ interface HubState {
   /** Kadr startowy w panelu Video (image→video). */
   videoFrame: StagedImage | null
   setVideoFrame: Dispatch<SetStateAction<StagedImage | null>>
+  /** Obrazy referencyjne w panelu Video (reference-to-video, do 3). Osobne od
+   *  `videoFrame`: nie są pierwszą klatką, tylko niosą postać/przedmiot do klipu. */
+  videoRefs: StagedImage[]
+  setVideoRefs: Dispatch<SetStateAction<StagedImage[]>>
   /** Źródłowe wideo w panelu Video (edit/extend). `uri` = data:video/* lub https URL. */
   videoSource: StagedImage | null
   setVideoSource: Dispatch<SetStateAction<StagedImage | null>>
@@ -128,6 +132,7 @@ export function HubProvider({
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [imageRefs, setImageRefs] = useState<StagedImage[]>([])
   const [videoFrame, setVideoFrame] = useState<StagedImage | null>(null)
+  const [videoRefs, setVideoRefs] = useState<StagedImage[]>([])
   const [videoSource, setVideoSource] = useState<StagedImage | null>(null)
   const [videoCommandMode, setVideoCommandMode] = useState<'edit' | 'extend' | null>(null)
   const [projects, setProjects] = useState<HubProject[]>([])
@@ -231,6 +236,8 @@ export function HubProvider({
       setImageRefs,
       videoFrame,
       setVideoFrame,
+      videoRefs,
+      setVideoRefs,
       videoSource,
       setVideoSource,
       videoCommandMode,
@@ -268,6 +275,7 @@ export function HubProvider({
       pendingSend,
       imageRefs,
       videoFrame,
+      videoRefs,
       videoSource,
       videoCommandMode,
       codeSessionId,

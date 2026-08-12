@@ -14,6 +14,8 @@ grok_core/.venv/        # legacy (sprzed rebrandu M15) — na wszelki wypadek
 # desktopu jest osobno (desktop/dist/, desktop/out/ niżej).
 /build/
 /dist/
+# Pobrane z CI binaria Linuksa (AppImage/deb) — wyjście buildu, jak /dist.
+/dist-linux/
 /Output/
 # appicon.ico jest generowany przez make_icon.py (artefakt) — nie commitujemy.
 appicon.ico

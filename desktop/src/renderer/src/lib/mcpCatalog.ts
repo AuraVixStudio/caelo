@@ -11,7 +11,8 @@ export function missingRequired(entry: McpCatalogEntry, values: Record<string, s
 
 /**
  * Wpis katalogu + wartości inputów → `McpServerInput` gotowy do `addMcpServer`.
- * 'arg' podstawia wartość w miejsce tokenu `{key}` w command; 'env' ustawia env[env_key].
+ * 'arg' podstawia wartość w miejsce tokenu `{key}` w command; 'env' ustawia env[env_key];
+ * 'auth' składa nagłówek `Authorization: Bearer <wartość>` (lokalny endpoint http).
  * Zawsze `enabled: false` — TOP4: install != autostart (start to osobna, potwierdzana akcja).
  */
 export function resolveCatalogEntry(
@@ -20,6 +21,7 @@ export function resolveCatalogEntry(
 ): McpServerInput {
   const env: Record<string, string> = { ...(entry.env ?? {}) }
   let command = entry.command ? [...entry.command] : undefined
+  let authorization: string | undefined
   for (const inp of entry.inputs ?? []) {
     const v = (values[inp.key] ?? '').trim()
     if (!v) continue
@@ -27,6 +29,9 @@ export function resolveCatalogEntry(
       command = command.map((tok) => (tok === `{${inp.key}}` ? v : tok))
     } else if (inp.target === 'env' && inp.env_key) {
       env[inp.env_key] = v
+    } else if (inp.target === 'auth') {
+      // Użytkownik wkleja sam token; „Bearer" dokładamy, chyba że wkleił z prefiksem.
+      authorization = /^bearer\s/i.test(v) ? v : `Bearer ${v}`
     }
   }
   return {
@@ -36,12 +41,17 @@ export function resolveCatalogEntry(
     command,
     env: Object.keys(env).length ? env : undefined,
     url: entry.url,
+    authorization,
     enabled: false
   }
 }
 
-/** Podgląd komendy (z podstawionymi argami) do consentu w UI — bez wartości env (sekretów). */
+/**
+ * Podgląd tego, co wpis uruchomi — do consentu w UI. Nigdy nie pokazuje sekretów:
+ * ani wartości env, ani tokenu (`target: 'auth'`), bo consent dotyczy TEGO, co
+ * zostanie wywołane, a nie czym się przy tym uwierzytelnimy.
+ */
 export function commandPreview(entry: McpCatalogEntry, values: Record<string, string>): string {
-  if (entry.transport === 'remote') return entry.url ?? ''
+  if (entry.transport !== 'stdio') return entry.url ?? ''
   return (resolveCatalogEntry(entry, values).command ?? []).join(' ')
 }

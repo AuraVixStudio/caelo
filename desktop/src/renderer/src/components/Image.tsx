@@ -13,8 +13,10 @@ import {
   ASPECT_RATIOS,
   EDIT_MAX_IMAGES,
   IMAGE_MODELS,
+  IMAGE_QUALITY_LEVELS,
   IMAGE_VARIANTS,
-  RESOLUTIONS
+  RESOLUTIONS,
+  imageModelSupportsQuality
 } from '../lib/constants'
 import { compressImageIfNeeded } from '../lib/imageCompress'
 import { ArtifactCard } from './ArtifactCard'
@@ -40,6 +42,8 @@ export function Image({ conn }: { conn: Conn }) {
   const [n, setN] = useState(1)
   const [ratio, setRatio] = useState('auto')
   const [resolution, setResolution] = useState('1k')
+  // Parametr `quality` przyjmuje tylko grok-imagine-image-2.0; 'medium' = domyślne API.
+  const [quality, setQuality] = useState<'low' | 'medium'>('medium')
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<HubArtifact[]>([])
   const { models: modelsResp, error: modelsError } = useModels(conn) // P2-2
@@ -57,6 +61,7 @@ export function Image({ conn }: { conn: Conn }) {
   } = useHub()
 
   const editing = images.length > 0
+  const supportsQuality = imageModelSupportsQuality(model)
   const imageJobs = jobs.filter((j) => j.kind === 'image')
   // Refetch wyników, gdy przybędzie ukończonych zadań (job → artefakt M9).
   const doneCount = imageJobs.filter((j) => j.status === 'done').length
@@ -142,7 +147,8 @@ export function Image({ conn }: { conn: Conn }) {
       aspect_ratio: ratio,
       resolution,
       model: model || undefined,
-      images: editing ? images.map((i) => i.uri) : undefined
+      images: editing ? images.map((i) => i.uri) : undefined,
+      quality: supportsQuality ? quality : undefined
     })
   }
 
@@ -163,7 +169,8 @@ export function Image({ conn }: { conn: Conn }) {
         aspect_ratio: ratio,
         resolution,
         model: model || undefined,
-        images: [ib.data_uri]
+        images: [ib.data_uri],
+        quality: supportsQuality ? quality : undefined
       })
     } catch (e) {
       setError(String((e as Error).message || e))
@@ -263,6 +270,22 @@ export function Image({ conn }: { conn: Conn }) {
               ))}
             </Select>
           </Field>
+          {/* `quality` is a grok-imagine-image-2.0 parameter — other models reject it. */}
+          {supportsQuality ? (
+            <Field label="Quality" className="w-28">
+              <Select
+                size="sm"
+                value={quality}
+                onChange={(e) => setQuality(e.target.value as 'low' | 'medium')}
+              >
+                {IMAGE_QUALITY_LEVELS.map((q) => (
+                  <option key={q} value={q}>
+                    {q}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <Button
             className="ml-auto"
             icon={editing ? <Wand2 size={16} /> : <Sparkles size={16} />}

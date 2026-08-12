@@ -23,6 +23,27 @@ describe('EffortSelect — wskaźnik braku wsparcia reasoning_effort', () => {
     expect(screen.queryByText(/ignores reasoning effort/i)).toBeNull()
   })
 
+  it('xHigh jest w dropdownie tylko dla grok-4.6', () => {
+    const { unmount } = render(
+      <EffortSelect effort="" model="grok-4.6" onSelect={() => undefined} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /reasoning effort/i }))
+    expect(screen.getByText('xHigh')).toBeInTheDocument()
+    unmount()
+
+    render(<EffortSelect effort="" model="grok-4.5" onSelect={() => undefined} />)
+    fireEvent.click(screen.getByRole('button', { name: /reasoning effort/i }))
+    expect(screen.queryByText('xHigh')).toBeNull()
+  })
+
+  it('xHigh wybrany przy modelu bez tego poziomu → ostrzeżenie', () => {
+    render(<EffortSelect effort="xhigh" model="grok-4.5" onSelect={() => undefined} />)
+    const trigger = screen.getByRole('button', { name: /reasoning effort/i })
+    expect(trigger.getAttribute('aria-label')).toMatch(/not supported by the selected model/i)
+    fireEvent.click(trigger)
+    expect(screen.getByText(/has no xHigh level/i)).toBeInTheDocument()
+  })
+
   it('Auto na modelu bez wsparcia → trigger nie ostrzega, ale dropdown nadal informuje', () => {
     render(<EffortSelect effort="" model="grok-build-0.1" onSelect={() => undefined} />)
     const trigger = screen.getByRole('button', { name: /reasoning effort/i })

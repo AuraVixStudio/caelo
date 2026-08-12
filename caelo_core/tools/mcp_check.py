@@ -318,17 +318,28 @@ def test_catalog() -> None:
 
     ok_entries = True
     for e in entries:
-        if e.get("transport") != "stdio" or not e.get("command"):
+        transport = e.get("transport")
+        # 28c/28d: wpis to albo lokalny proces (`command`), albo lokalny serwer
+        # HTTP (`url`). Poprzednia wersja tej asercji mówiła „stdio + command" —
+        # co było prawdą tylko dopóki katalog miał jeden transport.
+        if transport == "stdio" and not e.get("command"):
+            ok_entries = False
+        elif transport == "http" and not e.get("url"):
+            ok_entries = False
+        elif transport not in ("stdio", "http"):
             ok_entries = False
         for inp in e.get("inputs") or []:
-            if inp.get("target") not in ("arg", "env"):
+            if inp.get("target") not in ("arg", "env", "auth"):
                 ok_entries = False
             if inp.get("target") == "env" and not inp.get("env_key"):
                 ok_entries = False
             # token placeholder dla 'arg' MUSI istnieć w command (renderer go podstawia)
             if inp.get("target") == "arg" and ("{" + (inp.get("key") or "") + "}") not in (e.get("command") or []):
                 ok_entries = False
-    check("TOP4: catalog entries well-formed (stdio+command, inputs consistent)", ok_entries)
+            # 'auth' ma sens wyłącznie tam, gdzie żądanie wysyłamy MY
+            if inp.get("target") == "auth" and transport != "http":
+                ok_entries = False
+    check("TOP4: catalog entries well-formed (command or url, inputs consistent)", ok_entries)
     check("TOP4: catalog() returns a fresh copy", catalog() is not entries and catalog() == entries)
 
     # install != autostart: dodanie wpisu z enabled=False NIE startuje serwera.
@@ -343,6 +354,180 @@ def test_catalog() -> None:
         mgr.shutdown()
 
 
+def test_http_transport() -> None:
+    """28c: lokalny transport `http` — my wołamy serwer, nie xAI.
+
+    Cztery rzeczy, których stdio nie ma i które dlatego mogą być zepsute tylko
+    tutaj: kod odpowiedzi (202 na notyfikację), typ treści (JSON vs SSE), token
+    w nagłówku i powód odmowy. Handshake i klasyfikacja bramki są sprawdzane tak
+    samo jak dla stdio — bo to ma być ten sam produkt, tylko innym kanałem.
+    """
+    from caelo_core.mcp.client import HttpTransport, McpError
+    from caelo_core.tools._mcp_mock_http_server import MockMcpHttpServer
+
+    # --- JSON, bez tokenu ---
+    server = MockMcpHttpServer()
+    try:
+        client = McpClient(HttpTransport(server.url), name="mock-http")
+        info = client.connect()
+        check("http: handshake returns serverInfo",
+              info.get("serverInfo", {}).get("name") == "mock-mcp-http")
+        # `notifications/initialized` poszło w handshake'u i dostało 202 bez treści;
+        # gdyby transport tego nie odróżnił, connect() by tu wisiał do timeoutu.
+        check("http: a notification answered with 202 does not hang", client.is_alive())
+        tools = client.list_tools()
+        check("http: list_tools finds the tools",
+              {t.get("name") for t in tools} == {"echo", "write_thing"})
+        check("http: call_tool works",
+              flatten_tool_result(client.call_tool("echo", {"text": "hi"})) == "echo: hi")
+        client.close()
+        check("http: transport is closed after close()", not client.is_alive())
+    finally:
+        server.stop()
+
+    # --- SSE: ten sam serwer, inny typ treści ---
+    server = MockMcpHttpServer(sse=True)
+    try:
+        client = McpClient(HttpTransport(server.url), name="mock-sse")
+        client.connect()
+        check("http: an SSE reply is read as a JSON-RPC frame",
+              flatten_tool_result(client.call_tool("echo", {"text": "sse"})) == "echo: sse")
+        client.close()
+    finally:
+        server.stop()
+
+    # --- token: dobry przechodzi, zły wraca z POWODEM serwera ---
+    server = MockMcpHttpServer(token="s3cret")
+    try:
+        good = McpClient(HttpTransport(server.url, authorization="Bearer s3cret"))
+        good.connect()
+        check("http: a correct bearer token is accepted", len(good.list_tools()) == 2)
+        good.close()
+
+        bad = McpClient(HttpTransport(server.url, authorization="Bearer wrong"))
+        detail = ""
+        try:
+            bad.connect()
+        except McpError as exc:
+            detail = str(exc)
+        # Nie samo „nie wystartował": user musi widzieć, że chodzi o token, a nie
+        # o zły adres albo niedziałający serwer.
+        check("http: a refused token reports the server's own reason",
+              "401" in detail and "token" in detail.lower())
+        bad.close()
+    finally:
+        server.stop()
+
+    # --- menedżer: add/start/route/gate, tak samo jak dla stdio ---
+    server = MockMcpHttpServer(token="s3cret")
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            mgr = McpManager(Path(d) / "caelo_mcp.json")
+            cfg = mgr.add_server({"id": "mockhttp", "name": "Mock HTTP", "transport": "http",
+                                  "url": server.url, "authorization": "Bearer s3cret",
+                                  "headers": {"X-Trace": "1"}})
+            check("http: add_server accepts an http server", cfg["transport"] == "http")
+            check("http: the token never comes back to the UI",
+                  cfg.get("has_authorization") is True and "authorization" not in cfg)
+            check("http: header names come back, values do not",
+                  cfg.get("header_keys") == ["X-Trace"] and "headers" not in cfg)
+
+            status = mgr.start_server("mockhttp")
+            check("http: the server reaches ready", status["status"] == "ready")
+
+            qualified = _qualify("mockhttp", "echo")
+            check("http: the tool is routed under its namespaced name",
+                  qualified in {t["qualified_name"] for t in mgr.list_tools()})
+            # Menedżer oddaje już spłaszczony tekst (to on rozmawia z modelem).
+            check("http: a call through the manager works",
+                  mgr.call_tool(qualified, {"text": "via manager"}) == "echo: via manager")
+            # Klasyfikacja bramki jest własnością narzędzia, nie transportu.
+            check("http: readOnlyHint still means no gate", not mgr.is_mutating(qualified))
+            check("http: a tool with no annotation is still gated",
+                  mgr.is_mutating(_qualify("mockhttp", "write_thing")))
+
+            # Restart po zatrzymaniu — sesja HTTP musi dać się otworzyć ponownie.
+            mgr.stop_server("mockhttp")
+            check("http: stop leaves the server not ready",
+                  mgr.status("mockhttp")["status"] != "ready")
+            check("http: it can be started again",
+                  mgr.start_server("mockhttp")["status"] == "ready")
+            mgr.shutdown()
+    finally:
+        server.stop()
+
+    # --- odmowy, których nie wolno przyjąć do configu ---
+    with tempfile.TemporaryDirectory() as d:
+        mgr = McpManager(Path(d) / "caelo_mcp.json")
+        refused = False
+        try:
+            mgr.add_server({"id": "nourl", "transport": "http"})
+        except ValueError:
+            refused = True
+        check("http: a server with no url is refused", refused)
+
+        refused = False
+        try:
+            # Token w jawnym HTTP poza pętlą zwrotną leciałby przez sieć czytelny.
+            mgr.add_server({"id": "plain", "transport": "http",
+                            "url": "http://example.com/mcp",
+                            "authorization": "Bearer x"})
+        except ValueError:
+            refused = True
+        check("http: a token over plain http to a public host is refused", refused)
+        check("http: the same over loopback is allowed",
+              mgr.add_server({"id": "loop", "transport": "http",
+                              "url": "http://127.0.0.1:9/mcp",
+                              "authorization": "Bearer x"})["transport"] == "http")
+        mgr.shutdown()
+
+
+def test_loopback_import_is_local() -> None:
+    """28c: serwer z `~/.claude.json` na pętli zwrotnej to transport LOKALNY.
+
+    Zmapowany na `remote` wyglądałby na skonfigurowany i nie mógłby zadziałać
+    nigdy: native remote MCP wykonuje xAI po swojej stronie, a chmura nie widzi
+    `127.0.0.1` tej maszyny.
+    """
+    from caelo_core.mcp.manager import _claude_server_to_cfg
+
+    local = _claude_server_to_cfg("x", "x", {"url": "http://127.0.0.1:8772/mcp"}, "claude")
+    check("interop: a loopback url is imported as http", local["transport"] == "http")
+    check("interop: an imported server still arrives disabled", local["enabled"] is False)
+
+    public = _claude_server_to_cfg("y", "y", {"url": "https://mcp.example.com/mcp"}, "claude")
+    check("interop: a public url is still remote (xAI-side)", public["transport"] == "remote")
+
+
+def test_sceneagent_catalog_entries() -> None:
+    """28d: obie edycje SceneAgent MCP są w katalogu i różnią się transportem."""
+    from caelo_core.mcp.catalog import catalog
+
+    entries = {e["id"]: e for e in catalog()}
+    pro = entries.get("sceneagent-mcp")
+    plugin = entries.get("sceneagent-mcp-plugin")
+    check("28d: both SceneAgent editions are in the catalogue",
+          pro is not None and plugin is not None)
+    if pro is None or plugin is None:
+        return
+
+    check("28d: Pro is stdio, Plugin Edition is local http",
+          pro["transport"] == "stdio" and plugin["transport"] == "http")
+    check("28d: the Plugin Edition points at loopback",
+          (plugin.get("url") or "").startswith("http://127.0.0.1:"))
+    check("28d: its token is a secret input on the auth target",
+          [i for i in plugin.get("inputs") or []
+           if i["target"] == "auth" and i.get("secret")] != [])
+
+    # Wykrycie instalacji: albo mamy gotową komendę (i wtedy NIE pytamy o ścieżkę),
+    # albo jej nie mamy (i wtedy pytamy). Trzeci stan — komenda z niepodstawionym
+    # tokenem i bez pola do wpisania — byłby serwerem, którego nie da się wystartować.
+    has_placeholder = any("{bridge}" in part for part in pro.get("command") or [])
+    asks_for_path = any(i["key"] == "bridge" for i in pro.get("inputs") or [])
+    check("28d: the Pro entry either resolves the bridge or asks for it, never neither",
+          has_placeholder == asks_for_path)
+
+
 def main() -> int:
     test_client()
     test_manager()
@@ -353,6 +538,9 @@ def main() -> int:
     test_corrupt_config()
     test_interop()
     test_catalog()           # Faza-G/TOP4
+    test_http_transport()          # 28c: lokalny Streamable HTTP
+    test_loopback_import_is_local()  # 28c: loopback z ~/.claude.json != remote
+    test_sceneagent_catalog_entries()  # 28d
 
     print("\n=== MCP client/manager self-check (M14-B1/B2) ===")
     ok = True

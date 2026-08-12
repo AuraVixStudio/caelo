@@ -309,12 +309,16 @@ def _unit_backend_image_executor(checks: list) -> None:
             captured = {}
 
             class _FakeApi:
-                def generate_image(self_inner, prompt, n, ratio, resolution, model=None):
+                def generate_image(self_inner, prompt, n, ratio, resolution, model=None,
+                                   quality=None):
                     captured["gen"] = (prompt, n, ratio, resolution, model)
+                    captured["gen_quality"] = quality
                     return [f"https://x/g{i}.png" for i in range(n)]
 
-                def edit_image_b64(self_inner, prompt, images, n, ratio, resolution, model=None):
+                def edit_image_b64(self_inner, prompt, images, n, ratio, resolution,
+                                   model=None, quality=None):
                     captured["edit"] = (prompt, list(images), n, ratio, resolution, model)
+                    captured["edit_quality"] = quality
                     return ["https://x/e0.png"]
 
             b.api = _FakeApi()
@@ -343,6 +347,17 @@ def _unit_backend_image_executor(checks: list) -> None:
             eids = b._run_image_job(ejob, threading.Event())
             checks.append(("genjobs/exec: edit returns artifact + honors up to 3 refs",
                            len(eids) == 1 and len(captured["edit"][1]) == 3))
+
+            # grok-imagine-image-2.0: `quality` przechodzi z params do api (filtr
+            # „tylko 2.0" siedzi w api_manager, nie tutaj).
+            qjob = GenJob(id="t3", kind="image", op="text2img",
+                          params={"prompt": "a cat", "n": 1, "aspect_ratio": "auto",
+                                  "resolution": "1k", "model": "grok-imagine-image-2.0",
+                                  "quality": "low"},
+                          project_id=proj.id, created_at=time.time(), updated_at=time.time())
+            b._run_image_job(qjob, threading.Event())
+            checks.append(("genjobs/exec: image quality forwarded to api",
+                           captured.get("gen_quality") == "low"))
 
             # S31-a: obraz honoruje pre-set cancel (cancelled, nie done)
             from caelo_core.genjobs import GenJobCancelled
@@ -384,8 +399,11 @@ def _unit_backend_video_executor(checks: list) -> None:
 
             polls = {"n": 0}
 
+            vcaptured = {}
+
             class _DoneApi:
                 def create_video_job(self_inner, *a, **k):
+                    vcaptured.update(k)
                     return "rid-123"
 
                 def poll_video_status(self_inner, rid):
@@ -403,6 +421,22 @@ def _unit_backend_video_executor(checks: list) -> None:
             checks.append(("genjobs/exec: video poll-loop -> done artifact",
                            bool(vids) and art is not None and art.type == "video"
                            and polls["n"] >= 2))
+            checks.append(("genjobs/exec: no reference_images -> None (not empty list)",
+                           vcaptured.get("reference_images") is None))
+
+            # Reference-to-video: `reference_images` z params trafia do api_manager
+            # (obok kadru startowego — to dwie różne rzeczy).
+            polls["n"] = 0
+            rjob = GenJob(id="v-ref", kind="video", op="text2video",
+                          params={"prompt": "<IMAGE_1> walks in", "duration": 6,
+                                  "resolution": "480p",
+                                  "model": "grok-imagine-video-1.5",
+                                  "reference_images": ["data:image/png;base64,AAAA",
+                                                       "data:image/png;base64,BBBB"]},
+                          created_at=time.time(), updated_at=time.time())
+            b._run_video_job(rjob, threading.Event())
+            checks.append(("genjobs/exec: reference_images forwarded to api",
+                           len(vcaptured.get("reference_images") or []) == 2))
 
             # edit/extend → dispatch na edit_video_job/extend_video_job (ten sam poll)
             called = {}
@@ -563,9 +597,26 @@ def _unit_route_validation(checks: list) -> None:
         VideoJobReq(op="img2video", prompt="motion", image="data:image/png;base64,AA")
         VideoJobReq(op="edit", prompt="restyle", video="https://x/v.mp4")
         VideoJobReq(op="extend", prompt="more", video="https://x/v.mp4", duration=5)
+        # 2026-08: reference-to-video (do 3) i `quality` obrazu (2.0)
+        VideoJobReq(prompt="<IMAGE_1> walks in",
+                    reference_images=["data:image/png;base64,AA"] * 3)
+        VideoJobReq(op="img2video", prompt="motion", image="data:image/png;base64,AA",
+                    reference_images=["data:image/png;base64,BB"])
+        ImageJobReq(prompt="a cat", model="grok-imagine-image-2.0", quality="low")
     except Exception:
         ok = False
     checks.append(("genjobs/route: valid requests accepted", ok))
+    checks.append(("genjobs/route: more than 3 video reference images rejected",
+                   rejects(lambda: VideoJobReq(prompt="x",
+                                               reference_images=["data:image/png;base64,AA"] * 4))))
+    checks.append(("genjobs/route: non-data-URI video reference rejected",
+                   rejects(lambda: VideoJobReq(prompt="x",
+                                               reference_images=["http://evil/x.png"]))))
+    checks.append(("genjobs/route: edit with reference images rejected",
+                   rejects(lambda: VideoJobReq(op="edit", prompt="x", video="https://x/v.mp4",
+                                               reference_images=["data:image/png;base64,AA"]))))
+    checks.append(("genjobs/route: unknown image quality rejected",
+                   rejects(lambda: ImageJobReq(prompt="x", quality="ultra"))))
     checks.append(("genjobs/route: edit without video rejected",
                    rejects(lambda: VideoJobReq(op="edit", prompt="x"))))
     checks.append(("genjobs/route: edit with image rejected",
@@ -612,16 +663,20 @@ def _unit_blob_stripping(checks: list) -> None:
             ji = mgr.submit(kind="image", op="edit",
                             params={"prompt": "x", "n": 1, "images": [big, big, big]})
             jv = mgr.submit(kind="video", op="edit", params={"prompt": "y", "video": bigv})
+            jr = mgr.submit(kind="video", op="text2video",
+                            params={"prompt": "z", "reference_images": [big, big]})
             mgr.wait(ji.id, timeout=10)
             mgr.wait(jv.id, timeout=10)
+            mgr.wait(jr.id, timeout=10)
 
             # (1) odpowiedzi listy nie niosą data-URI (placeholder < 1 KB)
             lean_ok = True
             for j in mgr.list_jobs(limit=100):
                 d2 = j.to_dict()  # domyślnie stripped
-                for s in d2["params"].get("images", []):
-                    if isinstance(s, str) and len(s) > 1024:
-                        lean_ok = False
+                for key in ("images", "reference_images"):
+                    for s in d2["params"].get(key, []):
+                        if isinstance(s, str) and len(s) > 1024:
+                            lean_ok = False
                 v = d2["params"].get("video")
                 if isinstance(v, str) and len(v) > 1024:
                     lean_ok = False
@@ -708,6 +763,14 @@ def _unit_cost_resolution(checks: list) -> None:
                    video_rate_per_second("grok-imagine-video", "1080p") == 0.05))
     checks.append(("cost: 1.5 without resolution falls back to 1.5 480p",
                    video_rate_per_second("grok-imagine-video-1.5", None) == 0.08))
+
+    # Cennik obrazu per-model (docs 2026-08: 2.0 = $0.04/szt., 2× standard)
+    checks.append(("cost: image 2.0 = $0.04/img",
+                   estimate_cost("image", "text2img",
+                                 {"model": "grok-imagine-image-2.0", "n": 2}) == 0.08))
+    checks.append(("cost: image standard stays $0.02/img",
+                   estimate_cost("image", "text2img",
+                                 {"model": "grok-imagine-image", "n": 2}) == 0.04))
 
     # end-to-end przez estimate_cost: 1.5 @ 1080p, 6 s → 0.25*6
     checks.append(("cost: estimate text2video 1.5@1080p 6s = 1.50",

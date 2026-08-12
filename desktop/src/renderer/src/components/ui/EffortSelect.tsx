@@ -1,10 +1,10 @@
-// M19-B9: reasoning_effort selector (Auto / Low / Medium / High) shared by the chat
+// M19-B9: reasoning_effort selector (Auto / Low / Medium / High / xHigh) shared by the chat
 // composer and the coding-agent composer. '' = Auto (the backend falls back to the
 // saved chat_effort / code_effort setting). Mirrors the ModeSelector dropdown style.
 import { AlertTriangle, Check, ChevronDown, Gauge } from 'lucide-react'
 import type { ReasoningEffort } from '../../lib/api'
 import { cn } from '../../lib/cn'
-import { modelSupportsEffort } from '../../lib/modelCaps'
+import { modelSupportsEffort, modelSupportsXhighEffort } from '../../lib/modelCaps'
 import { Popover } from './Popover'
 
 interface EffortOption {
@@ -18,11 +18,25 @@ export const EFFORT_OPTIONS: EffortOption[] = [
   { id: '', label: 'Auto', short: 'Auto', desc: 'Use the saved default (no override).' },
   { id: 'low', label: 'Low', short: 'Low', desc: 'Faster, cheaper — less reasoning.' },
   { id: 'medium', label: 'Medium', short: 'Med', desc: 'Balanced reasoning depth.' },
-  { id: 'high', label: 'High', short: 'High', desc: 'Deepest reasoning — slower, costlier.' }
+  { id: 'high', label: 'High', short: 'High', desc: 'Deepest reasoning — slower, costlier.' },
+  {
+    id: 'xhigh',
+    label: 'xHigh',
+    short: 'xHigh',
+    desc: 'Maximum reasoning — grok-4.6 only.'
+  }
 ]
 
 function optionFor(effort: ReasoningEffort): EffortOption {
   return EFFORT_OPTIONS.find((o) => o.id === effort) ?? EFFORT_OPTIONS[0]
+}
+
+/** Opcje dostępne dla wybranego modelu. `xhigh` znają na razie tylko modele 4.6 —
+ *  pokazanie go przy innych dałoby wybór, który backend cicho cofa do domyślnego. */
+export function effortOptionsFor(model?: string): EffortOption[] {
+  return modelSupportsXhighEffort(model || '')
+    ? EFFORT_OPTIONS
+    : EFFORT_OPTIONS.filter((o) => o.id !== 'xhigh')
 }
 
 /** Compact dropdown to pick the reasoning effort for the next turn.
@@ -49,7 +63,10 @@ export function EffortSelect({
   // gracefully ponawia bez niego). `warnIgnored` = na triggerze pokaż, że bieżący (≠Auto)
   // wybór nic nie da; `unsupported` = w dropdownie wyjaśnij, że tryby Low/Med/High są no-op.
   const unsupported = !!model && !modelSupportsEffort(model)
-  const warnIgnored = unsupported && !!effort
+  // `xhigh` wybrany wcześniej przy 4.6, a potem zmieniono model → ten sam los
+  // (4xx → ponowienie bez effortu), więc ostrzegamy tak samo.
+  const xhighIgnored = effort === 'xhigh' && !!model && !modelSupportsXhighEffort(model)
+  const warnIgnored = (unsupported && !!effort) || xhighIgnored
   return (
     <Popover
       label="Reasoning effort"
@@ -82,7 +99,7 @@ export function EffortSelect({
           <div className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
             Reasoning effort
           </div>
-          {EFFORT_OPTIONS.map((o) => (
+          {effortOptionsFor(model).map((o) => (
             <button
               key={o.id || 'auto'}
               onClick={() => {
@@ -107,6 +124,11 @@ export function EffortSelect({
             <div className="mt-1 flex items-start gap-1.5 border-t border-border px-2.5 pb-1 pt-2 text-[11px] text-warn">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               <span>{model} ignores reasoning effort — it uses the model default.</span>
+            </div>
+          ) : xhighIgnored ? (
+            <div className="mt-1 flex items-start gap-1.5 border-t border-border px-2.5 pb-1 pt-2 text-[11px] text-warn">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{model} has no xHigh level — pick another effort or switch to grok-4.6.</span>
             </div>
           ) : null}
         </div>

@@ -189,7 +189,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Max agentic iterations before stopping.")
     p.add_argument("--effort", "--reasoning-effort", dest="effort",
                    choices=["low", "medium", "high"], default=None,
-                   help="Reasoning effort for reasoning models (low|medium|high).")
+                   help="Reasoning effort for reasoning models (low|medium|high|xhigh; "
+                        "xhigh needs grok-4.6).")
     p.add_argument("--tools", dest="tools", default=None,
                    help="Comma-separated allowlist of tools (only these are available).")
     p.add_argument("--disallowed-tools", dest="disallowed", default=None,

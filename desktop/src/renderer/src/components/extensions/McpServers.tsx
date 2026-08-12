@@ -12,7 +12,8 @@ import {
   type Conn,
   type McpCatalogEntry,
   type McpServerInfo,
-  type McpServerInput
+  type McpServerInput,
+  type McpTransportKind
 } from '../../lib/api'
 import { downloadBase64 } from '../../lib/packages'
 import { commandPreview, missingRequired, resolveCatalogEntry } from '../../lib/mcpCatalog'
@@ -62,7 +63,7 @@ export function McpServers({ conn }: { conn: Conn }) {
   }, [conn])
 
   // Add-server form state
-  const [transport, setTransport] = useState<'stdio' | 'remote'>('stdio')
+  const [transport, setTransport] = useState<McpTransportKind>('stdio')
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [url, setUrl] = useState('')
@@ -209,8 +210,12 @@ export function McpServers({ conn }: { conn: Conn }) {
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-[160px_1fr] gap-3">
             <Field label="Transport">
-              <Select value={transport} onChange={(e) => setTransport(e.target.value as 'stdio' | 'remote')}>
-                <option value="stdio">stdio (local)</option>
+              <Select
+                value={transport}
+                onChange={(e) => setTransport(e.target.value as McpTransportKind)}
+              >
+                <option value="stdio">stdio (local process)</option>
+                <option value="http">http (local server)</option>
                 <option value="remote">remote (xAI-side)</option>
               </Select>
             </Field>
@@ -230,14 +235,28 @@ export function McpServers({ conn }: { conn: Conn }) {
           ) : (
             <>
               <Field label="Server URL">
-                <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/mcp" />
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder={
+                    transport === 'http' ? 'http://127.0.0.1:8772/mcp' : 'https://example.com/mcp'
+                  }
+                />
               </Field>
               <Field label="Authorization (optional)">
                 <Input value={auth} onChange={(e) => setAuth(e.target.value)} placeholder="Bearer …" type="password" />
               </Field>
-              <p className="text-xs text-warn">
-                Remote MCP runs on xAI&apos;s side: there is no local approval gate and your data is sent to xAI.
-              </p>
+              {transport === 'http' ? (
+                <p className="text-xs text-muted">
+                  This machine calls the server, so a loopback address works and tools go through the
+                  same approval gate as a local process.
+                </p>
+              ) : (
+                <p className="text-xs text-warn">
+                  Remote MCP runs on xAI&apos;s side: there is no local approval gate, your data is sent
+                  to xAI, and a loopback address cannot be reached from there.
+                </p>
+              )}
             </>
           )}
           <div>
@@ -272,10 +291,16 @@ export function McpServers({ conn }: { conn: Conn }) {
                   <p className="mt-1 truncate font-mono text-xs text-muted">
                     {s.transport === 'stdio' ? (s.command ?? []).join(' ') : s.url}
                   </p>
+                  {s.header_keys && s.header_keys.length > 0 ? (
+                    <p className="mt-1 truncate text-xs text-muted">
+                      headers: {s.header_keys.join(', ')}
+                    </p>
+                  ) : null}
                   {s.error ? <p className="mt-1 text-xs text-error">{s.error}</p> : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {s.transport === 'stdio' ? (
+                  {/* remote runs on xAI's side — there is nothing here to start. */}
+                  {s.transport !== 'remote' ? (
                     s.status === 'ready' ? (
                       <Button
                         variant="outline"
@@ -292,11 +317,13 @@ export function McpServers({ conn }: { conn: Conn }) {
                         size="sm"
                         disabled={busy === s.id}
                         onClick={() => {
-                          if (
-                            window.confirm(
-                              `Start "${s.name}"? This runs the configured command on your machine.`
-                            )
-                          )
+                          // Say what actually happens: stdio runs a program, http
+                          // only opens a session with one that is already running.
+                          const what =
+                            s.transport === 'http'
+                              ? `This connects to ${s.url} and loads its tools.`
+                              : 'This runs the configured command on your machine.'
+                          if (window.confirm(`Start "${s.name}"? ${what}`))
                             act(s.id, () => startMcpServer(conn, s.id))
                         }}
                         icon={<Play size={13} />}

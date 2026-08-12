@@ -321,6 +321,7 @@ OAUTH_REDIRECT_PATH = "/callback"
 # --- Modele czatu (lista zapasowa, gdy /v1/models się nie powiedzie) ---
 # "Grok Build" = wybór modelu grok-build-0.1.
 DEFAULT_CHAT_MODELS = [
+    "grok-4.6",
     "grok-4.5",
     "grok-4.3",
     "grok-4.20-0309-non-reasoning",
@@ -330,7 +331,7 @@ DEFAULT_CHAT_MODELS = [
     "grok-4",
     "grok-3",
 ]
-DEFAULT_CHAT_MODEL = "grok-4.5"
+DEFAULT_CHAT_MODEL = "grok-4.6"
 
 # Przybliżony rozmiar okna kontekstowego modelu (do miernika UI agenta). To SZACUNEK
 # (xAI nie udostępnia tego stabilnie per-model) — używany tylko do paska „X/Y (Z%)".
@@ -339,22 +340,37 @@ _CONTEXT_WINDOW_DEFAULT = 256_000
 
 def context_window_for(model: str) -> int:
     """Przybliżony rozmiar okna kontekstowego (tokeny) dla miernika UI. Szacunek —
-    rodzina grok-3 ma mniejsze okno; grok-4.5 = 500k (docs); grok-4.x / grok-build /
-    nieznane → duże okno."""
+    rodzina grok-3 ma mniejsze okno; grok-4.5 / grok-4.6 = 500k (docs); grok-4.x /
+    grok-build / nieznane → duże okno."""
     m = (model or "").lower()
     if m.startswith("grok-3"):
         return 131_072
-    if m.startswith("grok-4.5"):
+    if m.startswith("grok-4.5") or m.startswith("grok-4.6"):
         return 500_000
     return _CONTEXT_WINDOW_DEFAULT
 
 # --- Modele obrazu (zakładka Image: generowanie + edycja) ---
 # "quality" daje lepszą jakość za wyższą cenę; standard jest tańszy i jest domyślny.
+# 2.0 (docs 2026-08) to nowsza generacja — $0.04/obraz i JAKO JEDYNY przyjmuje parametr
+# `quality` (low|medium). Domyślnego modelu NIE zmieniamy: 2.0 kosztuje 2× standard,
+# a to wybór usera (BYO-key), nie milcząca podwyżka.
 IMAGE_MODELS = [
     "grok-imagine-image",
+    "grok-imagine-image-2.0",
     "grok-imagine-image-quality",
 ]
 DEFAULT_IMAGE_MODEL = "grok-imagine-image"
+
+# Modele przyjmujące parametr `quality` i jego dozwolone wartości (docs.x.ai:
+# „The parameter is only supported for grok-imagine-image-2.0", low|medium, domyślnie
+# medium). Wysłanie go do innego modelu = 4xx, więc filtrujemy po tej liście.
+IMAGE_QUALITY_MODELS = ["grok-imagine-image-2.0"]
+IMAGE_QUALITY_LEVELS = ["low", "medium"]
+
+
+def image_model_supports_quality(model: str) -> bool:
+    """Czy dany model obrazu przyjmuje parametr `quality` (tylko rodzina 2.0)."""
+    return (model or "") in IMAGE_QUALITY_MODELS
 
 # --- Modele wideo (zakładka Video + komendy czatu /video, narzędzie generate_video) ---
 # Nowszy model 1.5 daje lepszą jakość; bazowy zostawiamy jako wybór wsteczny.
@@ -364,6 +380,18 @@ VIDEO_MODELS = [
     "grok-imagine-video",
 ]
 DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5"
+
+# Reference-to-video (docs.x.ai 2026-08, tylko grok-imagine-video-1.5): do 3 obrazów
+# referencyjnych w polu `reference_images` — postać/ubranie/przedmiot są przenoszone do
+# klipu BEZ blokowania pierwszej klatki (to inna rzecz niż `image` w image→video, gdzie
+# obraz JEST pierwszą klatką). W promptcie odwołujemy się do nich tagami <IMAGE_1>…
+MAX_VIDEO_REFERENCE_IMAGES = 3
+VIDEO_REFERENCE_MODELS = ["grok-imagine-video-1.5"]
+
+
+def video_model_supports_references(model: str) -> bool:
+    """Czy dany model wideo przyjmuje `reference_images` (tylko 1.5)."""
+    return (model or DEFAULT_VIDEO_MODEL) in VIDEO_REFERENCE_MODELS
 # Model wideo dla CZATU (narzedzie generate_video). Celowo BAZOWY, nie 1.5:
 # 1.5 ma mniej mozliwosci (tylko image->video, brak edit/extend) niz bazowy grok-imagine-video.
 # Panel Video nadal pozwala wybrac dowolny model (domyslnie 1.5).

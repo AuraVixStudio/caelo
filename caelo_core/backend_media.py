@@ -57,16 +57,21 @@ class MediaMixin:
         ratio = p.get("aspect_ratio", "auto")
         resolution = p.get("resolution", "1k")
         model = p.get("model") or None
+        # `quality` (low|medium) dotyczy tylko grok-imagine-image-2.0 — filtr jest
+        # w `api_manager._apply_quality`, tu tylko podajemy dalej.
+        quality = p.get("quality") or None
         if cancel.is_set():
             raise GenJobCancelled()
         if job.op == "text2img":
-            urls = self.api.generate_image(prompt, n, ratio, resolution, model=model)
+            urls = self.api.generate_image(prompt, n, ratio, resolution, model=model,
+                                           quality=quality)
             legacy_mode = "generate"
         else:  # edit / variation — oba przez /images/edits (referencja + prompt)
             images = list(p.get("images") or [])
             if not images:
                 raise ValueError("edit/variation requires at least one reference image")
-            urls = self.api.edit_image_b64(prompt, images, n, ratio, resolution, model=model)
+            urls = self.api.edit_image_b64(prompt, images, n, ratio, resolution,
+                                           model=model, quality=quality)
             legacy_mode = "edit"
         if cancel.is_set():
             raise GenJobCancelled()
@@ -92,6 +97,7 @@ class MediaMixin:
                 prompt, int(p.get("duration", 6) or 6), p.get("resolution", "480p"),
                 p.get("aspect_ratio", "Original"), None, model=model,
                 image_data_uri=p.get("image"),
+                reference_images=p.get("reference_images") or None,
             )
         deadline = time.time() + VIDEO_JOB_DEADLINE_S
         while True:

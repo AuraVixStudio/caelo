@@ -38,6 +38,10 @@ class ImageJobReq(BaseModel):
     resolution: str = Field("1k", max_length=8)
     model: Optional[str] = Field(None, max_length=64)
     images: List[str] = Field(default_factory=list, max_length=MAX_EDIT_REFS)  # data-URI
+    # grok-imagine-image-2.0: low|medium (docs 2026-08). Dla innych modeli parametr jest
+    # POMIJANY w `api_manager._apply_quality` (xAI odrzuca go 4xx), więc tu tylko go
+    # walidujemy — nie zgadujemy, czy model go obsłuży.
+    quality: Optional[Literal["low", "medium"]] = None
 
     @field_validator("images")
     @classmethod
@@ -63,6 +67,10 @@ class VideoJobReq(BaseModel):
     model: Optional[str] = Field(None, max_length=64)
     image: Optional[str] = None  # data-URI: kadr startowy dla img2video
     video: Optional[str] = None  # https URL lub data:video — źródło dla edit/extend
+    # Reference-to-video (docs 2026-08, grok-imagine-video-1.5): do 3 obrazów, które
+    # przenoszą postać/ubranie/przedmiot do klipu BEZ blokowania pierwszej klatki.
+    # Ortogonalne do `image` (kadr startowy) — mogą wystąpić razem.
+    reference_images: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS)
     # ROAD-3.6-d: długość źródła (s) dla edit/extend — wyjście zachowuje długość
     # źródła, więc koszt liczymy z niej, nie z domyślnego `duration`. Opcjonalne;
     # klient podaje, gdy zna długość źródła (np. z HTMLVideoElement.duration).
@@ -78,6 +86,11 @@ class VideoJobReq(BaseModel):
     def _check_video(cls, v: Optional[str]) -> Optional[str]:
         return V.validate_video_ref(v) if v else v
 
+    @field_validator("reference_images")
+    @classmethod
+    def _check_reference_images(cls, v: List[str]) -> List[str]:
+        return [V.validate_image_uri(u) for u in v]
+
     @model_validator(mode="after")
     def _check_op(self) -> "VideoJobReq":
         if self.op == "img2video" and not self.image:
@@ -89,6 +102,10 @@ class VideoJobReq(BaseModel):
                 raise ValueError(f"{self.op} requires a source video")
             if self.image:
                 raise ValueError(f"{self.op} takes no source image")
+            # /videos/edits i /videos/extensions nie znają `reference_images` — nie
+            # przepuszczaj ich cicho, bo user straciłby je bez śladu.
+            if self.reference_images:
+                raise ValueError(f"{self.op} takes no reference images")
             if self.op == "extend" and self.duration > V.MAX_EXTEND_DURATION:
                 raise ValueError(f"extend duration must be <= {V.MAX_EXTEND_DURATION}s")
         elif self.video:

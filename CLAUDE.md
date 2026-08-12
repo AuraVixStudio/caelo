@@ -125,8 +125,23 @@ Routes ([`routes/genjobs.py`](caelo_core/routes/genjobs.py)): `POST /genjobs/ima
 job is active); `GenJobManager.on_update` is an unused hook for an optional WS push. Selfcheck:
 [`caelo_core/tools/genjobs_check.py`](caelo_core/tools/genjobs_check.py) (don't regress the lifecycle/cancel/
 queue-limit asserts) + `/genjobs` guards in `api_smoke.py`. Renderer staged inputs (Image refs, Video
-frame/source) live in the **Hub context** (`lib/hub.tsx`) — panels are lazy and unmount on tab switch,
-so per-panel `useState` would lose them.
+frame/source, **Video reference images**) live in the **Hub context** (`lib/hub.tsx`) — panels are lazy
+and unmount on tab switch, so per-panel `useState` would lose them.
+
+**Model-scoped media parameters (2026-08 docs wave) — send them ONLY where they're documented.**
+xAI rejects the whole request (4xx) when a parameter reaches a model that doesn't know it, so both
+sides gate: `config.image_model_supports_quality` / `video_model_supports_references` (+ the mirrors
+`imageModelSupportsQuality` / `videoModelSupportsReferences` in `lib/constants.ts`, which also hide
+the controls). (a) **`reference_images`** (≤3, `grok-imagine-video-1.5` only) is NOT the same thing as
+the `image` first frame — it carries a character/outfit/object into the clip without locking the
+opening shot, is referenced in the prompt as `<IMAGE_1>`…, and the two may be sent together; it's
+rejected on `edit`/`extend` (those endpoints don't take it) and it IS a data-URI carrier, so it's in
+`genjobs._BLOB_PARAM_KEYS` (P1-D) — a new blob-bearing param must be added there or `GET /genjobs`
+balloons again. (b) **`quality`** (low|medium) belongs to `grok-imagine-image-2.0` alone; the final
+filter is `api_manager._apply_quality`, which drops it rather than break the call. **`xhigh`**
+reasoning effort follows the same rule but with the opposite default in the UI: `modelSupportsEffort`
+returns true for unknown models, while `modelSupportsXhighEffort` returns true only for known-4.6 —
+an unrecognised effort silently degrades to the model default via the existing 400/422 retry.
 
 **Voice = bridges + conversation pipeline (M12, see [`docs/plans/zrealizowane/PLAN_M12_GLOS.md`](docs/plans/zrealizowane/PLAN_M12_GLOS.md)):**
 all voice routes live in [`routes/voice.py`](caelo_core/routes/voice.py); audio flows
@@ -172,7 +187,7 @@ the hub became a **programmable platform** — tools serve chat AND the agent. T
 **custom thin SYNCHRONOUS layer** (`caelo_core/mcp/`), NOT the official SDK (deliberate hybrid, like
 `responses_client` vs the OpenAI SDK — zero new deps, fits the worker-thread model; `client.py` does
 stdio newline-delimited JSON-RPC 2.0, transport is abstract (`McpTransport`) so HTTP/native-remote can
-adopt the SDK later). Server subprocesses are hardened like `run_command` (**`tools.scrubbed_env()`** +
+adopt the SDK later — **that seam is now used**, see local HTTP below). Server subprocesses are hardened like `run_command` (**`tools.scrubbed_env()`** +
 **`_tree_kill`**; Windows wraps `.cmd`/`npx` in `cmd /c`); starting a stdio server is an explicit,
 gated user action. `McpManager` namespaces tools (`mcp__<server>__<tool>`), routes calls, classifies
 gating by `annotations.readOnlyHint` (READONLY → no gate; else → `PermissionGate`, key `mcp:<name>`),
@@ -197,10 +212,31 @@ CAELO.md). New state files (all via `load_json_or_backup` + atomic writes, gitig
 `caelo_commands.json`, `caelo_hooks.json`, `caelo_audit.log`, `skills/`. REST: `routes/mcp.py`,
 `routes/hooks.py`, `routes/commands.py`, `routes/skills.py`; lazy `backend.mcp`/`.hooks`/`.commands`/
 `.skills`; `backend.shutdown()` tree-kills MCP subprocesses in the server lifespan. Renderer module
-**Extensions** (4 tabs). Selfchecks: `caelo_core/tools/mcp_check.py` (24, mock stdio server),
-`agent_selfcheck.py` (MCP-in-agent + hooks → 139), `api_smoke.py` (`_unit_responses_mcp_loop`,
+**Extensions** (4 tabs). Selfchecks: `caelo_core/tools/mcp_check.py` (**80**, mock stdio **and** mock
+HTTP server), `agent_selfcheck.py` (MCP-in-agent + hooks → 139), `api_smoke.py` (`_unit_responses_mcp_loop`,
 `_unit_mcp_routes`, `_unit_commands_skills`). **Real MCP servers / live chat verified on the user's
 machine** (sandbox blocks them); don't regress P0-1…P0-8 / M5–M6.
+
+**Local HTTP MCP (`transport: "http"`) — we call the server, xAI does not.** Third transport beside
+`stdio` and `remote`, and the distinction is the whole point: **`remote` is executed on xAI's side**, so
+a loopback address is useless there — their cloud cannot reach this machine. `http` is a Streamable
+HTTP server on *this* machine that `HttpTransport` POSTs to, so its tools go through the same
+`PermissionGate` as a local process. Request-response, not a stream: the reply comes back in the same
+POST as `application/json` **or** `text/event-stream` (the server chooses; both are handled), a
+notification gets `202` with no body, and the optional server→client `GET` stream is deliberately not
+opened. `McpTransport.send()` therefore takes a `timeout` — for HTTP that is the only place a caller's
+budget can be enforced, since `request()` waits on its Event only *after* `send()` returns. Secrets are
+masked like `env`: `has_authorization` plus `header_keys`, never values. **A token is refused over plain
+`http://` to a non-loopback host** (it would cross the network readable). Interop follows the same
+logic: a **loopback** url in `~/.claude.json` is imported as `http`, not `remote` — mapping it to
+`remote` would look configured and could never work.
+
+**Catalogue entries can be completed from this machine.** `catalog()` is no longer pure data: it fills
+the SceneAgent MCP (Pro) entry's command from `HKLM\SOFTWARE\SceneAgentMCP\InstallLocation` (verifying
+the exe is really there — a stale key would otherwise produce a server that never starts), and drops the
+path input when it finds it. Its Plugin Edition sibling is the `http` entry, with the endpoint token as
+a `target: "auth"` input the renderer turns into `Authorization: Bearer …`. `commandPreview` shows the
+url and **never the token**: consent is about what will be called, not what we authenticate with.
 
 **Agent teams = subagents (M17, see [`docs/plans/zrealizowane/PLAN_M17_SUBAGENCI.md`](docs/plans/zrealizowane/PLAN_M17_SUBAGENCI.md)):** the
 orchestrator (top-level `AgentSession`) gets a **`delegate`** tool that fans out subtasks to specialized

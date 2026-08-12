@@ -10,13 +10,16 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-# M19-B9: dozwolone poziomy reasoning_effort (CLI: low/medium/high). Wspólny słownik
-# dla obu ścieżek inferencji (Responses/chat), ról subagentów i tras — leaf, bez cykli.
-REASONING_EFFORTS = ("low", "medium", "high")
+# M19-B9: dozwolone poziomy reasoning_effort (CLI: low/medium/high/xhigh). Wspólny
+# słownik dla obu ścieżek inferencji (Responses/chat), ról subagentów i tras — leaf,
+# bez cykli. `xhigh` doszedł z grok-4.6 (docs 2026-08: low/medium/high/xhigh); modele,
+# które go nie znają, odrzucą żądanie 4xx, a oba klienty ponawiają wtedy BEZ effortu
+# (ta sama ścieżka, co dla modeli bez wsparcia effortu w ogóle).
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 
 
 def normalize_effort(value) -> Optional[str]:
-    """Znormalizuj reasoning_effort do `low`/`medium`/`high` albo None (M19-B9).
+    """Znormalizuj reasoning_effort do `low`/`medium`/`high`/`xhigh` albo None (M19-B9).
     Cokolwiek poza dozwolonymi (None/""/śmieć) → None, by NIE dokładać pola do
     payloadu xAI (modele nie-rozumujące mogłyby zwrócić 4xx)."""
     if not value:
@@ -28,6 +31,7 @@ def normalize_effort(value) -> Optional[str]:
 # Limity (sekundy/sztuki/znaki).
 MAX_PROMPT = 8000           # długość promptu (obraz/wideo)
 MAX_IMAGES = 8              # liczba obrazów referencyjnych w jednej edycji
+MAX_VIDEO_REFS = 3          # obrazy referencyjne wideo (reference-to-video, limit API)
 MAX_N = 10                  # liczba generowanych obrazów na żądanie
 MAX_VIDEO_DURATION = 30     # sekundy zadania wideo
 MAX_EXTEND_DURATION = 10    # dodane sekundy przy przedłużeniu
