@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.9] — 2026-09-22
+
+Pierwsze **publiczne** wydanie linii 2.0: aplikacja jest odtąd multi-provider
+(xAI + Google + OpenAI). Wersje 2.0.0–2.0.8 powstawały wewnętrznie i nigdy nie
+trafiły do Releases, więc to wydanie konsoliduje całą tę linię — pełny opis
+zmian w sekcjach poniżej.
+
 ### Added
 - Katalog modeli odświeżony wg dokumentacji dostawców (2026-09-22):
   **Grok 4.7** (`grok-4.7`, 500k kontekstu, `reasoning_effort` do `xhigh`) jest nowym
@@ -380,6 +387,7 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[2.0.9]: https://github.com/AuraVixStudio/caelo/compare/v0.1.5...v2.0.9
 [2.0.4]: https://github.com/AuraVixStudio/caelo/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/AuraVixStudio/caelo/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/AuraVixStudio/caelo/compare/v2.0.1...v2.0.2
