@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.10] — 2026-09-22
+
 ### Fixed
 - Panel **Video**: wstawiona „Optional first frame" pokazywała tylko nazwę pliku — teraz
   jest miniaturka (klik = podgląd na pełnym ekranie), a w trybie Edit/Extend podgląd
@@ -395,6 +397,7 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[2.0.10]: https://github.com/AuraVixStudio/caelo/compare/v2.0.9...v2.0.10
 [2.0.9]: https://github.com/AuraVixStudio/caelo/compare/v0.1.5...v2.0.9
 [2.0.4]: https://github.com/AuraVixStudio/caelo/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/AuraVixStudio/caelo/compare/v2.0.2...v2.0.3
