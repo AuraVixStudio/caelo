@@ -4,7 +4,8 @@
 // się 400 na całym żądaniu, więc ukrycie kontrolki jest zabezpieczeniem, nie kosmetyką.
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent } from '@testing-library/dom'
 import type { ReactNode } from 'react'
 
 const models = { value: { video: ['grok-imagine-video-1.5', 'grok-imagine-video'],
@@ -46,7 +47,7 @@ const hub = {
   currentProjectId: null,
   pendingSend: null,
   setPendingSend: vi.fn(),
-  videoFrame: null,
+  videoFrame: null as { name: string; uri: string } | null,
   setVideoFrame: vi.fn(),
   videoRefs: [] as { name: string; uri: string }[],
   setVideoRefs: vi.fn(),
@@ -57,6 +58,9 @@ const hub = {
   promptReuse: null,
   setPromptReuse: vi.fn()
 }
+vi.mock('../../src/renderer/src/lib/imageCompress', () => ({
+  compressImageIfNeeded: vi.fn(async (file: File) => ({ uri: `data:image/png;base64,${file.name}` }))
+}))
 vi.mock('../../src/renderer/src/lib/hub', () => ({
   useHub: () => hub,
   HubProvider: ({ children }: { children: ReactNode }) => children
@@ -72,6 +76,8 @@ describe('Video — obrazy referencyjne (reference-to-video)', () => {
     // keeps the per-connection capabilities cache isolated between examples.
     conn = { baseUrl: '', token: '' }
     hub.videoRefs = []
+    hub.videoFrame = null
+    hub.setVideoRefs.mockClear()
     models.value = { video: ['grok-imagine-video-1.5', 'grok-imagine-video'],
                      default_video: 'grok-imagine-video-1.5' }
   })
@@ -96,6 +102,31 @@ describe('Video — obrazy referencyjne (reference-to-video)', () => {
     render(<Video conn={conn} />)
     expect(await screen.findByText(/Reference images · 1\/3/)).toBeInTheDocument()
     expect(await screen.findByDisplayValue('grok-imagine-video-1.5')).toBeInTheDocument()
+  })
+
+  // Regresja: blok „Optional first frame" pokazywał samą NAZWĘ pliku, więc po
+  // upuszczeniu obrazu nie było widać, co właściwie zostało wstawione jako klatka.
+  it('wstawiona pierwsza klatka pokazuje miniaturkę, nie samą nazwę', async () => {
+    hub.videoFrame = { name: 'opening.png', uri: 'data:image/png;base64,FRAME' }
+    render(<Video conn={conn} />)
+    const thumb = await screen.findByAltText('opening.png')
+    expect(thumb).toHaveAttribute('src', 'data:image/png;base64,FRAME')
+    expect(screen.getByRole('button', { name: 'Preview opening.png' })).toBeInTheDocument()
+  })
+
+  // Regresja: kafelek referencji przyjmował pliki tylko przez „From disk"/„Library" —
+  // upuszczenie obrazu na kartę nie robiło nic, choć blok pierwszej klatki obok działał.
+  it('upuszczenie obrazów na kartę referencji dodaje je', async () => {
+    render(<Video conn={conn} />)
+    const card = (await screen.findByText(/Reference images · 0\/3/)).closest('div.rounded-2xl')
+    expect(card).not.toBeNull()
+    const file = new File(['x'], 'dropped.png', { type: 'image/png' })
+    fireEvent.drop(card as Element, { dataTransfer: { files: [file] } })
+    await waitFor(() => expect(hub.setVideoRefs).toHaveBeenCalled())
+    const update = hub.setVideoRefs.mock.calls[0][0] as (items: unknown[]) => unknown[]
+    expect(update([])).toEqual([
+      { name: 'dropped.png', uri: 'data:image/png;base64,dropped.png', role: 'character' }
+    ])
   })
 
   it('dodane referencje są otagowane <IMAGE_n> zgodnie z promptem', async () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Film, ImagePlus, Images } from 'lucide-react'
+import { Film, ImagePlus, Images, Maximize2 } from 'lucide-react'
 import { type Conn, type HubArtifact } from '../lib/api'
 import { cn } from '../lib/cn'
 import { fileToDataUri } from '../lib/files'
@@ -14,6 +14,7 @@ import { GenQueue } from './GenQueue'
 import { ProviderModelPicker } from './ProviderModelPicker'
 import { ReferenceLibrary } from './ReferenceLibrary'
 import { ReferencePicker } from './ReferencePicker'
+import { ImagePreview } from './ImagePreview'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { Input } from './ui/Input'
@@ -21,6 +22,39 @@ import { Field, Page } from './ui/Page'
 import { Select } from './ui/Select'
 import { Slider } from './ui/Slider'
 import { Textarea } from './ui/Textarea'
+
+/** Strefa „upuść pliki tutaj" z podświetleniem. `dragleave` wpada też przy przejściu na
+ *  dziecko strefy, więc gasimy podświetlenie dopiero, gdy kursor naprawdę opuścił
+ *  kontener (relatedTarget poza nim) — inaczej ramka miga przy każdym elemencie w środku. */
+function useDropZone(onFiles: (files: FileList | null) => void): {
+  dragging: boolean
+  zoneProps: {
+    onDrop: (event: DragEvent<HTMLElement>) => void
+    onDragOver: (event: DragEvent<HTMLElement>) => void
+    onDragLeave: (event: DragEvent<HTMLElement>) => void
+  }
+} {
+  const [dragging, setDragging] = useState(false)
+  return {
+    dragging,
+    zoneProps: {
+      onDragOver: (event) => {
+        event.preventDefault()
+        setDragging(true)
+      },
+      onDragLeave: (event) => {
+        const next = event.relatedTarget
+        if (next instanceof Node && event.currentTarget.contains(next)) return
+        setDragging(false)
+      },
+      onDrop: (event) => {
+        event.preventDefault()
+        setDragging(false)
+        onFiles(event.dataTransfer.files)
+      }
+    }
+  }
+}
 
 type Mode = 'generate' | 'edit' | 'extend'
 const MODES: { id: Mode; label: string }[] = [
@@ -46,6 +80,7 @@ export function Video({ conn }: { conn: Conn }) {
     (value): value is string => typeof value === 'string')
   const [results, setResults] = useState<HubArtifact[]>([])
   const [libraryOpen, setLibraryOpen] = useState(false)
+  const [framePreview, setFramePreview] = useState<StagedImage | null>(null)
   const { jobs, submitVideo, cancel, retry, clearFinished, dismiss, error: jobsError } = useGenJobs(conn)
   const { currentProjectId, pendingSend, setPendingSend, videoFrame: image, setVideoFrame: setImage,
     videoRefs: refs, setVideoRefs: setRefs, videoSource: source, setVideoSource: setSource,
@@ -126,7 +161,8 @@ export function Video({ conn }: { conn: Conn }) {
   function pick(handler: (files: FileList | null) => Promise<void>) {
     return (event: ChangeEvent<HTMLInputElement>) => { void handler(event.target.files); event.target.value = '' }
   }
-  function onDrop(event: DragEvent<HTMLDivElement>): void { event.preventDefault(); void addMain(event.dataTransfer.files) }
+  const mainZone = useDropZone((files) => void addMain(files))
+  const refsZone = useDropZone((files) => void addRefs(files))
 
   async function run(): Promise<void> {
     if (!prompt.trim() || !caps.model || (needsSource && !source)) return
@@ -149,6 +185,7 @@ export function Video({ conn }: { conn: Conn }) {
       source_artifact_roles: sources.map((item) => item.role) })
   }
 
+  const staged = needsSource ? source : image
   const durations = capability?.durations ?? []
   const resolutions = mode === 'extend' && capability?.extension_resolutions.length
     ? capability.extension_resolutions : capability?.resolutions ?? []
@@ -159,14 +196,28 @@ export function Video({ conn }: { conn: Conn }) {
           className={cn('rounded-md px-3.5 py-1.5 text-sm font-medium', mode === item.id ? 'bg-surface text-fg shadow-sm' : 'text-muted')}>
           {item.label}</button>)}
       </div>
-      <div onDrop={onDrop} onDragOver={(e) => e.preventDefault()}
-        className="mb-4 rounded-xl border border-dashed border-border-strong bg-surface/40 p-4">
+      <div {...mainZone.zoneProps}
+        className={cn('mb-4 rounded-xl border border-dashed bg-surface/40 p-4 transition-colors',
+          mainZone.dragging ? 'border-accent bg-accent/5' : 'border-border-strong')}>
         <p className="mb-2 text-xs text-muted">{needsSource ? 'Source video' : 'Optional first frame'}</p>
-        {(needsSource ? source : image) ? <div className="flex items-center gap-3"><span className="text-sm">{(needsSource ? source : image)?.name}</span>
-          <Button variant="ghost" size="sm" onClick={() => needsSource ? setSource(null) : setImage(null)}>Remove</Button></div> :
+        {staged ? <div className="flex items-center gap-3">
+          {needsSource
+            ? <video src={staged.uri} muted preload="metadata"
+                className="h-20 w-28 shrink-0 rounded-md border border-border object-cover" />
+            : <button type="button" aria-label={`Preview ${staged.name}`} onClick={() => setFramePreview(staged)}
+                className="group relative h-20 w-28 shrink-0 overflow-hidden rounded-md border border-border">
+                <img src={staged.uri} alt={staged.name} className="h-full w-full object-cover" />
+                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all group-hover:bg-black/35 group-hover:opacity-100 group-focus-visible:bg-black/35 group-focus-visible:opacity-100">
+                  <Maximize2 size={18} />
+                </span>
+              </button>}
+          <span className="min-w-0 flex-1 truncate text-sm" title={staged.name}>{staged.name}</span>
+          <Button variant="ghost" size="sm" onClick={() => needsSource ? setSource(null) : setImage(null)}>Remove</Button>
+        </div> :
           <p className="py-5 text-center text-sm text-muted">Drop a {needsSource ? 'video' : 'still image'} here.</p>}
       </div>
-      {mode === 'generate' && maxRefs > 0 ? <Card className="mb-4">
+      {mode === 'generate' && maxRefs > 0 ? <Card {...refsZone.zoneProps}
+        className={cn('mb-4 transition-colors', refsZone.dragging && 'border-accent bg-accent/5')}>
         <div className="mb-3 flex items-center justify-between gap-3"><p className="text-sm font-medium">Reference images · {refs.length}/{maxRefs}</p>
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" icon={<Images size={14} />}
@@ -174,8 +225,10 @@ export function Video({ conn }: { conn: Conn }) {
             <label className="cursor-pointer text-xs text-accent"><ImagePlus size={14} className="mr-1 inline" />From disk
               <input hidden multiple type="file" accept="image/*" onChange={pick(addRefs)} /></label>
           </div></div>
-        {refs.length ? <ReferenceLibrary items={refs} max={maxRefs} onChange={setRefs} /> : <p className="text-xs text-muted">Assign each reference as a character, object, or style.</p>}
+        {refs.length ? <ReferenceLibrary items={refs} max={maxRefs} onChange={setRefs} /> :
+          <p className="text-xs text-muted">Drop images here, or use Library / From disk. Assign each reference as a character, object, or style.</p>}
       </Card> : null}
+      {framePreview ? <ImagePreview src={framePreview.uri} name={framePreview.name} onClose={() => setFramePreview(null)} /> : null}
       <Card>
         <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} className="mb-4" placeholder="Describe the shot and motion…" />
         {capability?.supports_negative_prompt ? <Textarea value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} rows={2} className="mb-4" placeholder="Negative prompt (optional)…" /> : null}

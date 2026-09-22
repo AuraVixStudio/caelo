@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Panel **Video**: wstawiona „Optional first frame" pokazywała tylko nazwę pliku — teraz
+  jest miniaturka (klik = podgląd na pełnym ekranie), a w trybie Edit/Extend podgląd
+  źródłowego wideo. Nie było jak sprawdzić, co właściwie zostało wstawione jako klatka.
+- Panel **Video**: na kartę **Reference images** nie dało się upuścić obrazu — przyjmowała
+  pliki tylko przez „From disk"/„Library", choć blok pierwszej klatki tuż obok reagował na
+  drop. Obie strefy podświetlają się teraz podczas przeciągania.
+
 ## [2.0.9] — 2026-09-22
 
 Pierwsze **publiczne** wydanie linii 2.0: aplikacja jest odtąd multi-provider
