@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   build:
-    name: Build (UNSIGNED, ${{ matrix.os }} ${{ matrix.arch }})
+    name: Build (${{ matrix.os }} ${{ matrix.arch }})
     strategy:
       fail-fast: false
       # Każdy wpis = osobny runner danego OS/architektury. Sidecar PyInstaller jest

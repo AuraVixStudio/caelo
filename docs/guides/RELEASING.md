@@ -90,6 +90,20 @@ created the Release yourself first with `gh release create`, it's already publis
 
 ## Gotchas learned the hard way
 
+- **A truncated NSIS cache fails the Windows build with a missing `.nlf`.** Symptom:
+  `Can't open language file - "…\Contrib\Language files\German.nlf"` from `makensis`,
+  after the app itself packed fine. electron-builder caches NSIS under
+  `%LOCALAPPDATA%\electron-builder\Cache
+sis`, and an interrupted download leaves a
+  cache that looks complete but carries only a handful of the ~120 language files (seen
+  2026-09-22: 16). The installer is multi-language, so it needs them all. Fix: move the
+  `nsis` cache folder aside and re-run — electron-builder re-downloads it in ~2 s. Move
+  rather than delete, so a blocked download does not leave you unable to build at all.
+- **`signtool.exe` is usually not on `PATH`.** `build_sidecar.ps1` only warns and silently
+  skips sidecar signing when it is missing. Prepend the SDK's `x64` folder (e.g.
+  `C:\Program Files (x86)\Windows Kitsin.0.26100.0d`) to `$env:PATH` in the
+  same shell as `npm run dist:full`, or the `.exe` inside the installer ships unsigned
+  while the installer itself is signed.
 - **Repo must be public for end-user auto-update.** `electron-updater` can't read `latest*.yml`
   from a private repo without auth. Public since 2026-07-03.
 - **macOS is arm64-only (no Intel/x64).** GitHub is retiring the Intel `macos-13` runner —
