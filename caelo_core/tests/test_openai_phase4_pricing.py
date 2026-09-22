@@ -18,8 +18,8 @@ def test_openai_cost_separates_cached_input_and_output_tokens() -> None:
     })
     assert cost == 2.75
     # Snapshot cennika jest jawnie wersjonowany — data rusza się tylko po ponownym
-    # sprawdzeniu stawek u dostawcy (ostatnio: katalog OpenAI, 2026-09-01).
-    assert OPENAI_TEXT_PRICING_UPDATED == "2026-09-01"
+    # sprawdzeniu stawek u dostawcy (ostatnio: katalog OpenAI, 2026-09-22).
+    assert OPENAI_TEXT_PRICING_UPDATED == "2026-09-22"
 
 
 def test_openai_unknown_model_has_no_false_zero_cost() -> None:
@@ -44,7 +44,7 @@ def test_gpt_image_2_estimate_matches_official_calculator_presets() -> None:
         "provider": "openai", "model": "gpt-image-2",
         "resolution": "1024x1536", "quality": "high", "n": 1,
     }) == 0.16464
-    assert OPENAI_IMAGE_PRICING_UPDATED == "2026-09-01"
+    assert OPENAI_IMAGE_PRICING_UPDATED == "2026-09-22"
 
 
 def test_gpt_image_2_actual_cost_uses_modal_usage_breakdown() -> None:

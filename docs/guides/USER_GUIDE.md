@@ -300,9 +300,10 @@ above the tabs because it applies to all three. The last tab you used is remembe
   picked from **every** configured provider, grouped by provider. The Code list shows only models
   that support tool calling. Caelo stores the provider alongside the model, so a Gemini or OpenAI
   default actually starts there; Chat and Code can still switch provider per conversation. The
-  default chat model is **`grok-4.6`** (500k context, vision, live search).
+  default chat model is **`grok-4.7`** (500k context, vision, live search).
 - **Reasoning effort** — the gauge next to the chat and agent composers overrides how hard the
-  model thinks for the next turn (Auto / Low / Medium / High, plus **xHigh** on `grok-4.6`). Only
+  model thinks for the next turn (Auto / Low / Medium / High, plus **xHigh** on `grok-4.7`,
+  `grok-4.6`, the Grok multi-agent models and the OpenAI GPT-5.6 / GPT-6 families). Only
   levels the selected model actually supports are offered; if one isn't, the selector says so and
   the model's own default is used.
 - **System prompt** and **temperature** for chat.

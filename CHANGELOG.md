@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Katalog modeli odświeżony wg dokumentacji dostawców (2026-09-22):
+  **Grok 4.7** (`grok-4.7`, 500k kontekstu, `reasoning_effort` do `xhigh`) jest nowym
+  domyślnym modelem czatu xAI; **Gemini 3.8 Flash** (`gemini-3.8-flash`, GA 2026-09-02)
+  jest nowym domyślnym modelem Google; OpenAI zyskuje flagowca **GPT-6 Astra**
+  (`gpt-6-astra`, 1.05M kontekstu) oraz modele obrazu **GPT Image 2.5**
+  (`gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`) z poziomami jakości `xhigh`/`max`.
+  Domyślne pozostają `gpt-5.6-terra` i `gpt-image-2` — Astra kosztuje 5x więcej na
+  wejściu, więc jej wybór jest świadomą decyzją.
+- Selektor „Reasoning effort" pokazuje **xHigh** także dla `grok-4.7` i rodzin
+  `gpt-5.6-*` / `gpt-6-*`, które dokumentują ten poziom.
+
+### Changed
+- Preflightowy szacunek kosztu GPT Image dla poziomów `xhigh`/`max` zwraca teraz brak
+  szacunku zamiast po cichu liczyć jak `medium` — OpenAI nie opublikowało dla nich osi
+  kalkulatora. Rzeczywisty koszt nadal liczy `usage` z odpowiedzi.
+
 ### Fixed
 - `agent_selfcheck` podstawiał atrapę HTTP w `caelo_core/agent/llm.py`, który jest dziś
   cienkim delegatem — `requests` żyje w adapterze `providers/xai/tools.py`. Test wywalał

@@ -44,13 +44,17 @@ describe('modelSupportsEffort', () => {
   })
 })
 
-// `xhigh` jest udokumentowany dla 4.6 i multi-agent; przeciwna polityka niż wyżej — pokazujemy tylko tam,
-// gdzie wiemy, że działa (inaczej wybór cicho degraduje się do domyślnego).
+// `xhigh` jest udokumentowany dla grok-4.7/4.6, multi-agent i rodzin OpenAI gpt-5.6/gpt-6;
+// przeciwna polityka niż wyżej — pokazujemy tylko tam, gdzie wiemy, że działa (inaczej wybór
+// cicho degraduje się do domyślnego).
 describe('modelSupportsXhighEffort', () => {
-  it('rodzina 4.6 i multi-agent → true', () => {
+  it('rodziny 4.7/4.6, multi-agent i OpenAI → true', () => {
+    expect(modelSupportsXhighEffort('grok-4.7')).toBe(true)
     expect(modelSupportsXhighEffort('grok-4.6')).toBe(true)
     expect(modelSupportsXhighEffort('  GROK-4.6 ')).toBe(true)
     expect(modelSupportsXhighEffort('grok-4.20-multi-agent-0309')).toBe(true)
+    expect(modelSupportsXhighEffort('gpt-5.6-terra')).toBe(true)
+    expect(modelSupportsXhighEffort('gpt-6-astra')).toBe(true)
   })
 
   it('starsze/nieznane modele → false', () => {
@@ -62,6 +66,7 @@ describe('modelSupportsXhighEffort', () => {
 
 describe('effortOptionsFor', () => {
   it('pokazuje xHigh tylko dla modeli, które je dokumentują', () => {
+    expect(effortOptionsFor('grok-4.7').map((o) => o.id)).toContain('xhigh')
     expect(effortOptionsFor('grok-4.6').map((o) => o.id)).toContain('xhigh')
     expect(effortOptionsFor('grok-4.20-multi-agent-0309').map((o) => o.id)).toContain('xhigh')
     expect(effortOptionsFor('grok-4.5').map((o) => o.id)).not.toContain('xhigh')

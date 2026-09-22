@@ -23,7 +23,7 @@ export const EFFORT_OPTIONS: EffortOption[] = [
     id: 'xhigh',
     label: 'xHigh',
     short: 'xHigh',
-    desc: 'Maximum reasoning — grok-4.6 only.'
+    desc: 'Maximum reasoning — grok-4.7 / 4.6 and GPT-5.6 / GPT-6.'
   }
 ]
 
@@ -31,8 +31,9 @@ function optionFor(effort: ReasoningEffort): EffortOption {
   return EFFORT_OPTIONS.find((o) => o.id === effort) ?? EFFORT_OPTIONS[0]
 }
 
-/** Opcje dostępne dla wybranego modelu. `xhigh` znają na razie tylko modele 4.6 —
- *  pokazanie go przy innych dałoby wybór, który backend cicho cofa do domyślnego. */
+/** Opcje dostępne dla wybranego modelu. `xhigh` znają tylko wybrane modele (grok-4.7/4.6,
+ *  multi-agent oraz rodziny OpenAI gpt-5.6 i gpt-6) — pokazanie go przy innych dałoby
+ *  wybór, który backend cicho cofa do domyślnego. */
 export function effortOptionsFor(model?: string): EffortOption[] {
   return modelSupportsXhighEffort(model || '')
     ? EFFORT_OPTIONS
@@ -128,7 +129,7 @@ export function EffortSelect({
           ) : xhighIgnored ? (
             <div className="mt-1 flex items-start gap-1.5 border-t border-border px-2.5 pb-1 pt-2 text-[11px] text-warn">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>{model} has no xHigh level — pick another effort or switch to grok-4.6.</span>
+              <span>{model} has no xHigh level — pick another effort or switch to grok-4.7.</span>
             </div>
           ) : null}
         </div>

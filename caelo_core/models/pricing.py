@@ -62,10 +62,11 @@ GOOGLE_VIDEO_RATES_USD = {
     "gemini-omni-1.1-flash": {"360p": 0.10, "720p": 0.10, "1080p": 0.15, "4k": 0.25},
 }
 
-# Oficjalne stawki OpenAI API za 1M tokenów, zweryfikowane 2026-09-01.
+# Oficjalne stawki OpenAI API za 1M tokenów, zweryfikowane 2026-09-22.
 # To jawnie wersjonowany snapshot: nieznany model zwraca None zamiast pozornego $0.
-OPENAI_TEXT_PRICING_UPDATED = "2026-09-01"
+OPENAI_TEXT_PRICING_UPDATED = "2026-09-22"
 OPENAI_TEXT_PER_MTOK_USD = {
+    "gpt-6-astra": {"input": 10.00, "cached_input": 1.00, "output": 50.00},
     "gpt-5.6-sol": {"input": 4.00, "cached_input": 0.40, "output": 20.00},
     "gpt-5.6-terra": {"input": 2.00, "cached_input": 0.20, "output": 12.00},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "output": 1.20},
@@ -74,7 +75,7 @@ OPENAI_TEXT_PER_MTOK_USD = {
 # GPT Image 2: oficjalne stawki za 1M tokenow. Szacunek przed wyslaniem
 # odwzorowuje kalkulator OpenAI, a po odpowiedzi jest zastepowany kosztem
 # policzonym z rzeczywistego pola ``usage``.
-OPENAI_IMAGE_PRICING_UPDATED = "2026-09-01"
+OPENAI_IMAGE_PRICING_UPDATED = "2026-09-22"
 OPENAI_IMAGE_PER_MTOK_USD = {
     "text_input": 5.00,
     "cached_text_input": 1.25,
@@ -82,6 +83,9 @@ OPENAI_IMAGE_PER_MTOK_USD = {
     "cached_image_input": 2.00,
     "image_output": 30.00,
 }
+# Os dluzszego boku wg oficjalnego kalkulatora. OpenAI nie opublikowalo jej dla
+# poziomow `xhigh`/`max` z rodziny 2.5, wiec dla nich NIE zgadujemy — preflight zwraca
+# None (brak szacunku), a rzeczywisty koszt i tak liczy `usage` z odpowiedzi.
 OPENAI_IMAGE_QUALITY_AXIS = {"low": 16, "medium": 48, "high": 96}
 
 
@@ -114,7 +118,12 @@ def openai_image_output_tokens(size: object, quality: object) -> Optional[int]:
     if dimensions is None:
         return None
     quality_id = str(quality or "auto").lower()
-    axis = OPENAI_IMAGE_QUALITY_AXIS.get(quality_id, OPENAI_IMAGE_QUALITY_AXIS["medium"])
+    # `auto` jest niepoznawalne przed wykonaniem → neutralny profil medium. Poziomy
+    # bez opublikowanej osi (xhigh/max) zwracaja None zamiast falszywego szacunku.
+    axis = (OPENAI_IMAGE_QUALITY_AXIS["medium"] if quality_id == "auto"
+            else OPENAI_IMAGE_QUALITY_AXIS.get(quality_id))
+    if axis is None:
+        return None
     width, height = dimensions
     long_edge, short_edge = max(width, height), min(width, height)
     short_axis = int(

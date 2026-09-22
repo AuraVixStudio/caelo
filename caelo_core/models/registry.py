@@ -121,6 +121,7 @@ def _video_model(model_id: str) -> ModelDescriptor:
 
 def _chat_model(model_id: str) -> ModelDescriptor:
     thinking_levels = {
+        "grok-4.7": ("low", "medium", "high", "xhigh"),
         "grok-4.6": ("low", "medium", "high", "xhigh"),
         "grok-4.5": ("low", "medium", "high"),
         "grok-4.3": ("none", "low", "medium", "high"),
@@ -132,7 +133,7 @@ def _chat_model(model_id: str) -> ModelDescriptor:
         id=model_id, provider="xai", label=model_id, media_type="chat",
         is_default=model_id == config.DEFAULT_CHAT_MODEL,
         status="stable",
-        tier="pro" if model_id in {"grok-4.6", "grok-4.5"} else "standard",
+        tier="pro" if model_id in {"grok-4.7", "grok-4.6", "grok-4.5"} else "standard",
         notes="Current xAI API model documented for text and image input.",
         capabilities=ModelCapabilities(
             operations=("chat",), input_modalities=("text", "image", "document"),

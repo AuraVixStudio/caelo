@@ -40,7 +40,7 @@ def test_openai_registry_exposes_chat_and_image_models_and_capabilities() -> Non
     assert provider.auth_modes == ("api_key",)
     models = registry.models(provider="openai", media_type="chat")
     assert {model.id for model in models} == {
-        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
     }
     assert registry.default_for("openai", "chat").id == "gpt-5.6-terra"
     assert all(model.capabilities.supports_tools for model in models)

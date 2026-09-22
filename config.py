@@ -321,6 +321,7 @@ OAUTH_REDIRECT_PATH = "/callback"
 # --- Modele czatu (lista zapasowa, gdy /v1/models się nie powiedzie) ---
 # "Grok Build" = wybór modelu grok-build-0.1.
 DEFAULT_CHAT_MODELS = [
+    "grok-4.7",
     "grok-4.6",
     "grok-4.5",
     "grok-4.3",
@@ -329,7 +330,7 @@ DEFAULT_CHAT_MODELS = [
     "grok-4.20-multi-agent-0309",
     "grok-build-0.1",
 ]
-DEFAULT_CHAT_MODEL = "grok-4.6"
+DEFAULT_CHAT_MODEL = "grok-4.7"
 
 # Przybliżony rozmiar okna kontekstowego modelu (do miernika UI agenta). Dla modeli
 # OpenAI korzystamy z wartości opublikowanej w katalogu modeli; pozostałe wpisy są
@@ -339,14 +340,15 @@ _CONTEXT_WINDOW_DEFAULT = 256_000
 
 def context_window_for(model: str) -> int:
     """Przybliżony rozmiar okna kontekstowego (tokeny) dla miernika UI. Wg katalogów
-    dostawców (2026-09-01): grok-4.6/4.5 = 500k, grok-4.3 i grok-4.20-* = 1M,
-    grok-build-0.1 = 256k, gpt-5.6-* = 1.05M, gemini-3.x = 1 048 576. Nieznane → 256k."""
+    dostawców (2026-09-22): grok-4.7/4.6/4.5 = 500k, grok-4.3 i grok-4.20-* = 1M,
+    grok-build-0.1 = 256k, gpt-5.6-* i gpt-6-* = 1.05M, gemini-3.x = 1 048 576.
+    Nieznane → 256k."""
     m = (model or "").lower()
-    if m.startswith("gpt-5.6"):
+    if m.startswith("gpt-5.6") or m.startswith("gpt-6"):
         return 1_050_000
     if m.startswith("grok-3"):
         return 131_072
-    if m.startswith("grok-4.5") or m.startswith("grok-4.6"):
+    if m.startswith("grok-4.5") or m.startswith("grok-4.6") or m.startswith("grok-4.7"):
         return 500_000
     if m.startswith("grok-4.3") or m.startswith("grok-4.20"):
         return 1_000_000

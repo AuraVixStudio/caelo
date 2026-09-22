@@ -5,7 +5,7 @@
 // pewno, że NIE wspierają effortu (xAI zwraca błąd); nowe/nieznane → `true` (brak fałszywych
 // ostrzeżeń; realną niezgodność wychwyci fallback backendu).
 //
-// Wsparcie (docs.x.ai): grok-4.6 (low/medium/high/xhigh, domyślnie high), grok-4.5
+// Wsparcie (docs.x.ai): grok-4.7 i grok-4.6 (low/medium/high/xhigh), grok-4.5
 // (low/medium/high, domyślnie high), grok-4.3,
 // grok-4.20-*-reasoning, grok-4.20-multi-agent, rodzina grok-3-mini. Brak wsparcia (4xx):
 // grok-4, grok-build-*, grok-3 (nie-mini), warianty *-non-reasoning.
@@ -19,11 +19,18 @@ export function modelSupportsEffort(model: string): boolean {
   return true // grok-4.3 / grok-4.20-*-reasoning / multi-agent / grok-3-mini / nieznane
 }
 
-/** Czy model dokumentuje poziom `xhigh` (doszedł z grok-4.6). Tu odwrotna polityka
- *  niż w `modelSupportsEffort`: pokazujemy `xhigh` TYLKO dla modeli, o których wiemy,
- *  że go znają — nieznany model dostałby 4xx i backend cofnąłby się do żądania BEZ
- *  effortu, czyli wybór „xhigh" po cichu zdegradowałby się do domyślnego. */
+/** Czy model dokumentuje poziom `xhigh` (doszedł z grok-4.6, ma go też grok-4.7 oraz
+ *  rodziny OpenAI gpt-5.6-* / gpt-6-*). Tu odwrotna polityka niż w `modelSupportsEffort`:
+ *  pokazujemy `xhigh` TYLKO dla modeli, o których wiemy, że go znają — nieznany model
+ *  dostałby 4xx i backend cofnąłby się do żądania BEZ effortu, czyli wybór „xhigh"
+ *  po cichu zdegradowałby się do domyślnego. */
 export function modelSupportsXhighEffort(model: string): boolean {
   const m = (model || '').toLowerCase().trim()
-  return m.startsWith('grok-4.6') || m.startsWith('grok-4.20-multi-agent')
+  return (
+    m.startsWith('grok-4.7') ||
+    m.startsWith('grok-4.6') ||
+    m.startsWith('grok-4.20-multi-agent') ||
+    m.startsWith('gpt-5.6') ||
+    m.startsWith('gpt-6')
+  )
 }

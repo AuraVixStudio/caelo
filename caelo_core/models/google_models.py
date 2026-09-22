@@ -13,7 +13,10 @@ VIDEO_RATIOS = ("16:9", "9:16")
 def google_models() -> tuple[ModelDescriptor, ...]:
     chat_specs = (
         # model, label, tier, status, default, configurable thinking, temperature
-        ("gemini-3.7-flash", "Gemini 3.7 Flash", "pro", "stable", True, True, False),
+        # 3.8 Flash = GA 2026-09-02, najmocniejszy Flash (long-horizon coding/agenty).
+        # `thinking_level` przyjmuje tylko low/medium/high — MINIMAL zwraca blad walidacji.
+        ("gemini-3.8-flash", "Gemini 3.8 Flash", "pro", "stable", True, True, False),
+        ("gemini-3.7-flash", "Gemini 3.7 Flash", "pro", "stable", False, True, False),
         ("gemini-3.6-flash", "Gemini 3.6 Flash", "standard", "stable", False, True, False),
         ("gemini-3.5-flash", "Gemini 3.5 Flash", "pro", "stable", False, True, False),
         ("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "pro", "preview", False, True, False),

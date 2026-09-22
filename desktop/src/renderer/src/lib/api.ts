@@ -131,8 +131,9 @@ export interface ProviderDescriptor {
 }
 
 // M19-B9: poziom reasoning_effort dla modeli rozumujących ('' = Auto/dziedzicz).
-// '' = Auto (use the saved default). 'xhigh' arrived with grok-4.6 and is offered
-// only for models that document it — see lib/modelCaps.ts.
+// '' = Auto (use the saved default). 'xhigh' arrived with grok-4.6 (also grok-4.7 and
+// the OpenAI gpt-5.6 / gpt-6 families) and is offered only for models that document it
+// — see lib/modelCaps.ts.
 export type ReasoningEffort = '' | 'low' | 'medium' | 'high' | 'xhigh'
 export type OpenAIAuthSource = 'vault' | 'env' | 'none'
 

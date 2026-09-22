@@ -7,11 +7,17 @@ from .types import ModelDescriptor
 
 
 def openai_models() -> tuple[ModelDescriptor, ...]:
+    # id, label, tier, default, poziomy reasoning_effort.
+    # gpt-6-astra to flagowiec (1.05M kontekstu), ale kosztuje 5x wiecej na wejsciu i
+    # ~4x na wyjsciu niz Terra, wiec domyslnym modelem pozostaje Terra — wybor Astry
+    # jest swiadoma decyzja uzytkownika. Astra NIE dokumentuje poziomu `none`.
+    _ALL_EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
     specs = (
-        # id, label, tier, default
-        ("gpt-5.6-terra", "GPT-5.6 Terra", "standard", True),
-        ("gpt-5.6-sol", "GPT-5.6 Sol", "pro", False),
-        ("gpt-5.6-luna", "GPT-5.6 Luna", "economy", False),
+        ("gpt-6-astra", "GPT-6 Astra", "pro", False,
+         ("low", "medium", "high", "xhigh", "max")),
+        ("gpt-5.6-terra", "GPT-5.6 Terra", "standard", True, _ALL_EFFORTS),
+        ("gpt-5.6-sol", "GPT-5.6 Sol", "pro", False, _ALL_EFFORTS),
+        ("gpt-5.6-luna", "GPT-5.6 Luna", "economy", False, _ALL_EFFORTS),
     )
     chat_models = tuple(ModelDescriptor(
         id=model_id,
@@ -32,17 +38,29 @@ def openai_models() -> tuple[ModelDescriptor, ...]:
             supports_tools=True,
             supports_temperature=False,
             thinking=True,
-            thinking_levels=("none", "low", "medium", "high", "xhigh", "max"),
+            thinking_levels=thinking_levels,
             multi_turn=True,
         ),
-    ) for model_id, label, tier, is_default in specs)
-    image_model = ModelDescriptor(
-        id="gpt-image-2",
+    ) for model_id, label, tier, is_default, thinking_levels in specs)
+    # GPT Image 2.5 (sunburst/flare) doklada poziomy jakosci `xhigh`/`max` i wlasne
+    # wymiary WxH (wielokrotnosc 16, proporcje 1:3..3:1). Cennik tokenowy jest wspolny
+    # dla calej rodziny, wiec `pricing.OPENAI_IMAGE_PER_MTOK_USD` zostaje jeden.
+    image_specs = (
+        # id, label, tier, default, poziomy quality
+        ("gpt-image-2", "GPT Image 2", "pro", True,
+         ("low", "medium", "high", "auto")),
+        ("gpt-image-2.5-sunburst", "GPT Image 2.5 Sunburst", "pro", False,
+         ("low", "medium", "high", "xhigh", "max", "auto")),
+        ("gpt-image-2.5-flare", "GPT Image 2.5 Flare", "standard", False,
+         ("low", "medium", "high", "xhigh", "max", "auto")),
+    )
+    image_models = tuple(ModelDescriptor(
+        id=model_id,
         provider="openai",
-        label="GPT Image 2",
+        label=label,
         media_type="image",
-        tier="pro",
-        is_default=True,
+        tier=tier,
+        is_default=is_default,
         notes=(
             "OpenAI Images API generation and high-fidelity multi-image editing. "
             "Content filtering is always active; low is the least restrictive mode."
@@ -56,7 +74,7 @@ def openai_models() -> tuple[ModelDescriptor, ...]:
                 "2048x1152", "3840x2160", "2160x3840", "auto",
             ),
             supports_quality=True,
-            quality_levels=("low", "medium", "high", "auto"),
+            quality_levels=quality_levels,
             output_formats=("png", "jpeg", "webp"),
             backgrounds=("auto", "opaque", "transparent"),
             supports_output_compression=True,
@@ -68,5 +86,5 @@ def openai_models() -> tuple[ModelDescriptor, ...]:
             max_object_reference_images=14,
             max_style_reference_images=14,
         ),
-    )
-    return (*chat_models, image_model)
+    ) for model_id, label, tier, is_default, quality_levels in image_specs)
+    return (*chat_models, *image_models)

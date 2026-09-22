@@ -190,7 +190,7 @@ class GoogleChatProvider:
         on_tool: Optional[Callable[[dict[str, Any]], None]] = None,
         stop_flag: Optional[Callable[[], bool]] = None,
     ) -> ChatCompletionResult:
-        model_id = model or "gemini-3.7-flash"
+        model_id = model or "gemini-3.8-flash"
         payload = build_google_chat_payload(
             messages, model=model_id, temperature=temperature,
             reasoning_effort=reasoning_effort, search_grounding=search_grounding,

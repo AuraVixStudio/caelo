@@ -98,7 +98,7 @@ No Caelo account, no middleman, no telemetry.
 - **⌨️ Code** — a mini-IDE: file tree, CodeMirror editor, terminal, and an **agent** with file
   tools and **approval cards** (Accept / Reject / Always) + diff preview, checkpoints/undo,
   plan mode, per-project rules (`CAELO.md`), and **subagent teams** with merge review.
-- **🎨 Image** — generate and edit with xAI, Google, or OpenAI GPT Image 2 in one panel
+- **🎨 Image** — generate and edit with xAI, Google, or OpenAI GPT Image in one panel
   (no refs → generate, with refs → edit), with model-aware size, quality, format,
   background and reference controls.
 - **🎬 Video** — text→video and image→video generation, plus edit and extend.

@@ -190,7 +190,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--effort", "--reasoning-effort", dest="effort",
                    choices=["low", "medium", "high"], default=None,
                    help="Reasoning effort for reasoning models (low|medium|high|xhigh; "
-                        "xhigh needs grok-4.6).")
+                        "xhigh needs grok-4.7/4.6 or GPT-5.6/GPT-6).")
     p.add_argument("--tools", dest="tools", default=None,
                    help="Comma-separated allowlist of tools (only these are available).")
     p.add_argument("--disallowed-tools", dest="disallowed", default=None,

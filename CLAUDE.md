@@ -509,7 +509,7 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   with a list fetched before the job finished and then stamped it fresh for 15 s. Responses are
   sequenced so a late one can't overwrite a newer one.
 - **The model catalog is a verified snapshot, not a guess.** `caelo_core/tests/test_model_catalog.py`
-  pins the per-provider id lists checked on 2026-09-01 against the provider docs and the live Vertex
+  pins the per-provider id lists checked on 2026-09-22 against the provider docs and the live Vertex
   publisher listing. Retired xAI slugs (`grok-4`/`grok-4-0709`, `grok-3`, `grok-code-fast-1`, the
   `*-fast-*` families, `grok-imagine-image-pro`) still resolve but **silently redirect to `grok-4.3`
   and bill at its rates**, so they must not return to the menu. Approval-gated OpenAI models

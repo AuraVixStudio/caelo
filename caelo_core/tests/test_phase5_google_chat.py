@@ -162,7 +162,8 @@ def test_registry_exposes_google_chat_models_and_capabilities() -> None:
     models = registry.models(provider="google", media_type="chat")
     assert provider is not None and "chat" in provider.modalities
     assert [model.id for model in models] == [
-        "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview",
+        "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
         "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
         "gemini-2.5-pro", "gemini-2.5-flash",
     ]
