@@ -53,6 +53,8 @@ desktop/playwright-report/
 *.env
 .env.*
 *.token
+secrets.dat
+secrets.dat.*
 caelo_auth.json
 caelo_settings.json
 caelo_config.json
@@ -112,3 +114,11 @@ worktrees/
 # ROAD-3.6-e: lokalny zrzut brand-packa (pobrany pakiet). Wyselekcjonowany,
 # wersjonowany zestaw brandu żyje w assets/brand/ — to tylko robocza kopia.
 /files/
+
+# ── Caelo 2.0 ──
+# Surowe odpowiedzi ze spike'ów Google (Faza 0). Mogą zawierać treści wygenerowane
+# na koncie użytkownika + próbki mediów — produkt roboczy, nie część repo.
+/scripts/spikes/out/
+
+# Cache miniatur generowany w dev (DATA_DIR = repo).
+/thumbnail_cache/

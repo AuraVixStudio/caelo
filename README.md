@@ -2,7 +2,7 @@
   <img src="assets/brand/og-banner.png" alt="Caelo — every mode under one sky" width="720" />
 </p>
 
-<h3 align="center">Every mode of xAI's Grok — in one desktop app.</h3>
+<h3 align="center">xAI Grok, Google Gemini and OpenAI GPT — in one desktop app.</h3>
 
 <p align="center">
   Chat, image &amp; video, voice, and an <b>agentic coding module</b> — unified behind one hub.<br/>
@@ -35,20 +35,23 @@
 
 ## ✨ What is Caelo?
 
-**Caelo** is an independent, open-source **desktop client for the xAI Grok API**. Instead of
-five separate tools, it puts the entire Grok surface behind **one shared backbone** — context,
+**Caelo** is an independent, open-source **desktop client for xAI Grok, Google Gemini / Vertex AI and OpenAI GPT**. Instead of
+five separate tools, it puts all three providers behind **one shared backbone** — context,
 history, projects and cost flow across every mode:
 
 > 💬 **Chat** &nbsp;·&nbsp; 🎨 **Image &amp; Video** &nbsp;·&nbsp; 🎙️ **Voice** &nbsp;·&nbsp; ⌨️ **Agentic coder** &nbsp;·&nbsp; 🧩 **Extensions**
 
-It's **bring-your-own-key**: you supply your own xAI credentials, they stay on your machine, and
-they're sent **only** to `api.x.ai`. No accounts, no middleman, no telemetry.
+It's **bring-your-own-credentials**: use xAI OAuth/API key, Google Cloud ADC or an AI Studio
+key, and/or an OpenAI API key. A ChatGPT subscription does not authenticate or fund the OpenAI
+API. Saved keys and xAI tokens are encrypted by the operating system (DPAPI/Keychain/Secret
+Service), decrypted only into sidecar memory, and requests go only to the provider you select.
+No Caelo account, no middleman, no telemetry.
 
 ## 🚀 Highlights
 
 |  |  |
 |---|---|
-| 🔑 **Bring your own key** | Sign in with your xAI account (OAuth) or paste an API key. It never leaves your machine and is never returned by the local API. |
+| 🔑 **Bring your own credentials** | Use xAI OAuth/API key, Google Cloud ADC/AI Studio key, or an OpenAI API key. Saved secrets use Electron `safeStorage`, are never written to settings JSON, and are never returned to the UI. |
 | 🛡️ **Private by design** | Backend binds to `127.0.0.1` only, every request is token-authenticated, and the key never reaches the renderer. Zero telemetry. |
 | ⌨️ **Real coding agent** | Sandboxed file tools, unified diff approval, 4 trust modes, checkpoints &amp; undo, project rules (`CAELO.md`), and parallel **subagent teams**. |
 | 🔎 **Live search &amp; vision** | Web &amp; X search with clickable citations, image understanding, and document Q&amp;A — with a live token/cost counter. |
@@ -88,14 +91,16 @@ they're sent **only** to `api.x.ai`. No accounts, no middleman, no telemetry.
 
 ## 🧭 The modules
 
-- **💬 Chat** — streaming multi-conversation chat with a model picker, system prompt &amp;
-  temperature, markdown + code, attachments (image/file), **live web/X search**, vision,
-  document Q&amp;A with citations, and voice (TTS replies + STT dictation).
+- **💬 Chat** — streaming multi-conversation chat with a per-conversation xAI/Google/OpenAI
+  picker, model-aware settings, markdown + code, image/PDF attachments and vision. xAI provides
+  live web/X search, OpenAI provides optional web search, and voice actions retain the existing
+  xAI services.
 - **⌨️ Code** — a mini-IDE: file tree, CodeMirror editor, terminal, and an **agent** with file
   tools and **approval cards** (Accept / Reject / Always) + diff preview, checkpoints/undo,
   plan mode, per-project rules (`CAELO.md`), and **subagent teams** with merge review.
-- **🎨 Image** — generate and edit images in one panel (no refs → generate, with refs → edit),
-  model picker, and variations.
+- **🎨 Image** — generate and edit with xAI, Google, or OpenAI GPT Image 2 in one panel
+  (no refs → generate, with refs → edit), with model-aware size, quality, format,
+  background and reference controls.
 - **🎬 Video** — text→video and image→video generation, plus edit and extend.
 - **🎙️ Voice** — Speak (TTS), Transcribe (STT), Talk (voice conversation), and Live (realtime).
 - **🗂️ History &amp; Gallery** — a searchable artifact &amp; generation history (SQLite + FTS5),
@@ -108,34 +113,37 @@ they're sent **only** to `api.x.ai`. No accounts, no middleman, no telemetry.
 Caelo is a **normal desktop app** — a Windows GUI you install from a signed `.exe` and click
 around in. (There's a Python backend bundled *inside* the installer, but you never see a terminal.)
 It is **local-first** and sends **no telemetry** — no analytics endpoint, no usage reporting, no
-phoning home. A fresh install talks only to `api.x.ai` (with **your** key, for the features you
-use) and to GitHub Releases (to check for updates — skippable).
+phoning home. Model requests go only to the selected xAI, Google or OpenAI endpoint (with **your**
+credentials), plus GitHub Releases for the optional update check.
 
 **Where your data goes:**
 
 ```
-   You ──▶ Caelo (your PC) ──▶ api.x.ai   ← the only outbound destination
+   You ──▶ Caelo (your PC) ──▶ xAI OR Google OR OpenAI API (selected provider)
                   │
                   └──▶ GitHub Releases (update check only — can be skipped)
 ```
 
 - Backend listens on **127.0.0.1 (localhost) only** — never exposed to the network.
 - REST requires `Authorization: Bearer <token>`; WebSockets take the token via query — both **fail-closed**.
-- The xAI bearer token is sent **only** to `api.x.ai` and **never reaches the renderer**; it is
-  stored locally and never returned by the local API.
+- Provider credentials are sent **only** to that provider's API. After entry, keys and xAI OAuth
+  tokens are encrypted with the operating-system credential facility, never stored in plaintext
+  JSON, and never returned by the local API.
+- OpenAI Chat and Agent requests set **`store: false`**. Caelo keeps their history locally, while
+  OpenAI's documented operational/abuse-monitoring retention may still apply.
 - Agent file operations are **sandboxed** to the workspace; writes and shell commands require
   **approval**, and run with a **secret-free** environment.
 
 **What Caelo does *not* do:**
 
 - ❌ No telemetry, analytics, or tracking of any kind.
-- ❌ No third-party servers — nothing is sent anywhere except xAI's own API.
-- ❌ No account, no sign-up, no middleman — it's **bring-your-own-key**.
-- ❌ Your key, chats, files, and generations never leave your machine (except your prompts to xAI,
-  which Grok needs to answer them).
+- ❌ No Caelo cloud or proxy — requests go directly to the selected xAI, Google or OpenAI API.
+- ❌ No Caelo account, no sign-up, no middleman — it's **bring-your-own-credentials**.
+- ❌ Chats, attachments and generations leave your machine only when required for the selected
+  provider to answer or generate the requested media.
 
 **Don't trust — verify.** Caelo is fully open source under Apache-2.0. Read the code, or just watch
-the traffic: with the app running, `api.x.ai` is the only outbound connection you'll see.
+the traffic: model traffic goes directly to the xAI, Google or OpenAI endpoint you selected.
 
 Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 
@@ -143,7 +151,8 @@ Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 
 **For users** — grab the file for your platform from the
 **[latest release](https://github.com/AuraVixStudio/caelo/releases/latest)**, run it, then open
-**Settings** and sign in with your xAI account or paste an API key. That's it.
+**Settings** and configure xAI, Google Cloud ADC / an AI Studio key, and/or an OpenAI API key.
+That's it.
 
 | Platform | File | Code signing |
 |---|---|---|
@@ -160,7 +169,8 @@ Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
 <details>
 <summary><b>For developers — run from source</b></summary>
 
-**Requirements:** Node.js ≥ 20 (tested on v22) · Python 3.10+ · an xAI account or API key.
+**Requirements:** Node.js ≥ 20 (tested on v22) · Python 3.10+ · credentials for at least one
+provider: xAI, Google Cloud ADC / AI Studio, or OpenAI API.
 
 ```powershell
 # 1) Backend (caelo_core) — isolated venv
@@ -210,26 +220,26 @@ assembly — see [`docs/guides/RELEASING.md`](docs/guides/RELEASING.md).
 
 ## 🏗️ Architecture
 
-**Electron (frontend) + Python sidecar (backend).** The mature xAI logic (OAuth, SSE streaming,
-media) is **reused, not rewritten**.
+**Electron (frontend) + Python sidecar (backend).** Mature xAI logic is preserved behind the same
+routes as the Google REST/ADC and OpenAI Responses adapters and shared model-capability registry.
 
 ```
 ┌──────────────────────── Electron (main process) ──────────────────────────┐
-│  window, menu, IPC, sidecar lifecycle; spawns `python -m caelo_core`        │
-│  handshake: generates a session token → CAELO_CORE_TOKEN; reads port/stdout │
+│  window, menu, IPC, sidecar lifecycle; safeStorage credential vault          │
+│  handshake: session token + private stdin secret channel; reads port/stdout  │
 │  preload (contextBridge) → window.caelo ; Renderer: React 19 + TypeScript    │
 │  Modules: Chat · Code (mini-IDE) · Image · Video · Voice · History · Settings │
 └─────────────────────────────────────────────────────────────────────────────┘
               │  HTTP (REST) + WebSocket (streaming) — 127.0.0.1 only + token
               ▼
 ┌──────────────── Python backend "caelo-core" (FastAPI / uvicorn) ───────────┐
-│  Reused xAI core: api_manager · oauth_manager · chats · history (repo root) │
+│  Providers: xAI + Google REST/ADC + OpenAI Responses · shared history/queue   │
 │  Routes: /auth /models /settings /chat(WS) /images /video /voice(+WS)        │
 │          /history /fs /git /permissions /agent(WS) /terminal(WS) /mcp …      │
 │  Agent engine: file tools + workspace sandbox + approval gate + LLM loop     │
 └─────────────────────────────────────────────────────────────────────────────┘
-              │  Bearer (OAuth token / API key) — sent exclusively to api.x.ai
-              ▼  xAI / Grok API
+              │  Provider credentials decrypted into sidecar memory only
+              ▼  Selected xAI / Grok, Google Gemini / Vertex, or OpenAI API
 ```
 
 The architecture source of truth for contributors is [`CLAUDE.md`](CLAUDE.md).
@@ -260,6 +270,8 @@ Every coffee helps keep the project maintained and the updates coming. Thank you
 
 Licensed under [**Apache-2.0**](LICENSE). © 2026 AuraVix Studio.
 
-> Caelo is an independent project and is **not affiliated with, endorsed by, or sponsored by xAI**.
+> Caelo is an independent project and is **not affiliated with, endorsed by, or sponsored by xAI, Google or OpenAI**.
 > "Grok", "SuperGrok", and "xAI" are trademarks of xAI Corp; they are used here only to describe
-> interoperability (see [`NOTICE`](NOTICE)).
+> interoperability. "Google", "Gemini", "Vertex AI" and related marks belong to Google LLC;
+> their use likewise describes interoperability only. "OpenAI", "ChatGPT" and "GPT" are marks
+> of OpenAI; references describe API interoperability only (see [`NOTICE`](NOTICE)).

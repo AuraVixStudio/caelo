@@ -20,6 +20,18 @@ client for the xAI Grok API and requires the user to bring their own xAI
 credentials (BYO-key). No xAI trademark is used as part of the Caelo product
 name or branding.
 
+Caelo is also NOT affiliated with, endorsed by, or sponsored by Google LLC.
+"Google", "Gemini", "Vertex AI" and related marks are trademarks of Google LLC.
+References are nominative use only, solely to describe interoperability with
+Google APIs using credentials supplied by the user. No Google trademark is used
+as part of the Caelo product name or branding.
+
+Caelo is also NOT affiliated with, endorsed by, or sponsored by OpenAI.
+"OpenAI", "ChatGPT", "GPT" and related marks are trademarks of OpenAI.
+References are nominative use only, solely to describe interoperability with
+the OpenAI API using credentials supplied by the user. A ChatGPT subscription
+is not an OpenAI API credential and is not bundled with Caelo.
+
 --------------------------------------------------------------------------------
 Third-party components
 --------------------------------------------------------------------------------
@@ -36,6 +48,7 @@ under its own license. Notable runtime dependencies include:
     - regex ............................... Apache-2.0
     - websockets, httptools, watchfiles ... BSD / MIT
     - pywinpty (Windows only) ............. MIT
+    - google-auth ........................ Apache-2.0
 
   Frontend (Electron renderer):
     - Electron ............................ MIT

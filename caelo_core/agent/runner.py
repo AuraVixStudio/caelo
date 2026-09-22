@@ -25,6 +25,7 @@ from typing import Callable, List, Optional
 import config  # type: ignore  # repo-root (sys.path z caelo_core/__init__.py)
 
 from caelo_core.agent.session import AgentSession
+from caelo_core.providers.ids import ACTIVE_AGENT_PROVIDER_IDS, normalize_provider_id
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class AgentRunner:
         self._team = None
         # M17: model/tryb bieżącej tury — świeże per tura (delegate_fn ich używa).
         self._model = ""
+        self._provider = "xai"
         self._mode = "ask"
         # M19-B9: poziom reasoning_effort — domyślny (konstruktor, np. headless --effort)
         # + efektywny per tura (`run_turn(reasoning_effort=…)`, np. selektor UI agenta).
@@ -109,13 +111,14 @@ class AgentRunner:
         Brak sesji / mock bez `usage` → zera."""
         sess = self._session
         out = {"input_tokens": 0, "output_tokens": 0, "context_tokens": 0,
-               "max_context": config.context_window_for(self._model)}
+               "max_context": config.context_window_for(self._model), "cost_usd": 0.0}
         if sess is None:
             return out
         u = sess.usage
         if isinstance(u, dict):
             out["input_tokens"] = int(u.get("input_tokens", 0) or 0)
             out["output_tokens"] = int(u.get("output_tokens", 0) or 0)
+            out["cost_usd"] = float(u.get("cost_usd", 0.0) or 0.0)
         try:
             out["context_tokens"] = int(sess.context_tokens() or 0)
         except Exception:  # noqa: BLE001
@@ -133,16 +136,16 @@ class AgentRunner:
         """Leniwy TeamManager (M17). Współdzieli emit/approval/stop orkiestratora;
         scalenia rejestruje w magazynie Backendu (REST je stosuje)."""
         if self._team is None:
-            from caelo_core.agent.llm import stream_chat_with_tools
             from caelo_core.agent.team import TeamManager
 
             self._team = TeamManager(
                 registry=self.backend.subagents, gate=self.backend.permissions,
-                llm_fn=stream_chat_with_tools, api_key_provider=self.backend.get_api_key,
+                llm_fn=self._llm_dispatch, api_key_provider=self._credential,
                 base_url=config.API_BASE, mcp=self.backend.mcp, hooks=self.backend.hooks,
                 emit=self.emit, request_approval=self.request_approval,
                 orchestrator_stop=self.stop, merges_provider=self.backend.get_team_merges,
                 on_report=self.backend.record_team_report,
+                provider_id_provider=lambda: self._provider,
             )
         return self._team
 
@@ -154,15 +157,47 @@ class AgentRunner:
         return team.run(tasks, model=self._model, workspace=ws_obj, mode=self._mode,
                         reasoning_effort=self._effort)
 
+    def _credential(self) -> str:
+        """xAI/OpenAI potrzebują bearer key; GoogleClient posiada własny auth."""
+        resolvers = {
+            "xai": self.backend.get_api_key,
+            "google": lambda: "",
+            "openai": self.backend.get_openai_api_key,
+        }
+        return resolvers[self._provider]()
+
+    def _llm_dispatch(self, api_key: str, base_url: str, messages: List[dict],
+                      model: str, temperature: float, tools: list, **kwargs) -> dict:
+        def google_dispatch() -> dict:
+            provider = self.backend.get_provider("google")
+            return provider.agent.stream_chat_with_tools(
+                api_key, base_url, messages, model, temperature, tools, **kwargs)
+
+        def xai_dispatch() -> dict:
+            # Import at call time preserves existing monkeypatch-based selfchecks.
+            from caelo_core.agent.llm import stream_chat_with_tools
+            return stream_chat_with_tools(
+                api_key, base_url, messages, model, temperature, tools, **kwargs)
+
+        def openai_dispatch() -> dict:
+            provider = self.backend.get_provider("openai")
+            return provider.agent.stream_chat_with_tools(
+                api_key, base_url, messages, model, temperature, tools, **kwargs)
+
+        dispatchers = {
+            "xai": xai_dispatch,
+            "google": google_dispatch,
+            "openai": openai_dispatch,
+        }
+        return dispatchers[self._provider]()
+
     def _ensure_session(self, ws_obj) -> AgentSession:
         session = self._session
         if session is None:
-            from caelo_core.agent.llm import stream_chat_with_tools
-
             extra = {"max_iters": self._max_iters} if self._max_iters else {}
             session = AgentSession(
-                ws_obj, self.backend.permissions, stream_chat_with_tools,
-                self.backend.get_api_key, config.API_BASE,
+                ws_obj, self.backend.permissions, self._llm_dispatch,
+                self._credential, config.API_BASE,
                 emit=self.emit, request_approval=self.request_approval,
                 checkpoints_provider=self.backend.get_checkpoints,  # M13-B3/B5
                 # M14-B2/Faza-G: MCP jako PROVIDER (live), nie instancja — `backend.mcp` jest
@@ -181,6 +216,7 @@ class AgentRunner:
                 memory=getattr(self.backend, "memory", None),
                 # M19-B9: domyślny effort sesji (per-tura nadpisywany w run_turn).
                 reasoning_effort=self._reasoning_effort,
+                provider_id_provider=lambda: self._provider,
                 **extra,
             )
             # M19-B1: wznowiona sesja (headless -s/-c/ACP session/load) — wstrzyknij
@@ -193,7 +229,8 @@ class AgentRunner:
         return session
 
     def run_turn(self, text: str, model: str, *, images: Optional[List[str]] = None,
-                 mode: str = "ask", reasoning_effort: Optional[str] = None) -> str:
+                 mode: str = "ask", reasoning_effort: Optional[str] = None,
+                 provider: str = "xai") -> str:
         """Uruchom jedną turę agenta. Zwraca finalną odpowiedź (`last_assistant`) i
         zapisuje turę do historii huba (M9-B2). Błąd tury → ramka `error` (jak WS;
         P1-13: bez surowego str(exc)). Transport zarządza busy/done wokół wywołania;
@@ -206,11 +243,15 @@ class AgentRunner:
             if ws_obj is None:
                 self.emit({"type": "error", "error": "No workspace selected"})
                 return ""
-            session = self._ensure_session(ws_obj)
-            ran = True
             # M17: zapamiętaj model/tryb tury — delegate_fn użyje ich dla subagentów.
+            normalized_provider = normalize_provider_id(provider, ACTIVE_AGENT_PROVIDER_IDS)
+            if normalized_provider is None:
+                raise ValueError(f"Unsupported agent provider: {provider}")
+            self._provider = normalized_provider
             self._model = model
             self._mode = mode
+            session = self._ensure_session(ws_obj)
+            ran = True
             # M19-B9: efektywny effort tej tury (per-tura nadpisuje domyślny runnera) —
             # używany przez delegate_fn dla subagentów bez własnego effortu roli.
             self._effort = reasoning_effort if reasoning_effort is not None else self._reasoning_effort
@@ -230,7 +271,7 @@ class AgentRunner:
                 wsp = self.backend.get_workspace()
                 self.backend.record_event(
                     mode="code", text=self._last_assistant or "",
-                    meta={"prompt": text, "model": model,
+                    meta={"prompt": text, "model": model, "provider": self._provider,
                           "workspace": wsp.root.as_posix() if wsp else None},
                 )
             # M21: utrwal PEŁNĄ sesję (do wznowienia) — osobno od M9 (wyszukiwalny log).
@@ -253,6 +294,7 @@ class AgentRunner:
                 history=self._session.history,
                 project_id=getattr(self.backend, "current_project_id", None),
                 model=model,
+                provider=self._provider,
             )
         except Exception:  # noqa: BLE001
             log.warning("Could not persist agent session", exc_info=True)

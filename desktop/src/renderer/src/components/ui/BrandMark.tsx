@@ -40,14 +40,14 @@ export function BrandMark({ size = 32, className, starColor }: BrandMarkProps) {
       height={size}
       className={cn('shrink-0', className)}
       role="img"
-      aria-label="Caelo"
+      aria-label="Caelo 2.0"
     >
       <Rays starColor={starColor} />
     </svg>
   )
 }
 
-/** Horizontal lockup: mark + "Caelo" wordmark. Transparent background; the "aelo"
+/** Horizontal lockup: mark + "Caelo 2.0" wordmark. Transparent background; the "aelo"
  *  letters use `currentColor` (set a text colour on the parent — defaults to `text-fg`)
  *  so the same component reads correctly on light AND dark, unlike the static
  *  on-light / on-dark SVGs. Aspect ratio is fixed (460×150); pass a `height`. */
@@ -59,7 +59,7 @@ export function BrandLockup({ height = 40, className }: { height?: number; class
       height={height}
       className={cn('shrink-0 text-fg', className)}
       role="img"
-      aria-label="Caelo"
+      aria-label="Caelo 2.0"
     >
       <defs>
         <linearGradient id="caelo-sky" x1="0" y1="0" x2="1" y2="1">
@@ -81,6 +81,7 @@ export function BrandLockup({ height = 40, className }: { height?: number; class
       >
         <tspan fill="url(#caelo-sky)">C</tspan>
         <tspan fill="currentColor">aelo</tspan>
+        <tspan fill="currentColor" dx="12" fontSize="34" fontWeight="600">2.0</tspan>
       </text>
     </svg>
   )
@@ -96,7 +97,7 @@ export function BrandTile({ size = 32, className }: BrandMarkProps) {
       height={size}
       className={cn('shrink-0', className)}
       role="img"
-      aria-label="Caelo"
+      aria-label="Caelo 2.0"
     >
       <defs>
         <radialGradient id="caelo-night" cx="0.3" cy="0.25" r="0.95">

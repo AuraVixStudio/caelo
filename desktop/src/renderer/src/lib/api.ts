@@ -2,6 +2,7 @@
 // baseUrl i token pochodzą z handshake'u (window.caelo.getCore()).
 
 import { blobToDataUri } from './files'
+import type { AgentProvider, ChatProvider } from './providerIds'
 
 export interface Conn {
   baseUrl: string
@@ -28,7 +29,7 @@ export interface ChatUsage {
   tool_calls?: number
   input_tokens?: number
   output_tokens?: number
-  cost_usd?: number // 4.1-g: REAL cost from xAI usage.cost_in_usd_ticks (absent = no real cost)
+  cost_usd?: number // Provider-reported or usage-derived cost (absent = unavailable, never false $0)
 }
 
 export interface ChatMessage {
@@ -67,16 +68,81 @@ export interface ModelsResp {
   default_voice: string
   realtime_model: string
   default_code: string
+  /** Neutralny katalog fazy 1; stare serwery moga go jeszcze nie zwracac. */
+  items?: ModelDescriptor[]
+}
+
+export interface ModelCapabilities {
+  operations: string[]
+  input_modalities: string[]
+  output_modalities: string[]
+  aspect_ratios: string[]
+  resolutions: string[]
+  duration_min: number | null
+  duration_max: number | null
+  durations: number[]
+  supports_quality: boolean
+  quality_levels: string[]
+  output_formats: string[]
+  backgrounds: string[]
+  supports_output_compression: boolean
+  moderation_levels: string[]
+  max_reference_images: number
+  max_character_reference_images: number
+  max_object_reference_images: number
+  max_style_reference_images: number
+  supports_streaming: boolean
+  supports_tools: boolean
+  supports_temperature: boolean
+  thinking: boolean
+  thinking_levels: string[]
+  search_grounding: boolean
+  multi_turn: boolean
+  native_audio: boolean
+  supports_seed: boolean
+  first_last_frame: boolean
+  video_extension: boolean
+  extension_seconds: number | null
+  extension_resolutions: string[]
+  edit_uploaded_video: boolean
+  supports_negative_prompt: boolean
+  notes: string[]
+}
+
+export interface ModelDescriptor {
+  id: string
+  provider: string
+  label: string
+  media_type: 'chat' | 'image' | 'video'
+  capabilities: ModelCapabilities
+  status: string
+  tier: string
+  is_default: boolean
+  notes: string
+}
+
+export interface ProviderDescriptor {
+  id: string
+  label: string
+  modalities: string[]
+  auth_modes: string[]
+  no_cost: boolean
+  status: string
 }
 
 // M19-B9: poziom reasoning_effort dla modeli rozumujących ('' = Auto/dziedzicz).
 // '' = Auto (use the saved default). 'xhigh' arrived with grok-4.6 and is offered
 // only for models that document it — see lib/modelCaps.ts.
 export type ReasoningEffort = '' | 'low' | 'medium' | 'high' | 'xhigh'
+export type OpenAIAuthSource = 'vault' | 'env' | 'none'
 
 export interface SettingsResp {
   chat_model: string
+  chat_provider: ChatProvider
   code_model: string
+  code_provider: AgentProvider
+  openai_has_api_key: boolean
+  openai_auth_source: OpenAIAuthSource
   system_prompt: string
   chat_temperature: number
   chat_effort: ReasoningEffort // M19-B9: domyślny effort czatu
@@ -86,12 +152,18 @@ export interface SettingsResp {
   voice: string
   voice_language: string
   has_api_key: boolean
+  google_auth_mode: GoogleAuthMode
+  google_project_id: string
+  google_location: string
+  google_video_location: string
+  google_has_api_key: boolean
 }
 
 /** Preferowane źródło uwierzytelniania ("przełącznik trybów"). */
 export type AuthSource = 'auto' | 'oauth' | 'api_key'
 /** Faktycznie aktywne źródło klucza dla wywołań xAI. */
 export type ActiveSource = 'oauth' | 'api_key' | 'env' | 'none'
+export type GoogleAuthMode = 'vertex' | 'ai_studio'
 
 export interface AuthResp {
   authenticated: boolean
@@ -109,7 +181,9 @@ export type SettingsPatch = Partial<{
   api_key: string
   auth_source: AuthSource // preferowane źródło uwierzytelniania
   chat_model: string
+  chat_provider: ChatProvider
   code_model: string
+  code_provider: AgentProvider
   system_prompt: string
   chat_temperature: number
   chat_effort: ReasoningEffort // M19-B9
@@ -118,6 +192,12 @@ export type SettingsPatch = Partial<{
   chat_search_sources: string[]
   voice: string
   voice_language: string
+  google_auth_mode: GoogleAuthMode
+  google_project_id: string
+  google_location: string
+  google_video_location: string
+  google_api_key: string
+  openai_api_key: string
 }>
 
 /** Błąd HTTP z kodem statusu — pozwala wywołującym rozróżnić auth (401/403),
@@ -171,60 +251,53 @@ export function formatDetail(detail: unknown): string {
   return String(detail)
 }
 
-/** Łączy sygnały (timeout + opcjonalny sygnał wywołującego) — pierwszy abort wygrywa. */
-function combineSignals(signals: AbortSignal[]): AbortSignal {
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals)
-  const ctrl = new AbortController()
-  for (const s of signals) {
-    if (s.aborted) {
-      ctrl.abort(s.reason)
-      break
-    }
-    s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true })
-  }
-  return ctrl.signal
-}
-
 async function api<T>(conn: Conn, path: string, init?: ApiInit): Promise<T> {
-  // P2-9: każde żądanie ma timeout (nie wisi w nieskończoność), a wywołujący może
-  // dołożyć własny AbortSignal (przycisk Cancel) — pierwszy abort wygrywa.
-  const { timeoutMs, signal: userSignal, headers, ...rest } = init ?? {}
-  const timeout = AbortSignal.timeout(timeoutMs ?? DEFAULT_TIMEOUT_MS)
-  const signal = userSignal ? combineSignals([userSignal, timeout]) : timeout
+  const { timeoutMs, signal, headers, method, body } = init ?? {}
+  if (signal?.aborted) throw new ApiError('Request cancelled', 0)
 
-  let res: Response
-  try {
-    res = await fetch(conn.baseUrl + path, {
-      ...rest,
-      signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${conn.token}`,
-        ...(headers as Record<string, string> | undefined)
-      }
-    })
-  } catch (e) {
-    const name = (e as Error)?.name
-    if (name === 'TimeoutError') throw new ApiError('Request timed out', 0)
-    if (name === 'AbortError') throw new ApiError('Request cancelled', 0)
-    throw new ApiError(`Network error: ${String((e as Error)?.message || e)}`, 0)
+  // Żądania binarne pozostają bezpośrednie; typowe JSON (w tym galeria i kolejka
+  // generowania) idą przez stabilny, natywny most procesu głównego.
+  if (body != null && typeof body !== 'string') {
+    let response: Response
+    try {
+      response = await fetch(conn.baseUrl + path, {
+        method, body, headers: {
+          'Content-Type': 'application/json', Authorization: `Bearer ${conn.token}`,
+          ...(headers as Record<string, string> | undefined)
+        }, signal: AbortSignal.timeout(timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      })
+    } catch (reason) {
+      const name = (reason as Error)?.name
+      throw new ApiError(name === 'TimeoutError' ? 'Request timed out' :
+        `Network error: ${String((reason as Error)?.message || reason)}`, 0)
+    }
+    if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response.status)
+    return (await response.json()) as T
   }
 
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`
-    try {
-      const body = await res.json()
-      if (body?.detail !== undefined && body?.detail !== null) detail = formatDetail(body.detail)
-    } catch {
-      /* ignore */
+  const headerRecord: Record<string, string> = {}
+  if (headers) new Headers(headers).forEach((value, name) => { headerRecord[name] = value })
+  const result = await window.caelo.coreRequest({
+    path,
+    method: method || 'GET',
+    body: typeof body === 'string' ? body : undefined,
+    headers: headerRecord,
+    timeoutMs: timeoutMs ?? DEFAULT_TIMEOUT_MS
+  })
+
+  if (!result.ok) {
+    let detail = result.error || `HTTP ${result.status}`
+    const responseBody = result.data as { detail?: unknown } | undefined
+    if (responseBody?.detail !== undefined && responseBody.detail !== null) {
+      detail = formatDetail(responseBody.detail)
     }
     // P2-11: 401/403 to problem tokenu SESJI backendu (nie OAuth xAI) — podpowiedz restart.
-    if (res.status === 401 || res.status === 403) {
-      detail = `Authentication failed (${res.status}) — the backend session may need a restart.`
+    if (result.status === 401 || result.status === 403) {
+      detail = `Authentication failed (${result.status}) — the backend session may need a restart.`
     }
-    throw new ApiError(detail, res.status)
+    throw new ApiError(detail, result.status)
   }
-  return (await res.json()) as T
+  return result.data as T
 }
 
 // S34-d: status sandboxa OS — czy izolacja jest faktycznie dostępna na tej platformie.
@@ -236,6 +309,19 @@ export const getSandboxStatus = (c: Conn): Promise<SandboxStatus> =>
   api<SandboxStatus>(c, '/sandbox/status')
 
 export const getModels = (c: Conn): Promise<ModelsResp> => api<ModelsResp>(c, '/models')
+export const getProviders = (c: Conn): Promise<{ default: string; providers: ProviderDescriptor[] }> =>
+  api(c, '/providers')
+export const getCapabilities = (
+  c: Conn,
+  query: { provider?: string; model?: string; media_type?: string } = {}
+): Promise<{ capabilities?: ModelDescriptor[]; capability?: ModelDescriptor }> => {
+  const params = new URLSearchParams()
+  if (query.provider) params.set('provider', query.provider)
+  if (query.model) params.set('model', query.model)
+  if (query.media_type) params.set('media_type', query.media_type)
+  const suffix = params.size ? `?${params.toString()}` : ''
+  return api(c, `/capabilities${suffix}`)
+}
 export const getSettings = (c: Conn): Promise<SettingsResp> => api<SettingsResp>(c, '/settings')
 export const getAuthStatus = (c: Conn): Promise<AuthResp> => api<AuthResp>(c, '/auth/status')
 export const putSettings = (c: Conn, patch: SettingsPatch): Promise<{ ok: boolean }> =>
@@ -243,6 +329,12 @@ export const putSettings = (c: Conn, patch: SettingsPatch): Promise<{ ok: boolea
 /** Usuwa zapisany klucz API (nie dotyka XAI_API_KEY z .env ani OAuth). */
 export const clearApiKey = (c: Conn): Promise<{ ok: boolean }> =>
   api<{ ok: boolean }>(c, '/settings/api-key', { method: 'DELETE' })
+/** Usuwa tylko zapisany klucz Google AI Studio; ADC/gcloud pozostaje nietkniete. */
+export const clearGoogleApiKey = (c: Conn): Promise<{ ok: boolean }> =>
+  api<{ ok: boolean }>(c, '/settings/google-api-key', { method: 'DELETE' })
+/** Usuwa klucz OpenAI z sejfu; OPENAI_API_KEY ze środowiska pozostaje nietknięty. */
+export const clearOpenAIApiKey = (c: Conn): Promise<{ ok: boolean }> =>
+  api<{ ok: boolean }>(c, '/settings/openai-api-key', { method: 'DELETE' })
 
 // --- Auth (OAuth) ---
 export const login = (c: Conn): Promise<{ ok: boolean; account: Record<string, unknown> }> =>
@@ -258,6 +350,7 @@ export interface MediaResult {
 }
 
 export interface GenerateImageBody {
+  provider?: string
   prompt: string
   n: number
   aspect_ratio: string
@@ -266,6 +359,7 @@ export interface GenerateImageBody {
 }
 
 export interface EditImageBody {
+  provider?: string
   prompt: string
   images: string[] // data-URI
   n: number
@@ -275,6 +369,7 @@ export interface EditImageBody {
 }
 
 export interface VideoJobBody {
+  provider?: string
   prompt: string
   duration: number
   resolution: string
@@ -284,12 +379,14 @@ export interface VideoJobBody {
 }
 
 export interface VideoEditBody {
+  provider?: string
   prompt: string
   video: string // https URL or data-URI of the source video
   model?: string
 }
 
 export interface VideoExtendBody {
+  provider?: string
   prompt: string
   video: string // https URL or data-URI of the source video
   duration?: number // added seconds (1-10)
@@ -325,8 +422,9 @@ export const pollVideoJob = (c: Conn, id: string): Promise<VideoStatus> =>
 
 // --- Generation jobs (M11): one async queue for image + video ---
 export type GenJobKind = 'image' | 'video'
-export type GenJobOp = 'text2img' | 'edit' | 'variation' | 'text2video' | 'img2video'
-export type GenJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+export type GenJobOp = 'text2img' | 'edit' | 'variation' | 'text2video' | 'img2video' | 'reference_to_video' | 'first_last_frame' | 'extend'
+export type GenJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'unknown_remote_state'
+export type GenJobState = 'QUEUED' | 'PREPARING' | 'UPLOADING' | 'SUBMITTING' | 'SUBMITTED' | 'PROCESSING' | 'DOWNLOADING' | 'FINALIZING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RETRY_WAIT' | 'RECOVERY_PENDING' | 'UNKNOWN_REMOTE_STATE'
 
 export interface GenJob {
   id: string
@@ -340,21 +438,42 @@ export interface GenJob {
   project_id: string | null
   created_at: number
   updated_at: number
+  state: GenJobState
+  generation_id: string
+  provider: string
+  remote_operation_id: string | null
+  remote_file_uri: string | null
+  remote_metadata: Record<string, unknown>
+  attempt: number
+  max_attempts: number
+  progress: number | null
 }
 
 export interface ImageJobBody {
+  provider?: string
   op: 'text2img' | 'edit' | 'variation'
   prompt: string
   n: number
   aspect_ratio: string
   resolution: string
   model?: string
-  images?: string[] // data-URI (edit/variation, up to 3)
-  quality?: 'low' | 'medium' // grok-imagine-image-2.0 only (ignored elsewhere)
+  images?: string[] // data-URI (edit/variation; limit comes from model capabilities)
+  quality?: 'low' | 'medium' | 'high' | 'auto'
+  mime_type?: 'image/png' | 'image/jpeg' | 'image/webp'
+  output_format?: 'png' | 'jpeg' | 'webp'
+  output_compression?: number
+  background?: 'auto' | 'opaque' | 'transparent'
+  moderation?: 'auto' | 'low'
+  reference_roles?: string[]
+  thinking_level?: 'minimal' | 'low' | 'medium' | 'high'
+  search_grounding?: boolean
+  source_artifact_ids?: string[]
+  source_artifact_roles?: string[]
 }
 
 export interface VideoGenJobBody {
-  op: 'text2video' | 'img2video' | 'edit' | 'extend'
+  provider?: string
+  op: 'text2video' | 'img2video' | 'reference_to_video' | 'first_last_frame' | 'edit' | 'extend'
   prompt: string
   duration: number
   resolution: string
@@ -366,6 +485,13 @@ export interface VideoGenJobBody {
   // or object into the clip WITHOUT locking the first frame. Referenced in the prompt
   // as <IMAGE_1>…<IMAGE_3>. Orthogonal to `image` — both may be sent together.
   reference_images?: string[]
+  reference_roles?: string[]
+  last_image?: string
+  generate_audio?: boolean
+  seed?: number
+  negative_prompt?: string
+  source_artifact_ids?: string[]
+  source_artifact_roles?: string[]
 }
 
 // Submit returns immediately with the queued job; the worker runs it server-side.
@@ -509,6 +635,8 @@ export interface HubArtifact {
   meta: Record<string, unknown>
   project_id: string | null
   created_at: number
+  favorite: boolean
+  tags: string[]
 }
 
 /** Prompt zapisany w metadanych wygenerowanego artefaktu (obraz/wideo/audio).
@@ -568,9 +696,14 @@ export const listHistory = (
 
 export const listArtifacts = (
   c: Conn,
-  query: HistoryQuery = {}
+  query: HistoryQuery = {},
+  timeoutMs?: number
 ): Promise<{ artifacts: HubArtifact[]; count: number; limit: number; offset: number }> =>
-  api(c, '/artifacts' + queryString(query as Record<string, string | number | undefined>))
+  api(
+    c,
+    '/artifacts' + queryString(query as Record<string, string | number | undefined>),
+    timeoutMs ? { timeoutMs } : undefined
+  )
 
 /** M19-B10: fetch hub history as Markdown (the /history/export route returns
  *  text/markdown, not JSON — so this is a raw fetch with the bearer header). */
@@ -586,6 +719,56 @@ export async function exportHistoryMarkdown(c: Conn, query: HistoryQuery = {}): 
 
 export const getArtifact = (c: Conn, id: string): Promise<HubArtifact> =>
   api(c, `/artifacts/${encodeURIComponent(id)}`)
+
+export const updateArtifact = (
+  c: Conn,
+  id: string,
+  patch: { favorite?: boolean; tags?: string[] }
+): Promise<HubArtifact> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
+
+export const uploadReferenceImage = (
+  c: Conn,
+  name: string,
+  data: string
+): Promise<{ artifact: HubArtifact }> => {
+  const separator = data.indexOf(',')
+  const header = separator >= 0 ? data.slice(0, separator) : ''
+  const mime = /^data:([^;]+);base64$/i.exec(header)?.[1] ?? 'application/octet-stream'
+  const encoded = separator >= 0 ? data.slice(separator + 1) : ''
+  const binary = atob(encoded)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return api(c, `/reference-library/file?name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    body: new Blob([bytes], { type: mime }),
+    headers: { 'Content-Type': mime },
+    timeoutMs: 120_000
+  })
+}
+
+export interface ArtifactLineageEntry { artifact_id: string; role: string }
+export const getArtifactLineage = (
+  c: Conn,
+  id: string
+): Promise<{ parents: ArtifactLineageEntry[]; children: ArtifactLineageEntry[] }> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}/lineage`)
+
+export interface MediaDiagnostics {
+  database: string
+  output_directory: string
+  output_directory_exists: boolean
+  migrations: { version: number; name: string; applied_at: number }[]
+  job_states: Record<string, number>
+  artifacts: number
+  generations: number
+  providers: { id: string; label: string; status: string }[]
+}
+export const getMediaDiagnostics = (c: Conn): Promise<MediaDiagnostics> =>
+  api(c, '/diagnostics/media')
+
+export const validateProvider = (c: Conn, provider: string): Promise<Record<string, unknown>> =>
+  api(c, `/providers/${encodeURIComponent(provider)}/validate`, { method: 'POST' })
 
 /** Delete an artifact: its record + the file on disk (if under an allowed media dir).
  *  Used to clear accumulated media from Recent / Gallery. Irreversible. */
@@ -605,6 +788,15 @@ export async function getArtifactContentUrl(c: Conn, id: string): Promise<string
   })
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
   return URL.createObjectURL(await res.blob())
+}
+
+/** URL obsługiwany w procesie głównym Electron; token nigdy nie trafia do DOM/URL. */
+export function getArtifactMediaUrl(id: string): string {
+  return `caelo-media://artifact/${encodeURIComponent(id)}`
+}
+
+export function getArtifactThumbnailUrl(id: string): string {
+  return `caelo-media://thumbnail/${encodeURIComponent(id)}`
 }
 
 /** Fetch an artifact's bytes as a data-URI — e.g. to reuse a generated video as the
@@ -829,6 +1021,7 @@ export interface AgentSessionMeta {
   project_id: string | null
   cwd: string
   model: string | null
+  provider: AgentProvider
   created_at: number // epoch seconds
   updated_at: number // epoch seconds
   message_count: number // user + assistant messages
@@ -1281,6 +1474,7 @@ export interface ChatStreamHandle {
 
 export interface ChatStreamPayload {
   messages: ApiChatMessage[]
+  provider: ChatProvider
   model: string
   temperature: number
   system_prompt?: string

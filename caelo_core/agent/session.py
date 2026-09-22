@@ -269,6 +269,7 @@ class AgentSession:
         lsp_provider: Optional[Callable[[], object]] = None,
         memory: Optional[object] = None,
         reasoning_effort: Optional[str] = None,
+        provider_id_provider: Optional[Callable[[], str]] = None,
     ) -> None:
         self.ws = workspace
         self.gate = gate
@@ -291,7 +292,7 @@ class AgentSession:
         # M17-B6: telemetria pod-sesji (tury LLM, wywołania narzędzi, tokeny z usage).
         self.turns = 0
         self.tool_calls = 0
-        self.usage = {"input_tokens": 0, "output_tokens": 0}
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
         # Miernik okna kontekstowego: tokeny ostatniego promptu wysłanego do modelu.
         # `last_input_tokens` = realne (usage.input z ostatniego wywołania, gdy serwer je
         # zwróci); `last_context_tokens` = szacunek (~4 znaki/token) jako fallback offline.
@@ -328,6 +329,7 @@ class AgentSession:
         # subagenta); per-tura `run_turn(reasoning_effort=…)` może go nadpisać.
         self._default_effort = reasoning_effort
         self._reasoning_effort = reasoning_effort
+        self._provider_id_provider = provider_id_provider or (lambda: "xai")
         self.history: List[dict] = []
         self._mode = DEFAULT_MODE  # M13: tryb bieżącej tury (ask/accept-edits/plan/bypass)
         self._cur_model = ""  # Faza-G/TOP1: model bieżącej tury (web_search → live-search)
@@ -449,7 +451,8 @@ class AgentSession:
             tools.append(WEB_FETCH_TOOL)
         # Faza-G/TOP1: web_search tylko gdy włączone i tylko orkiestratorowi (subagenci mają
         # zawężony zbiór plikowy). READONLY — biegnie bez bramki, jak lsp.
-        if getattr(config, "WEB_SEARCH_ENABLED", False) and self._tool_names is None:
+        if (getattr(config, "WEB_SEARCH_ENABLED", False) and self._tool_names is None
+                and self._provider_id_provider() == "xai"):
             tools.append(WEB_SEARCH_TOOL)
         # Faza-G/TOP3: update_plan (live checklist) — orkiestratorowi (subagenci raportują
         # postęp przez TeamView). META/READONLY → bez kosztu/sieci, więc bez flagi (zawsze on).
@@ -460,6 +463,10 @@ class AgentSession:
     def _tool_allowed(self, name: str) -> bool:
         """M17-B1: czy narzędzie plikowe wolno wywołać w tej (pod)sesji. Narzędzia
         MCP i `delegate` mają osobne ścieżki; filtr dotyczy tylko zbioru plikowego."""
+        # web_search is implemented by xAI Responses API, not by the neutral
+        # filesystem/MCP tool loop. Never expose or execute it for Google.
+        if name == "web_search" and self._provider_id_provider() != "xai":
+            return False
         if self._tool_names is None:
             return True
         if name in self._tool_names:
@@ -908,6 +915,11 @@ class AgentSession:
         try:
             self.usage["input_tokens"] += int(inp)
             self.usage["output_tokens"] += int(out)
+            if isinstance(usage.get("cost_usd"), (int, float)):
+                self.usage["cost_usd"] = round(
+                    float(self.usage.get("cost_usd", 0.0) or 0.0)
+                    + float(usage["cost_usd"]), 6,
+                )
             # Realny rozmiar ostatniego promptu (= bieżące okno kontekstowe) > szacunek.
             if int(inp) > 0:
                 self.last_input_tokens = int(inp)
@@ -950,6 +962,7 @@ class AgentSession:
                 "output_tokens": int(self.usage.get("output_tokens", 0) or 0),
                 "context_tokens": int(self.context_tokens() or 0),
                 "max_context": config.context_window_for(self._cur_model),
+                "cost_usd": float(self.usage.get("cost_usd", 0.0) or 0.0),
             })
         except Exception:  # noqa: BLE001
             pass

@@ -53,6 +53,23 @@ describe('AgentConnection — onClose funnel (P1-G)', () => {
     expect(onClose).toHaveBeenCalledTimes(1) // close → onclose → onClose
     conn.close()
   })
+
+  it('wysyła provider razem z modelem w ramce agenta', () => {
+    const conn = new AgentConnection({ baseUrl: 'http://x', token: 't' })
+    conn.sendMessage('inspect', 'google', 'gemini-3.7-flash', [], 'ask', 'high')
+    expect(FakeWS.last?.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: 'message',
+        text: 'inspect',
+        provider: 'google',
+        model: 'gemini-3.7-flash',
+        images: [],
+        mode: 'ask',
+        effort: 'high'
+      })
+    )
+    conn.close()
+  })
 })
 
 describe('parseAgentEvent — ramki info/usage', () => {
@@ -63,14 +80,16 @@ describe('parseAgentEvent — ramki info/usage', () => {
         input_tokens: 1200,
         output_tokens: 340,
         context_tokens: 8000,
-        max_context: 256000
+        max_context: 256000,
+        cost_usd: 0.0123
       })
     ).toEqual({
       type: 'usage',
       input_tokens: 1200,
       output_tokens: 340,
       context_tokens: 8000,
-      max_context: 256000
+      max_context: 256000,
+      cost_usd: 0.0123
     })
     // niepoprawne pola → 0 (zera pomija konsument)
     expect(parseAgentEvent({ type: 'usage' })).toEqual({
@@ -78,7 +97,8 @@ describe('parseAgentEvent — ramki info/usage', () => {
       input_tokens: 0,
       output_tokens: 0,
       context_tokens: 0,
-      max_context: 0
+      max_context: 0,
+      cost_usd: 0
     })
   })
 

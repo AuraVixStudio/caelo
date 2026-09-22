@@ -3,7 +3,7 @@
 Protokół (JSON):
   klient -> serwer:
     {"type":"workspace","path":"C:/..."}          # ustaw katalog roboczy
-    {"type":"message","text":"...","model":"...","mode":"ask","effort":"high"}  # nowa tura agenta (effort: M19-B9, opcjonalny)
+    {"type":"message","text":"...","provider":"xai|google|openai","model":"...","mode":"ask","effort":"high"}
     {"type":"approval","id":"<call_id>","decision":"accept|reject|always"}
     {"type":"session","id":"<sid>"|null}          # M21: wznów sesję (id) / nowa (null)
     {"type":"stop"}
@@ -51,6 +51,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from caelo_core import validation as V
 from caelo_core.agent.runner import AgentRunner
+from caelo_core.providers.ids import ACTIVE_AGENT_PROVIDER_IDS, normalize_provider_id
 from caelo_core.errors import masked_error
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
@@ -109,13 +110,13 @@ async def agent_stream(ws: WebSocket) -> None:
         runner = AgentRunner(backend, emit=emit, request_approval=request_approval,
                              stop=stop_event.is_set, session_id=secrets.token_urlsafe(8))
 
-        def run_turn(text: str, model: str, images: list, mode: str = "ask",
+        def run_turn(text: str, provider: str, model: str, images: list, mode: str = "ask",
                      reasoning_effort: Optional[str] = None) -> None:
             state["busy"] = True
             try:
                 stop_event.clear()  # nowa tura zaczyna od czystej flagi Stop
                 runner.run_turn(text, model, images=images, mode=mode,
-                                reasoning_effort=reasoning_effort)
+                                reasoning_effort=reasoning_effort, provider=provider)
             finally:
                 state["busy"] = False
                 # Licznik tokenów + miernik okna kontekstowego po turze.
@@ -123,7 +124,8 @@ async def agent_stream(ws: WebSocket) -> None:
                 emit({"type": "usage", "input_tokens": u["input_tokens"],
                       "output_tokens": u["output_tokens"],
                       "context_tokens": u["context_tokens"],
-                      "max_context": u["max_context"]})
+                      "max_context": u["max_context"],
+                      "cost_usd": u["cost_usd"]})
                 emit({"type": "done"})
 
         # M21: powiadom klienta o aktywnym id sesji (UI śledzi je do listy/wznawiania).
@@ -155,17 +157,37 @@ async def agent_stream(ws: WebSocket) -> None:
                     images = msg.get("images") or []
                     # M13: tryb agenta (ask/accept-edits/plan/bypass); wstecznie „plan":true.
                     mode = msg.get("mode") or ("plan" if msg.get("plan") else "ask")
-                    model = (
-                        msg.get("model")
-                        or backend.read_settings().get("code_model")
-                        or "grok-build-0.1"
+                    provider = normalize_provider_id(
+                        msg.get("provider") or "xai", ACTIVE_AGENT_PROVIDER_IDS,
                     )
+                    if provider is None:
+                        await stream.send({"type": "error",
+                                           "error": "Unsupported provider or agent model"})
+                        continue
+                    try:
+                        from caelo_core.models import get_model_registry
+                        registry = get_model_registry()
+                        requested_model = msg.get("model")
+                        if not requested_model and provider == "xai":
+                            requested_model = backend.read_settings().get("code_model")
+                        default_model = registry.default_for(provider, "chat")
+                        model = str(
+                            requested_model
+                            or (default_model.id if default_model is not None else "")
+                        )
+                        descriptor = registry.resolve(provider, "chat", model)
+                        if not descriptor.capabilities.supports_tools:
+                            raise KeyError(model)
+                    except Exception:
+                        await stream.send({"type": "error",
+                                           "error": "Unsupported provider or agent model"})
+                        continue
                     # M19-B9: reasoning_effort z ramki (selektor UI agenta) z fallbackiem
                     # na ustawienie `code_effort`; niepoprawne → None (pole pominięte).
                     effort = V.normalize_effort(
                         msg.get("effort") or backend.read_settings().get("code_effort"))
                     t = threading.Thread(target=run_turn,
-                                         args=(text, model, images, mode, effort),
+                                         args=(text, provider, model, images, mode, effort),
                                          daemon=True)
                     stream.track(t)   # P0-9: dołączony przy zamykaniu
                     t.start()

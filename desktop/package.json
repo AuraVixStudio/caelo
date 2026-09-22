@@ -1,7 +1,7 @@
 {
   "name": "caelo-desktop",
-  "version": "0.1.5",
-  "description": "Caelo — powłoka Electron (frontend) klienta desktopowego dla modeli xAI Grok",
+  "version": "2.0.8",
+  "description": "Caelo 2.0 — desktopowe studio AI dla modeli xAI Grok oraz Google Gemini / Vertex AI",
   "author": "AuraVix Studio",
   "repository": {
     "type": "git",
@@ -15,7 +15,9 @@
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "generate:model-types": "python ../scripts/generate_model_types.py",
+    "check:model-types": "python ../scripts/generate_model_types.py --check",
+    "typecheck": "npm run check:model-types && npm run typecheck:node && npm run typecheck:web",
     "lint": "eslint src",
     "test": "vitest run",
     "test:e2e": "playwright test",

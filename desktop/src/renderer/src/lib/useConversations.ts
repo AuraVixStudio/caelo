@@ -7,6 +7,7 @@ import {
   saveConversations,
   type Conversation
 } from './storage'
+import type { ChatProvider } from './providerIds'
 
 /**
  * Lista rozmów czatu (P2-3): inicjalizacja z localStorage, utrwalanie z
@@ -21,7 +22,7 @@ export function useConversations(): {
   saveError: string | null
   setActiveId: (id: string) => void
   patchActive: (updater: (c: Conversation) => Conversation) => void
-  createChat: (projectId?: string | null) => void
+  createChat: (projectId?: string | null, provider?: ChatProvider, model?: string) => void
   deleteChat: (id: string) => void
 } {
   const [convos, setConvos] = useState<Conversation[]>([])
@@ -92,8 +93,8 @@ export function useConversations(): {
     setConvos((prev) => prev.map((c) => (c.id === activeId ? updater(c) : c)))
   }
 
-  function createChat(projectId?: string | null): void {
-    const c = newConversation(projectId)
+  function createChat(projectId?: string | null, provider?: ChatProvider, model?: string): void {
+    const c = newConversation(projectId, provider, model)
     setConvos((prev) => [c, ...prev])
     setActiveId(c.id)
   }

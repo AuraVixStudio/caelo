@@ -1,14 +1,22 @@
-import { useEffect, useState } from 'react'
-import { getArtifactContentUrl, type Conn, type HubArtifact } from '../lib/api'
+import { useEffect, useRef, useState } from 'react'
+import { getArtifactMediaUrl, getArtifactThumbnailUrl, type Conn, type HubArtifact } from '../lib/api'
 import { cn } from '../lib/cn'
 
-/** Podgląd artefaktu obrazu/wideo (M11-F4). Treść `/content` wymaga nagłówka Bearer,
- *  więc pobieramy bajty jako blob object URL i zwalniamy go przy odmontowaniu.
+/** Ile razy ponawiamy nieudane pobranie podglądu, zanim pokażemy pustą kafelkę. */
+const MAX_ATTEMPTS = 3
+
+/** Podgląd korzysta ze strumieniowego protokołu procesu głównego. Dzięki obsłudze
+ * Range wideo nie jest kopiowane w całości do pamięci jako Blob.
  *
- *  Wideo: pokazujemy pierwszą klatkę od razu (element <video> z załadowanym blobem
- *  renderuje klatkę 0 jako poster — bez autoplay) i używamy `object-contain`, by
- *  zachować oryginalne proporcje w karcie ORAZ na pełnym ekranie (object-cover
- *  przycinał/zoomował w fullscreenie). Obraz zostaje `object-cover` (równe miniatury). */
+ * Dwie rzeczy są tu celowe i nie należy ich cofać:
+ *  1. BRAK `loading="lazy"` — pierwowzór Caelo pobierał bajty od razu w efekcie
+ *     (`<img>` dostawał gotowy blob), więc żądanie zawsze wychodziło przy montażu
+ *     karty. Po przejściu na `caelo-media://` leniwe ładowanie potrafiło NIGDY nie
+ *     wystartować dla świeżo dołożonej karty i miniatura pojawiała się dopiero po
+ *     restarcie aplikacji. Miniatury to małe WEBP-y — ładujemy je od razu.
+ *  2. Ponowienie po błędzie — protokół zwraca 503, gdy sidecar akurat nie jest
+ *     „ready" (restart po crashu). Bez retry `<img>` zostawał pusty na zawsze.
+ */
 export function ArtifactMedia({
   conn,
   art,
@@ -18,33 +26,58 @@ export function ArtifactMedia({
   art: HubArtifact
   className?: string
 }) {
+  void conn // połączenie jest przechowywane wyłącznie w zaufanym procesie głównym
   const isVideo = art.type === 'video' || (art.mime || '').startsWith('video/')
-  const [url, setUrl] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [ready, setReady] = useState(false)
+  const timer = useRef<number | null>(null)
 
   useEffect(() => {
-    let active = true
-    let objectUrl: string | null = null
-    getArtifactContentUrl(conn, art.id)
-      .then((u) => {
-        if (active) {
-          objectUrl = u
-          setUrl(u)
-        } else {
-          URL.revokeObjectURL(u)
-        }
-      })
-      .catch(() => undefined)
-    return () => {
-      active = false
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [conn, art.id])
+    setAttempt(0)
+    setReady(false)
+  }, [art.id])
 
-  if (!url) return <div className={cn('animate-pulse bg-surface-2', className)} aria-hidden="true" />
+  useEffect(
+    () => () => {
+      if (timer.current !== null) window.clearTimeout(timer.current)
+    },
+    []
+  )
+
+  function onError(): void {
+    if (attempt + 1 >= MAX_ATTEMPTS || timer.current !== null) return
+    timer.current = window.setTimeout(
+      () => {
+        timer.current = null
+        setAttempt((value) => value + 1)
+      },
+      400 * (attempt + 1)
+    )
+  }
+
+  const base = isVideo ? getArtifactMediaUrl(art.id) : getArtifactThumbnailUrl(art.id)
+  // `retry` omija cache Chromium po nieudanej próbie; `#t=0.1` każe odtwarzaczowi
+  // wyszukać klatkę, dzięki czemu karta wideo pokazuje podgląd bez odtwarzania.
+  const url = attempt ? `${base}?retry=${attempt}` : base
 
   return isVideo ? (
-    <video src={url} controls preload="metadata" className={cn('bg-black object-contain', className)} />
+    <video
+      key={attempt}
+      src={`${url}#t=0.1`}
+      controls
+      preload="metadata"
+      onLoadedData={() => setReady(true)}
+      onError={onError}
+      className={cn('bg-black object-contain', className)}
+    />
   ) : (
-    <img src={url} alt="" loading="lazy" className={cn('object-cover', className)} />
+    <img
+      src={url}
+      alt=""
+      decoding="async"
+      onLoad={() => setReady(true)}
+      onError={onError}
+      className={cn('object-cover', !ready && 'animate-pulse bg-surface-2', className)}
+    />
   )
 }

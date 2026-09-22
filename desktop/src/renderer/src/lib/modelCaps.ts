@@ -25,5 +25,5 @@ export function modelSupportsEffort(model: string): boolean {
  *  effortu, czyli wybór „xhigh" po cichu zdegradowałby się do domyślnego. */
 export function modelSupportsXhighEffort(model: string): boolean {
   const m = (model || '').toLowerCase().trim()
-  return m.startsWith('grok-4.6')
+  return m.startsWith('grok-4.6') || m.startsWith('grok-4.20-multi-agent')
 }

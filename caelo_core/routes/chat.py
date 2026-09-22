@@ -2,7 +2,7 @@
 
 Protokół (JSON tekstowe ramki):
   klient -> serwer:
-    {"type":"chat","messages":[...],"model":"...","temperature":0.7,
+    {"type":"chat","messages":[...],"provider":"xai|google|openai","model":"...","temperature":0.7,
      "system_prompt":"...","search_mode":"auto|on|off","sources":["web","x"]}
     {"type":"stop"}                      # przerwij bieżące generowanie
   serwer -> klient:
@@ -40,6 +40,9 @@ import config  # type: ignore
 from caelo_core import chat_media_tools, responses_client
 from caelo_core import validation as V
 from caelo_core.errors import masked_error
+from caelo_core.models.registry import get_model_registry
+from caelo_core.providers.errors import ProviderError
+from caelo_core.providers.ids import ACTIVE_CHAT_PROVIDER_IDS, normalize_provider_id
 from caelo_core.routes._ws import WsStream
 from caelo_core.state import ws_authorized
 
@@ -100,6 +103,120 @@ async def chat_stream(ws: WebSocket) -> None:
     current: dict = {"thread": None, "stop": None}  # P1-3: single-flight worker
 
     async with WsStream(ws) as stream:
+
+        def start_google_worker(messages, model: str, temperature: float,
+                                reasoning_effort=None) -> None:
+            """Gemini/Vertex: neutralny streaming tekstu, obrazów i PDF.
+
+            Narzędzia xAI (X Search, remote MCP i media function-calling) nie są
+            przenoszone do Gemini. Renderer ukrywa odpowiadające im kontrolki.
+            """
+            stop = threading.Event()
+            current["stop"] = stop
+
+            def on_delta(delta: str, _full: str) -> None:
+                if not stream.emit({"type": "delta", "delta": delta}):
+                    stop.set()
+
+            def on_tool(ev: dict) -> None:
+                if not stream.emit({"type": "tool_call", **ev}):
+                    stop.set()
+
+            def worker() -> None:
+                try:
+                    result = backend.get_provider("google").stream_chat(
+                        messages,
+                        model=model,
+                        temperature=temperature,
+                        reasoning_effort=reasoning_effort,
+                        search_grounding=False,
+                        on_delta=on_delta,
+                        on_tool=on_tool,
+                        stop_flag=stop.is_set,
+                    )
+                    full = result.text
+                    if result.citations:
+                        stream.emit({"type": "citations", "citations": list(result.citations)})
+                    if result.usage or result.tool_calls:
+                        stream.emit({"type": "usage", "usage": result.usage,
+                                     "tool_calls": result.tool_calls})
+                    stream.emit({"type": "done", "full": full})
+                    prompt = _last_user_text(messages)
+                    if full or prompt:
+                        backend.record_event(
+                            mode="chat", text=full or "",
+                            meta={"prompt": prompt, "provider": "google", "model": model,
+                                  "search_mode": "off", "tool_calls": result.tool_calls,
+                                  "usage": result.usage,
+                                  "citations": [c.get("url") for c in result.citations]},
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    # ProviderError jest już znormalizowany i pozbawiony sekretów;
+                    # ValueError pochodzi z walidacji lokalnego formatu załącznika.
+                    # Oba komunikaty są celowo użyteczne dla użytkownika.
+                    public = str(exc) if isinstance(exc, (ProviderError, ValueError)) else masked_error(
+                        exc, "Chat request failed"
+                    )
+                    stream.emit({"type": "error", "error": public})
+
+            t = threading.Thread(target=worker, daemon=True)
+            current["thread"] = t
+            stream.track(t)
+            t.start()
+
+        def start_openai_worker(messages, model: str, search_mode: str,
+                                reasoning_effort=None) -> None:
+            """OpenAI Responses: stateless, ``store:false`` i opcjonalny web search."""
+            stop = threading.Event()
+            current["stop"] = stop
+
+            def on_delta(delta: str, _full: str) -> None:
+                if not stream.emit({"type": "delta", "delta": delta}):
+                    stop.set()
+
+            def on_tool(ev: dict) -> None:
+                if not stream.emit({"type": "tool_call", **ev}):
+                    stop.set()
+
+            def worker() -> None:
+                try:
+                    result = backend.get_provider("openai").stream_chat(
+                        messages,
+                        model=model,
+                        temperature=0.7,  # adapter OpenAI celowo pomija temperature
+                        reasoning_effort=reasoning_effort,
+                        search_mode=search_mode,
+                        on_delta=on_delta,
+                        on_tool=on_tool,
+                        stop_flag=stop.is_set,
+                    )
+                    full = result.text
+                    if result.citations:
+                        stream.emit({"type": "citations", "citations": list(result.citations)})
+                    if result.usage or result.tool_calls:
+                        stream.emit({"type": "usage", "usage": result.usage,
+                                     "tool_calls": result.tool_calls})
+                    stream.emit({"type": "done", "full": full})
+                    prompt = _last_user_text(messages)
+                    if full or prompt:
+                        backend.record_event(
+                            mode="chat", text=full or "",
+                            meta={"prompt": prompt, "provider": "openai", "model": model,
+                                  "search_mode": search_mode,
+                                  "tool_calls": result.tool_calls,
+                                  "usage": result.usage,
+                                  "citations": [c.get("url") for c in result.citations]},
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    public = str(exc) if isinstance(exc, (ProviderError, ValueError)) else masked_error(
+                        exc, "OpenAI chat request failed"
+                    )
+                    stream.emit({"type": "error", "error": public})
+
+            t = threading.Thread(target=worker, daemon=True)
+            current["thread"] = t
+            stream.track(t)
+            t.start()
 
         def start_worker(messages, model: str, temperature: float,
                          search_mode: str, sources, reasoning_effort=None) -> None:
@@ -206,7 +323,7 @@ async def chat_stream(ws: WebSocket) -> None:
                         backend.record_event(
                             mode="chat", text=full or "",
                             meta={"prompt": prompt, "model": model,
-                                  "search_mode": search_mode,
+                                  "provider": "xai", "search_mode": search_mode,
                                   "tool_calls": result.get("tool_calls", 0),
                                   "usage": result.get("usage") or {},
                                   "citations": [c.get("url") for c in result.get("citations", [])]},
@@ -263,9 +380,43 @@ async def chat_stream(ws: WebSocket) -> None:
                             log.warning("Could not load project instructions", exc_info=True)
                     if system_prompt:
                         messages = [{"role": "system", "content": system_prompt}] + messages
-                    model = msg.get("model") or backend.read_settings().get(
-                        "chat_model"
-                    ) or config.DEFAULT_CHAT_MODEL
+                    provider_id = normalize_provider_id(
+                        msg.get("provider") or "xai", ACTIVE_CHAT_PROVIDER_IDS
+                    )
+                    registry = get_model_registry()
+                    if provider_id is None:
+                        await stream.send({"type": "error", "error": "Unknown chat provider."})
+                        continue
+
+                    def default_google_model() -> str:
+                        default_google = registry.default_for("google", "chat")
+                        return default_google.id if default_google else ""
+
+                    def default_xai_model() -> str:
+                        return backend.read_settings().get(
+                            "chat_model"
+                        ) or config.DEFAULT_CHAT_MODEL
+
+                    def default_openai_model() -> str:
+                        default_openai = registry.default_for("openai", "chat")
+                        return default_openai.id if default_openai else ""
+
+                    default_model = {
+                        "xai": default_xai_model,
+                        "google": default_google_model,
+                        "openai": default_openai_model,
+                    }[provider_id]
+                    model = msg.get("model") or default_model()
+                    descriptor = registry.find(provider_id, model)
+                    # xAI może zwrócić z /v1/models nowszy model niż commitowany
+                    # fallback registry. Zachowujemy tę dotychczasową elastyczność;
+                    # Google pozostaje ścisłe, bo jego UI bazuje na naszym registry.
+                    known_dynamic_xai = provider_id == "xai" and str(model).startswith("grok-")
+                    if descriptor is None and not known_dynamic_xai:
+                        await stream.send({"type": "error", "error": (
+                            f"The selected model '{model}' is not available for {provider_id}."
+                        )})
+                        continue
                     try:
                         temperature = float(msg.get("temperature", 0.7))
                     except (TypeError, ValueError):
@@ -285,13 +436,31 @@ async def chat_stream(ws: WebSocket) -> None:
                     )
                     # M10-B3/B4: wizja i dokumenty wymagają rodziny grok-4 — czytelny
                     # komunikat zamiast niejasnego błędu API na modelu text-only.
-                    if _has_rich_input(messages) and not _is_grok4(model):
+                    if provider_id == "xai" and _has_rich_input(messages) and not _is_grok4(model):
                         await stream.send({"type": "error", "error": (
                             f"Image and document input require a grok-4 model. The selected "
                             f"model '{model}' is text-only — switch models or remove the attachment.")})
                         continue
-                    start_worker(messages, model, temperature, search_mode, sources,
-                                 reasoning_effort)
+                    if descriptor is not None and _has_rich_input(messages) and not (
+                        {"image", "document"} & set(descriptor.capabilities.input_modalities)
+                    ):
+                        await stream.send({"type": "error", "error": (
+                            f"The selected model '{model}' does not accept attachments."
+                        )})
+                        continue
+                    worker_starters = {
+                        "xai": lambda: start_worker(
+                            messages, model, temperature, search_mode, sources,
+                            reasoning_effort,
+                        ),
+                        "google": lambda: start_google_worker(
+                            messages, model, temperature, reasoning_effort,
+                        ),
+                        "openai": lambda: start_openai_worker(
+                            messages, model, search_mode, reasoning_effort,
+                        ),
+                    }
+                    worker_starters[provider_id]()
         except WebSocketDisconnect:
             pass
         finally:

@@ -51,6 +51,12 @@ class StubBackend:
     def get_api_key(self):
         return "k"
 
+    # AgentRunner._credential buduje mape poswiadczen dla WSZYSTKICH dostawcow tekstowych,
+    # wiec stub musi znac tez OpenAI — inaczej tura pada na AttributeError, a asercja nizej
+    # raportuje mylacy brak pliku zamiast prawdziwej przyczyny.
+    def get_openai_api_key(self):
+        return "k-openai"
+
     def get_checkpoints(self):
         return None
 

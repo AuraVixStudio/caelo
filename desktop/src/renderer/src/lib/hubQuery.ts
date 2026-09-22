@@ -14,6 +14,7 @@ export type HubModule =
   | 'History'
   | 'Settings'
   | 'Extensions'
+  | 'Diagnostics'
 
 /** Tryb zdarzenia/artefaktu → moduł UJŚCIA (do skoku z History / Send-to). */
 export const MODE_TO_MODULE: Record<string, HubModule> = {

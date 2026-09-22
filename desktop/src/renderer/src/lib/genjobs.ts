@@ -1,10 +1,10 @@
 // Czyste utile kolejki generacji (M11-F5/F6) — formatowanie kosztu, status zadania,
 // reduktory listy. Bez React/DOM → testowalne w Vitest (node env), jak hubQuery.ts.
 
-import type { GenJob, GenJobOp, GenJobStatus } from './api'
+import type { GenJob, GenJobOp, GenJobState, GenJobStatus } from './api'
 
 export function isTerminal(status: GenJobStatus): boolean {
-  return status === 'done' || status === 'failed' || status === 'cancelled'
+  return status === 'done' || status === 'failed' || status === 'cancelled' || status === 'unknown_remote_state'
 }
 
 export function isActive(status: GenJobStatus): boolean {
@@ -13,6 +13,16 @@ export function isActive(status: GenJobStatus): boolean {
 
 export function activeCount(jobs: GenJob[]): number {
   return jobs.filter((j) => isActive(j.status)).length
+}
+
+export function jobState(job: GenJob): GenJobState {
+  if (job.state) return job.state
+  return job.status === 'done' ? 'COMPLETED' : job.status === 'failed' ? 'FAILED' :
+    job.status === 'cancelled' ? 'CANCELLED' : job.status === 'queued' ? 'QUEUED' : 'PROCESSING'
+}
+
+export function isActiveJob(job: GenJob): boolean {
+  return !['COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN_REMOTE_STATE'].includes(jobState(job))
 }
 
 /** Czytelna etykieta operacji (do listy/kolejki w UI). */
@@ -28,10 +38,24 @@ export function opLabel(op: GenJobOp): string {
       return 'Text → video'
     case 'img2video':
       return 'Image → video'
+    case 'reference_to_video':
+      return 'References → video'
+    case 'first_last_frame':
+      return 'First/last frame'
+    case 'extend':
+      return 'Extend'
     default:
       return op
   }
 }
+
+const STATE_LABELS: Record<GenJobState, string> = {
+  QUEUED: 'Queued', PREPARING: 'Preparing', UPLOADING: 'Uploading', SUBMITTING: 'Submitting',
+  SUBMITTED: 'Submitted', PROCESSING: 'Processing', DOWNLOADING: 'Downloading', FINALIZING: 'Finalizing',
+  COMPLETED: 'Done', FAILED: 'Failed', CANCELLED: 'Cancelled', RETRY_WAIT: 'Retry wait',
+  RECOVERY_PENDING: 'Recovering', UNKNOWN_REMOTE_STATE: 'Needs decision'
+}
+export function jobStateLabel(job: GenJob): string { return STATE_LABELS[jobState(job)] }
 
 /** Krótka etykieta statusu. */
 export function statusLabel(status: GenJobStatus): string {

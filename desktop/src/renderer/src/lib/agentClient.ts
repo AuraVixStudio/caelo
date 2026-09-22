@@ -3,6 +3,7 @@
 
 import type { TeamReport } from './api'
 import type { Conn } from './api'
+import type { AgentProvider } from './providerIds'
 
 /** Szczegóły żądania zatwierdzenia narzędzia (diff zapisu / komenda / plik binarny /
  *  wywołanie narzędzia MCP — M14-F2). */
@@ -81,6 +82,7 @@ export type AgentEvent =
       output_tokens: number
       context_tokens: number
       max_context: number
+      cost_usd: number
     }
   // M19-B3: pasywna diagnostyka LSP po edycie pliku.
   | { type: 'diagnostics'; path: string; items: LspDiagnostic[] }
@@ -182,7 +184,8 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
         input_tokens: asNum(o.input_tokens),
         output_tokens: asNum(o.output_tokens),
         context_tokens: asNum(o.context_tokens),
-        max_context: asNum(o.max_context)
+        max_context: asNum(o.max_context),
+        cost_usd: asNum(o.cost_usd)
       }
     case 'diagnostics': {
       const rawItems = Array.isArray(o.items) ? o.items : []
@@ -336,6 +339,7 @@ export class AgentConnection {
 
   sendMessage(
     text: string,
+    provider: AgentProvider,
     model: string,
     images: string[] = [],
     mode = 'ask',
@@ -343,7 +347,7 @@ export class AgentConnection {
   ): void {
     // M13: mode = ask | accept-edits | plan | bypass (jak „Mode" w Claude Code).
     // M19-B9: effort = '' | low | medium | high (pusty → backend użyje code_effort).
-    const frame: Record<string, unknown> = { type: 'message', text, model, images, mode }
+    const frame: Record<string, unknown> = { type: 'message', text, provider, model, images, mode }
     if (effort) frame.effort = effort
     this.send(frame)
   }

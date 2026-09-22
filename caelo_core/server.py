@@ -52,6 +52,7 @@ from caelo_core.routes import (
     permissions,
     projects,
     sandbox,
+    secrets,
     sessions,
     settings,
     skills,
@@ -94,6 +95,7 @@ SERVICE_NAME = "caelo-core"
 def create_app(
     token: str = "",
     port: int = 0,
+    secret_channel_token: str = "",
     on_startup: Optional[Callable[[], None]] = None,
 ) -> FastAPI:
     """Tworzy instancję aplikacji FastAPI sidecara.
@@ -107,6 +109,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.session_token = token
+        app.state.secret_channel_token = secret_channel_token
         app.state.port = port
         # P1-10: bez tokenu REST i WS są FAIL-CLOSED (symetrycznie). Głośno
         # ostrzegamy — inaczej „nic nie działa" byłoby trudne do zdiagnozowania.
@@ -197,6 +200,8 @@ def create_app(
     app.include_router(skills.router, dependencies=guard)  # M14-B6: biblioteka skilli
     app.include_router(packages.router, dependencies=guard)  # M16: marketplace pakietów
     app.include_router(sandbox.router, dependencies=guard)  # S34-d: status sandboxa OS
+    # Osobny token z stdin; NIE dodawaj publicznego guardu ani nie wystawiaj przez preload.
+    app.include_router(secrets.router)
     # WebSockety same weryfikują token z query (nagłówków nie da się ustawić w WS).
     app.include_router(chat.router)
     app.include_router(agent.router)

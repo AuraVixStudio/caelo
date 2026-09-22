@@ -31,4 +31,9 @@ describe('main handshake (S35-f)', () => {
     // kill wołany z komunikatem „bad handshake" = ścieżka odzysku przy złym JSON-ie handshake'u
     expect(src).toMatch(/killCoreForRestart\(`bad handshake/)
   })
+  it('nie ogłasza Connected przed uwierzytelnioną weryfikacją silnika', () => {
+    const src = read('../src/main/index.ts')
+    expect(src).toMatch(/Handshake oznacza tylko[\s\S]{0,360}status:\s*'starting'/)
+    expect(src).toMatch(/async function verifyConnection[\s\S]{0,1200}status:\s*'ready'/)
+  })
 })

@@ -277,6 +277,36 @@ def _unit_history_routes(checks: list) -> None:
                 ib_missing404 = e.status_code == 404
             checks.append(("/artifacts/{id}/input-block missing -> 404", ib_missing404))
 
+            # Regresja: obraz 2K/4K (PNG > MAX_IMAGE_URI po base64) MUSI dać się wysłać
+            # przez „Send to…" — blok wejściowy przekodowuje go, zamiast zwracać 413.
+            import caelo_core.validation as _V  # noqa: E402
+            try:
+                from PIL import Image as _PILImage  # noqa: E402
+            except Exception:
+                _PILImage = None
+            if _PILImage is not None:
+                import random as _random
+                big = Path(d) / "big.png"
+                rnd = _random.Random(7)
+                noise = _PILImage.frombytes(
+                    "RGB", (2048, 2048),
+                    bytes(rnd.randrange(256) for _ in range(2048 * 2048 * 3)),
+                )
+                noise.save(big, format="PNG")
+                oversized = big.stat().st_size * 4 // 3 > _V.MAX_IMAGE_URI
+                big_art = store.add_artifact(type="image", mode="image", mime="image/png",
+                                             path=str(big))
+                ib_big = hist_route.artifact_input_block(big_art.id, b=b)
+                url = ib_big["block"]["image_url"]["url"]
+                checks.append(("/artifacts/{id}/input-block re-encodes oversized image (no 413)",
+                               oversized
+                               and ib_big["block"]["type"] == "image_url"
+                               and url.startswith("data:image/jpeg;base64,")
+                               and len(url) <= _V.MAX_IMAGE_URI
+                               and ib_big["mime"] == "image/jpeg"))
+                store.delete_artifact(big_art.id)
+                big.unlink()
+
             # anty-traversal: artefakt wskazujący POZA dozwolone katalogi → 403
             outside = Path(d).resolve().parent / "grok_b3_outside_marker.bin"
             evil = store.add_artifact(type="file", mode="file", path=str(outside))

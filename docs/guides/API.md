@@ -1,8 +1,9 @@
 # Caelo — Backend API reference
 
 The Caelo sidecar (`caelo-core`, FastAPI/uvicorn) exposes a local HTTP + WebSocket API consumed by
-the Electron renderer. This document is the reference for that surface: **109 REST routes + 6
-WebSocket endpoints** (count verified via the snippet in [Regenerating this list](#regenerating-this-list);
+the Electron renderer. This document is the reference for that surface: **122 public REST routes +
+2 hidden secret-channel routes + 6 WebSocket endpoints** (count verified via the snippet in
+[Regenerating this list](#regenerating-this-list);
 a few M20 chat-media routes are reflected in the count but not yet split into their own table).
 
 > End users want **[USER_GUIDE.md](USER_GUIDE.md)**. This file is for developers and integrators.
@@ -17,6 +18,10 @@ a few M20 chat-media routes are reflected in the count but not yet split into th
   `__CAELO_CORE_READY__ {"port":…,"token":…,"version":…}`. Electron parses it to learn the
   `baseUrl` (`http://127.0.0.1:<port>`) and session `token`. uvicorn logs go to stderr so stdout
   stays clean.
+- **Private secret channel.** Electron sends a second random token through sidecar stdin (not
+  process arguments or environment). It authenticates hidden `/internal/secrets/import|export`
+  endpoints used only by the main process to inject the `safeStorage` snapshot and retrieve rotated
+  OAuth tokens. The regular renderer/session token is not accepted there.
 - **REST auth.** Every route **except `/health`** requires
   `Authorization: Bearer <token>` (constant-time compare). Missing → `401`, wrong → `403`.
 - **WebSocket auth.** Browsers can't set headers on WS, so the token goes in the query:
@@ -25,7 +30,7 @@ a few M20 chat-media routes are reflected in the count but not yet split into th
 - **Fail-closed.** With **no** configured token, both REST and WS **deny all** requests unless
   `CAELO_CORE_ALLOW_NO_TOKEN=1` is set (explicit dev opt-in; logged at startup and **per request**).
 - **CORS.** Restricted to dev loopback + packaged `file://` (Origin `null`); no `*`, no credentials.
-- **Errors.** Upstream (xAI) failures return a generic message; raw errors are logged server-side,
+- **Errors.** Upstream provider failures return a generic message; raw errors are logged server-side,
   not leaked to the client.
 
 ---
@@ -50,8 +55,8 @@ a few M20 chat-media routes are reflected in the count but not yet split into th
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/models` | List available chat models. |
-| `GET` | `/settings` | Current settings (key is masked → `has_api_key` flag only). |
-| `PUT` | `/settings` | Update settings (api key, chat/code model, system prompt, temperature, search/voice defaults). |
+| `GET` | `/settings` | Current settings (key is masked → `has_api_key` flag only). `chat_model`/`chat_provider` and `code_model`/`code_provider` travel in pairs — a model id alone does not say which provider owns it. |
+| `PUT` | `/settings` | Update settings. Secret fields are intercepted by Electron and stored through `safeStorage`; the sidecar keeps them in memory only. |
 | `GET` | `/config/output-dir` | Current media output directory. |
 | `PUT` | `/config/output-dir` | Change the media output directory. |
 
@@ -86,7 +91,7 @@ Unified async queue for image & video (statuses: queued → running → done/fai
 **Model-scoped body fields** (both are rejected by models that don't document them, so the
 renderer hides the controls and the backend drops the field rather than break the call):
 
-- `quality` (`low` | `medium`) on `/genjobs/image` — **`grok-imagine-image-2.0` only**; xAI's
+- `quality` (`low` | `medium` | `auto`) on `/genjobs/image` — **`grok-imagine-image-2.0` only**; xAI's
   default is `medium`.
 - `reference_images` (≤3 data-URIs) on `/genjobs/video` — **`grok-imagine-video-1.5` only**, and
   only for `text2video` / `img2video` (`edit` / `extend` reject it with 422). Distinct from
@@ -256,14 +261,14 @@ mode). The WS `/agent/stream` persists the full session after each turn and can 
 
 ## WebSocket endpoints
 
-All take the token in the query (`?token=…`) and enforce the Origin check. Blocking xAI work runs
+All take the token in the query (`?token=…`) and enforce the Origin check. Blocking provider work runs
 in a worker thread; deltas/events are pushed over a bounded queue with backpressure (`WsStream`).
 A `{"type":"stop"}` frame from the client cancels the in-flight operation.
 
 | Path | Purpose | Notable frames (server → client) |
 |---|---|---|
-| `/chat/stream` | Chat over the Responses API (search, vision, tools). | `delta` · `tool_call` · `citations` · `usage` · `done` · `error` |
-| `/agent/stream` | Coding-agent session loop (tools + approvals). | `delta`/event · `approval_request` · `workspace` · `session` (M21: active session id; client may send `{"type":"session","id":…\|null}` to resume/start) · `subagent`/`subagent_status` · `team_done` · `error` |
+| `/chat/stream` | Neutral chat stream: xAI Responses API, Google Gemini/Vertex, or OpenAI Responses API. Client frame includes `provider: "xai" | "google" | "openai"`; OpenAI requests enforce `store: false` and may use `web_search`, but never xAI-only X search. | `delta` · `tool_call` · `citations` · `usage` · `done` · `error` |
+| `/agent/stream` | Neutral xAI/Google/OpenAI coding-agent loop. Client message includes `provider: "xai" | "google" | "openai"`, `model`, `text`, `mode` and optional `effort`; tools, approvals and checkpoints are provider-independent. OpenAI function calls retain native `call_id` values and requests enforce `store: false`. | `text` · `tool_call` · `tool_result` · `approval_request` · `checkpoint` · `workspace` · `session` (active session id; client may send `{"type":"session","id":…\|null}` to resume/start) · `subagent`/`subagent_status` · `team_done` · `error` |
 | `/terminal` | Embedded pty shell (needs `pywinpty`). | pty output frames |
 | `/voice/converse` | **Talk** mode: transcript → Responses → TTS, with barge-in. | `audio` (+ text) frames; `{"type":"stop"}` = barge-in |
 | `/voice/realtime` | **Live** mode: transparent proxy to xAI Voice Agent (`/v1/realtime`). | raw passthrough frames |

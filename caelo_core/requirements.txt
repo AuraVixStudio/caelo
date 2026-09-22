@@ -4,6 +4,8 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 requests>=2.31
+# Application Default Credentials dla Google Cloud / Vertex AI.
+google-auth>=2.0
 pillow>=10.0
 python-dotenv>=1.0
 # Silnik regex z per-search timeout= dla agentowego grep (ochrona ReDoS, P0-3).

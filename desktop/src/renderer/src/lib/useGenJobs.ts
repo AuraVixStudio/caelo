@@ -20,6 +20,55 @@ import {
 import { activeCount, isTerminal, mergeJob, mergeJobs } from './genjobs'
 
 const POLL_INTERVAL_MS = 2500
+// Switching modules unmounts Image/Video. Keep the lightweight queue snapshot
+// outside the component so a quick switch does not start another database read.
+// Active jobs still bypass this window through the normal polling loop.
+const IDLE_CACHE_MS = 60_000
+const ACTIVE_DEDUP_MS = 2_000
+
+interface JobsCacheEntry {
+  jobs: GenJob[]
+  updatedAt: number
+  inflight?: Promise<GenJob[]>
+}
+
+const jobsCache = new WeakMap<Conn, JobsCacheEntry>()
+
+function cacheFor(conn: Conn): JobsCacheEntry {
+  const cached = jobsCache.get(conn)
+  if (cached) return cached
+  const created: JobsCacheEntry = { jobs: [], updatedAt: 0 }
+  jobsCache.set(conn, created)
+  return created
+}
+
+function commitJobs(conn: Conn, update: (jobs: GenJob[]) => GenJob[]): GenJob[] {
+  const cached = cacheFor(conn)
+  cached.jobs = update(cached.jobs)
+  cached.updatedAt = Date.now()
+  return cached.jobs
+}
+
+function loadJobs(conn: Conn, force: boolean): Promise<GenJob[]> {
+  const cached = cacheFor(conn)
+  const maxAge = force ? ACTIVE_DEDUP_MS : IDLE_CACHE_MS
+  if (cached.updatedAt > 0 && Date.now() - cached.updatedAt < maxAge) {
+    return Promise.resolve(cached.jobs)
+  }
+  if (cached.inflight) return cached.inflight
+
+  const request = listGenJobs(conn, { limit: 50 })
+    .then((response) => {
+      cached.jobs = mergeJobs(cached.jobs, response.jobs)
+      cached.updatedAt = Date.now()
+      return cached.jobs
+    })
+    .finally(() => {
+      cached.inflight = undefined
+    })
+  cached.inflight = request
+  return request
+}
 
 export interface UseGenJobs {
   jobs: GenJob[]
@@ -37,18 +86,19 @@ export interface UseGenJobs {
 }
 
 export function useGenJobs(conn: Conn): UseGenJobs {
-  const [jobs, setJobs] = useState<GenJob[]>([])
-  const [loading, setLoading] = useState(true)
+  const initialCache = cacheFor(conn)
+  const [jobs, setJobs] = useState<GenJob[]>(initialCache.jobs)
+  const [loading, setLoading] = useState(initialCache.updatedAt === 0)
   const [error, setError] = useState<string | null>(null)
   const aliveRef = useRef(true)
   const jobsRef = useRef<GenJob[]>([])
   jobsRef.current = jobs
 
-  const fetchOnce = useCallback(() => {
-    listGenJobs(conn, { limit: 50 })
-      .then((r) => {
+  const fetchOnce = useCallback((force = false) => {
+    loadJobs(conn, force)
+      .then((nextJobs) => {
         if (!aliveRef.current) return
-        setJobs((prev) => mergeJobs(prev, r.jobs))
+        setJobs(nextJobs)
         setError(null)
       })
       .catch((e) => {
@@ -64,7 +114,7 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     aliveRef.current = true
     fetchOnce()
     const id = setInterval(() => {
-      if (aliveRef.current && activeCount(jobsRef.current) > 0) fetchOnce()
+      if (aliveRef.current && activeCount(jobsRef.current) > 0) fetchOnce(true)
     }, POLL_INTERVAL_MS)
     return () => {
       aliveRef.current = false
@@ -76,7 +126,8 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     async (body: ImageJobBody): Promise<GenJob | null> => {
       try {
         const r = await submitImageJob(conn, body)
-        if (aliveRef.current) setJobs((prev) => mergeJob(prev, r.job))
+        const nextJobs = commitJobs(conn, (current) => mergeJob(current, r.job))
+        if (aliveRef.current) setJobs(nextJobs)
         return r.job
       } catch (e) {
         if (aliveRef.current) setError(String((e as Error).message || e))
@@ -90,7 +141,8 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     async (body: VideoGenJobBody): Promise<GenJob | null> => {
       try {
         const r = await submitVideoGenJob(conn, body)
-        if (aliveRef.current) setJobs((prev) => mergeJob(prev, r.job))
+        const nextJobs = commitJobs(conn, (current) => mergeJob(current, r.job))
+        if (aliveRef.current) setJobs(nextJobs)
         return r.job
       } catch (e) {
         if (aliveRef.current) setError(String((e as Error).message || e))
@@ -104,7 +156,8 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     async (id: string): Promise<void> => {
       try {
         const r = await cancelGenJob(conn, id)
-        if (aliveRef.current) setJobs((prev) => mergeJob(prev, r.job))
+        const nextJobs = commitJobs(conn, (current) => mergeJob(current, r.job))
+        if (aliveRef.current) setJobs(nextJobs)
       } catch (e) {
         if (aliveRef.current) setError(String((e as Error).message || e))
       }
@@ -116,7 +169,8 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     async (id: string): Promise<void> => {
       try {
         const r = await retryGenJob(conn, id)
-        if (aliveRef.current) setJobs((prev) => mergeJob(prev, r.job))
+        const nextJobs = commitJobs(conn, (current) => mergeJob(current, r.job))
+        if (aliveRef.current) setJobs(nextJobs)
       } catch (e) {
         if (aliveRef.current) setError(String((e as Error).message || e))
       }
@@ -128,11 +182,10 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     async (kind?: GenJobKind): Promise<void> => {
       try {
         await clearGenJobs(conn, kind)
-        if (aliveRef.current) {
-          setJobs((prev) =>
-            prev.filter((j) => !(isTerminal(j.status) && (!kind || j.kind === kind)))
-          )
-        }
+        const nextJobs = commitJobs(conn, (current) =>
+          current.filter((job) => !(isTerminal(job.status) && (!kind || job.kind === kind)))
+        )
+        if (aliveRef.current) setJobs(nextJobs)
       } catch (e) {
         if (aliveRef.current) setError(String((e as Error).message || e))
       }
@@ -144,7 +197,8 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     async (id: string): Promise<void> => {
       try {
         await deleteGenJob(conn, id)
-        if (aliveRef.current) setJobs((prev) => prev.filter((j) => j.id !== id))
+        const nextJobs = commitJobs(conn, (current) => current.filter((job) => job.id !== id))
+        if (aliveRef.current) setJobs(nextJobs)
       } catch (e) {
         if (aliveRef.current) setError(String((e as Error).message || e))
       }
@@ -162,6 +216,6 @@ export function useGenJobs(conn: Conn): UseGenJobs {
     retry,
     clearFinished,
     dismiss,
-    refresh: fetchOnce
+    refresh: () => fetchOnce(true)
   }
 }

@@ -58,7 +58,13 @@ export function SendToMenu({
       close()
     } catch (e) {
       const status = (e as { status?: number }).status
-      setError(status === 415 ? "This artifact can't be used as input." : 'Send failed.')
+      setError(
+        status === 415
+          ? "This artifact can't be used as input."
+          : status === 413
+            ? 'This artifact is too large to send.'
+            : 'Send failed.'
+      )
     } finally {
       setBusy(false)
     }

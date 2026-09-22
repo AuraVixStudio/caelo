@@ -21,27 +21,40 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from caelo_core import validation as V
-from caelo_core.genjobs import GenJobQueueFull
+from caelo_core.genjobs import CostLimitExceeded, GenJobQueueFull
+from caelo_core.models.capabilities import CapabilityError
+from caelo_core.models.registry import get_model_registry
 from caelo_core.state import Backend, get_backend
 
 router = APIRouter(tags=["genjobs"])
 
-# PLAN_M11: edycja/warianty komponują z DO 3 obrazów referencyjnych.
-MAX_EDIT_REFS = 3
+# Google Nano Banana przyjmuje wiecej referencji; xAI zachowuje limit 3.
+MAX_EDIT_REFS = 14
 
 
 class ImageJobReq(BaseModel):
+    provider: str = Field("xai", max_length=32)
     op: Literal["text2img", "edit", "variation"] = "text2img"
     prompt: str = Field(..., min_length=1, max_length=V.MAX_PROMPT)
     n: int = Field(1, ge=1, le=V.MAX_N)
     aspect_ratio: str = Field("auto", max_length=16)
-    resolution: str = Field("1k", max_length=8)
+    resolution: str = Field("1k", max_length=16)
     model: Optional[str] = Field(None, max_length=64)
     images: List[str] = Field(default_factory=list, max_length=MAX_EDIT_REFS)  # data-URI
-    # grok-imagine-image-2.0: low|medium (docs 2026-08). Dla innych modeli parametr jest
+    # grok-imagine-image-2.0: low|medium|auto (docs 2026-08). Dla innych modeli parametr jest
     # POMIJANY w `api_manager._apply_quality` (xAI odrzuca go 4xx), więc tu tylko go
     # walidujemy — nie zgadujemy, czy model go obsłuży.
-    quality: Optional[Literal["low", "medium"]] = None
+    quality: Optional[Literal["low", "medium", "high", "auto"]] = None
+    reference_roles: List[str] = Field(default_factory=list, max_length=14)
+    thinking_level: Optional[Literal["minimal", "low", "medium", "high"]] = None
+    search_grounding: bool = False
+    mime_type: Literal["image/png", "image/jpeg", "image/webp"] = "image/png"
+    output_format: Optional[Literal["png", "jpeg", "webp"]] = None
+    output_compression: Optional[int] = Field(None, ge=0, le=100)
+    background: Optional[Literal["auto", "opaque", "transparent"]] = None
+    moderation: Optional[Literal["auto", "low"]] = None
+    source_artifact_ids: List[str] = Field(default_factory=list, max_length=MAX_EDIT_REFS)
+    source_artifact_roles: List[str] = Field(default_factory=list, max_length=MAX_EDIT_REFS)
 
     @field_validator("images")
     @classmethod
@@ -50,6 +63,19 @@ class ImageJobReq(BaseModel):
 
     @model_validator(mode="after")
     def _check_op(self) -> "ImageJobReq":
+        if self.provider == "xai":
+            descriptor = get_model_registry().resolve(
+                "xai", "image", self.model or None
+            )
+            limit = descriptor.capabilities.max_reference_images
+            if len(self.images) > limit:
+                raise ValueError(
+                    f"{descriptor.id} image editing accepts at most {limit} reference images"
+                )
+        if self.background == "transparent" and self.output_format == "jpeg":
+            raise ValueError("transparent background requires PNG or WebP output")
+        if self.output_compression is not None and self.output_format not in {"jpeg", "webp"}:
+            raise ValueError("output compression requires JPEG or WebP output")
         if self.op == "text2img":
             if self.images:
                 raise ValueError("text2img takes no reference images")
@@ -59,26 +85,40 @@ class ImageJobReq(BaseModel):
 
 
 class VideoJobReq(BaseModel):
-    op: Literal["text2video", "img2video", "edit", "extend"] = "text2video"
+    provider: str = Field("xai", max_length=32)
+    op: Literal["text2video", "img2video", "reference_to_video", "first_last_frame", "edit", "extend"] = "text2video"
     prompt: str = Field(..., min_length=1, max_length=V.MAX_PROMPT)
     duration: int = Field(6, ge=1, le=V.MAX_VIDEO_DURATION)
     resolution: str = Field("480p", max_length=8)
     aspect_ratio: str = Field("Original", max_length=16)
     model: Optional[str] = Field(None, max_length=64)
     image: Optional[str] = None  # data-URI: kadr startowy dla img2video
+    last_image: Optional[str] = None  # drugi kadr dla interpolacji Veo
     video: Optional[str] = None  # https URL lub data:video — źródło dla edit/extend
     # Reference-to-video (docs 2026-08, grok-imagine-video-1.5): do 3 obrazów, które
     # przenoszą postać/ubranie/przedmiot do klipu BEZ blokowania pierwszej klatki.
     # Ortogonalne do `image` (kadr startowy) — mogą wystąpić razem.
     reference_images: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS)
+    reference_roles: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS)
+    generate_audio: bool = True
+    seed: Optional[int] = Field(None, ge=0, le=4_294_967_295)
+    negative_prompt: Optional[str] = Field(None, max_length=V.MAX_PROMPT)
+    previous_interaction_id: Optional[str] = Field(None, max_length=256)
     # ROAD-3.6-d: długość źródła (s) dla edit/extend — wyjście zachowuje długość
     # źródła, więc koszt liczymy z niej, nie z domyślnego `duration`. Opcjonalne;
     # klient podaje, gdy zna długość źródła (np. z HTMLVideoElement.duration).
     source_duration: Optional[int] = Field(None, ge=1, le=V.MAX_VIDEO_DURATION)
+    source_artifact_ids: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS + 2)
+    source_artifact_roles: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS + 2)
 
     @field_validator("image")
     @classmethod
     def _check_image(cls, v: Optional[str]) -> Optional[str]:
+        return V.validate_image_uri(v) if v else v
+
+    @field_validator("last_image")
+    @classmethod
+    def _check_last_image(cls, v: Optional[str]) -> Optional[str]:
         return V.validate_image_uri(v) if v else v
 
     @field_validator("video")
@@ -93,10 +133,27 @@ class VideoJobReq(BaseModel):
 
     @model_validator(mode="after")
     def _check_op(self) -> "VideoJobReq":
+        # Domysly starego formularza xAI nie sa prawidlowe dla Google. Przy
+        # jawnym providerze ustaw bezpieczny podstawowy profil Google.
+        if self.provider == "google":
+            if self.resolution == "480p":
+                self.resolution = "720p"
+            if self.aspect_ratio == "Original":
+                self.aspect_ratio = "16:9"
+            if self.op == "extend" and (self.model or "").startswith("veo-"):
+                self.duration = 7
+            if self.op == "reference_to_video" and (self.model or "").startswith("veo-"):
+                self.duration = 8
         if self.op == "img2video" and not self.image:
             raise ValueError("img2video requires a source image")
         if self.op == "text2video" and self.image:
             raise ValueError("text2video takes no source image")
+        if self.op == "first_last_frame" and (not self.image or not self.last_image):
+            raise ValueError("first_last_frame requires a starting and ending image")
+        if self.op != "first_last_frame" and self.last_image:
+            raise ValueError(f"{self.op} takes no ending image")
+        if self.op == "reference_to_video" and not self.reference_images:
+            raise ValueError("reference_to_video requires reference images")
         if self.op in ("edit", "extend"):
             if not self.video:
                 raise ValueError(f"{self.op} requires a source video")
@@ -114,11 +171,26 @@ class VideoJobReq(BaseModel):
 
 
 def _submit(b: Backend, *, kind: str, op: str, params: dict) -> dict:
+    provider = params.get("provider") or "xai"
+    try:
+        descriptor = get_model_registry().validate(
+            provider, kind, op, params, params.get("model") or None
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except CapabilityError as exc:
+        raise HTTPException(status_code=422, detail=exc.to_dict())
+    # Utrwal konkretny model, aby koszt, retry i adapter uzywaly tego samego
+    # wyboru (szczegolnie edit/extend wideo -> model bazowy xAI).
+    if not params.get("model"):
+        params["model"] = descriptor.id
     try:
         job = b.genjobs.submit(kind=kind, op=op, params=params,
                                project_id=b.current_project_id)
     except GenJobQueueFull as exc:
         raise HTTPException(status_code=429, detail=str(exc))
+    except CostLimitExceeded as exc:
+        raise HTTPException(status_code=402, detail=str(exc))
     return {"job": job.to_dict()}
 
 

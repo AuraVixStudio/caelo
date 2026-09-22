@@ -26,6 +26,7 @@ import {
   type SlashCommand
 } from './api'
 import type { HubModule } from './hubQuery'
+import type { ReferenceRole } from './referenceRoles'
 import { expandTemplate } from './slashCommands'
 
 export interface PendingSend {
@@ -45,6 +46,10 @@ export interface PendingSend {
 export interface StagedImage {
   name: string
   uri: string // data-URI (upload/drop) lub https URL (z magistrali Send-to)
+  artifactId?: string
+  /** ID pliku z natywnej biblioteki; nie jest ID artefaktu w bazie galerii. */
+  libraryId?: string
+  role?: ReferenceRole
 }
 
 /** Prompt „do ponownego użycia" wstawiany do panelu Image/Video z galerii/karty
@@ -83,7 +88,7 @@ interface HubState {
   videoCommandMode: 'edit' | 'extend' | null
   setVideoCommandMode: Dispatch<SetStateAction<'edit' | 'extend' | null>>
   /** Załaduj wideo jako źródło i przejdź do panelu Video w danym trybie (M11). */
-  sendVideoToVideo: (v: { name: string; uri: string; mode: 'edit' | 'extend' }) => void
+  sendVideoToVideo: (v: { name: string; uri: string; mode: 'edit' | 'extend'; artifactId?: string }) => void
 
   /** Prompt oczekujący na wstawienie do panelu Image/Video (z „Reuse prompt"). */
   promptReuse: PromptReuse | null
@@ -242,8 +247,8 @@ export function HubProvider({
       setVideoSource,
       videoCommandMode,
       setVideoCommandMode,
-      sendVideoToVideo: (v: { name: string; uri: string; mode: 'edit' | 'extend' }) => {
-        setVideoSource({ name: v.name, uri: v.uri })
+      sendVideoToVideo: (v: { name: string; uri: string; mode: 'edit' | 'extend'; artifactId?: string }) => {
+        setVideoSource({ name: v.name, uri: v.uri, artifactId: v.artifactId })
         setVideoCommandMode(v.mode)
         navigate('Video')
       },

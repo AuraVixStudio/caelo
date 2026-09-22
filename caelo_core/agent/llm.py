@@ -1,20 +1,48 @@
-"""Streaming czatu z tool-calls na xAI (akumulacja delt treści i tool_calls).
+"""Neutralny kontrakt odpowiedzi modelu dla agenta kodowania (ADR-8).
 
-Zwraca pełną wiadomość asystenta: {"role":"assistant","content":..., "tool_calls":[...]}.
-Dekoduje SSE jawnie jako UTF-8 (zasada z legacy — inaczej mojibake polskich znaków).
+Historia sesji używa jednego, serializowalnego kształtu niezależnie od providera.
+Prywatne dane wymagane do poprawnego replayu (np. ``thoughtSignature`` Gemini)
+żyją w ``provider_data`` i są ignorowane przez pętlę narzędziową.
+
+``stream_chat_with_tools`` pozostaje kompatybilnym wejściem xAI dla starszych
+transportów i testów. Właściwa serializacja drutu jest w providerze xAI.
 """
 
 from __future__ import annotations
 
-import json
-import logging
-from typing import Callable, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, List, Optional
 
-import requests  # type: ignore
 
-from caelo_core import validation as V
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
 
-log = logging.getLogger(__name__)
+    def to_message_dict(self) -> dict[str, Any]:
+        import json
+        return {"id": self.id, "type": "function",
+                "function": {"name": self.name,
+                             "arguments": json.dumps(self.arguments, ensure_ascii=False)}}
+
+
+@dataclass(frozen=True)
+class AssistantTurn:
+    content: Optional[str] = None
+    tool_calls: tuple[ToolCall, ...] = ()
+    usage: dict[str, Any] = field(default_factory=dict)
+    provider_data: dict[str, Any] = field(default_factory=dict)
+
+    def to_message_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"role": "assistant", "content": self.content}
+        if self.tool_calls:
+            out["tool_calls"] = [call.to_message_dict() for call in self.tool_calls]
+        if self.usage:
+            out["usage"] = self.usage
+        if self.provider_data:
+            out["provider_data"] = self.provider_data
+        return out
 
 
 def stream_chat_with_tools(
@@ -28,90 +56,7 @@ def stream_chat_with_tools(
     stop_flag: Optional[Callable[[], bool]] = None,
     reasoning_effort: Optional[str] = None,
 ) -> dict:
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "stream": True,
-        "tools": tools,
-        "tool_choice": "auto",
-    }
-    # M19-B9: reasoning_effort jest ZALEŻNY OD MODELU — grok-4.3 wspiera (none/low/medium/
-    # high), ale grok-4 / grok-build-0.1 zwracają 4xx, gdy pole jest obecne (docs.x.ai). Dlatego
-    # wysyłamy je tylko gdy poprawne i — gdy serwer odrzuci żądanie (400/422) — PONAWIAMY raz
-    # bez niego: effort jest „best-effort", nie wywraca tury na modelu, który go nie wspiera.
-    # 4xx przychodzi przed streamingiem (treść jeszcze pusta), więc ponowienie jest czyste.
-    eff = V.normalize_effort(reasoning_effort)
-    # M17-B6: NIE dokładamy `stream_options.include_usage` do payloadu — to nowy parametr
-    # na krytycznej ścieżce agenta, której nie da się zweryfikować w sandboxie (TLS),
-    # a 400 zepsułby każdą turę. Jeśli serwer i tak wyśle `usage` w strumieniu — zbierzemy
-    # je niżej (telemetria tokenów); telemetria tur/narzędzi (B6) działa niezależnie.
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-
-    def _open(send_effort: bool):
-        body = dict(payload)
-        if send_effort and eff:
-            body["reasoning_effort"] = eff
-        return requests.post(f"{base_url}/chat/completions", headers=headers, json=body,
-                             stream=True, timeout=600)
-
-    content = ""
-    tool_calls: dict[int, dict] = {}
-    usage: Optional[dict] = None
-
-    r = _open(bool(eff))
-    if eff and getattr(r, "status_code", 200) in (400, 422):
-        log.info("model %s rejected reasoning_effort=%s (HTTP %s) — retrying without it",
-                 model, eff, getattr(r, "status_code", "?"))
-        r.close()
-        r = _open(False)
-
-    with r:
-        r.raise_for_status()
-        for raw in r.iter_lines(decode_unicode=False):
-            if stop_flag and stop_flag():
-                break
-            if not raw:
-                continue
-            line = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else raw
-            if line.startswith("data:"):
-                line = line[5:].strip()
-            if line == "[DONE]":
-                break
-            try:
-                obj = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(obj.get("usage"), dict):
-                usage = obj["usage"]  # zwykle w ostatnim chunku (include_usage)
-            delta = (obj.get("choices") or [{}])[0].get("delta") or {}
-            if delta.get("content"):
-                content += delta["content"]
-                if on_text:
-                    on_text(content)
-            for tcd in delta.get("tool_calls") or []:
-                idx = tcd.get("index", 0)
-                slot = tool_calls.setdefault(idx, {"id": None, "name": "", "args": ""})
-                if tcd.get("id"):
-                    slot["id"] = tcd["id"]
-                fn = tcd.get("function") or {}
-                if fn.get("name"):
-                    slot["name"] = fn["name"]
-                if fn.get("arguments"):
-                    slot["args"] += fn["arguments"]
-
-    msg: dict = {"role": "assistant", "content": content or None}
-    if tool_calls:
-        msg["tool_calls"] = [
-            {
-                "id": v["id"] or f"call_{i}",
-                "type": "function",
-                "function": {"name": v["name"], "arguments": v["args"] or "{}"},
-            }
-            for i, v in sorted(tool_calls.items())
-        ]
-    if usage is not None:
-        # M17-B6: telemetria — AgentSession zdejmuje to pole przed zapisem do historii
-        # (nie wraca do xAI). Brak usage → pole pominięte (mock LLM = 0 tokenów).
-        msg["usage"] = usage
-    return msg
+    from caelo_core.providers.xai.tools import stream_chat_with_tools as xai_stream
+    return xai_stream(api_key, base_url, messages, model, temperature, tools,
+                       on_text=on_text, stop_flag=stop_flag,
+                       reasoning_effort=reasoning_effort)

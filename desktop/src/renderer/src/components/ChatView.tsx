@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -31,6 +32,7 @@ import {
   type ChatArtifact,
   type ChatMessage,
   type Conn,
+  type ModelDescriptor,
   type ReasoningEffort,
   type SearchMode,
   type ToolEvent
@@ -53,6 +55,11 @@ import { useConversations } from '../lib/useConversations'
 import { conversationToMarkdown, downloadText, safeFilename } from '../lib/exportMarkdown'
 import { appendDictation, useDictation } from '../lib/useDictation'
 import { useTts } from '../lib/useTts'
+import {
+  CHAT_PROVIDER_OPTIONS,
+  isChatProvider,
+  type ChatProvider
+} from '../lib/providerIds'
 import { AttachButton, AttachmentChips } from './Attachments'
 import { ProjectSwitcher } from './ProjectSwitcher'
 import { conversationsForProject, titleFromText } from '../lib/storage'
@@ -65,6 +72,7 @@ import { EffortSelect } from './ui/EffortSelect'
 import { ModelSelect } from './ui/ModelSelect'
 import { Popover } from './ui/Popover'
 import { ResizeHandle } from './ui/ResizeHandle'
+import { Select } from './ui/Select'
 import { Textarea } from './ui/Textarea'
 
 function updateLastAssistant(messages: ChatMessage[], content: string): ChatMessage[] {
@@ -375,6 +383,8 @@ export function ChatView({ conn }: { conn: Conn }) {
   const [slashIdx, setSlashIdx] = useState(0) // M14-F3: aktywny element listy komend
 
   const [models, setModels] = useState<string[]>([])
+  const [allChatModels, setAllChatModels] = useState<ModelDescriptor[]>([])
+  const [provider, setProvider] = useState<ChatProvider>('xai')
   const [model, setModel] = useState<string>('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [temperature, setTemperature] = useState(0.7)
@@ -402,6 +412,8 @@ export function ChatView({ conn }: { conn: Conn }) {
 
   // P2-3/P2-4: logika wydzielona do hooków (stabilne callbacki dla memoizacji wierszy).
   const convo = useConversations()
+  const activeConversationProvider = convo.active?.provider
+  const activeConversationModel = convo.active?.model
   const att = useAttachments()
   const hub = useHub()
   const stream = useChatStream(conn)
@@ -415,6 +427,11 @@ export function ChatView({ conn }: { conn: Conn }) {
   const convosPanelRef = usePanelRef()
   const [convosCollapsed, setConvosCollapsed] = useState(false)
 
+  const descriptor = useMemo(
+    () => allChatModels.find((item) => item.provider === provider && item.id === model),
+    [allChatModels, provider, model]
+  )
+
   function toggleConvos(): void {
     const p = convosPanelRef.current
     if (!p) return
@@ -422,13 +439,28 @@ export function ChatView({ conn }: { conn: Conn }) {
     else p.collapse()
   }
 
-  // Modele: idempotentne (prev || …), więc bezpieczne na każdą zmianę cache.
+  // Neutralny katalog modeli czatu. Dynamiczną listę xAI zachowujemy dla zgodności,
+  // a modele Google pochodzą wyłącznie z registry Pythona.
   useEffect(() => {
     if (!modelsResp) return
-    setModels(modelsResp.chat)
-    setModel((prev) => prev || modelsResp.default_chat)
+    setAllChatModels((modelsResp.items || []).filter((item) => item.media_type === 'chat'))
     if (modelsResp.default_voice) setDefaultVoice(modelsResp.default_voice)
   }, [modelsResp])
+
+  useEffect(() => {
+    if (!modelsResp) return
+    const available = provider === 'xai'
+      ? modelsResp.chat
+      : allChatModels.filter((item) => item.provider === provider).map((item) => item.id)
+    setModels(available)
+    setModel((current) => {
+      if (available.includes(current)) return current
+      const preferred = allChatModels.find(
+        (item) => item.provider === provider && item.is_default
+      )?.id
+      return preferred || (provider === 'xai' ? modelsResp.default_chat : '') || available[0] || ''
+    })
+  }, [allChatModels, modelsResp, provider])
 
   // Ustawienia: zaaplikuj RAZ (system_prompt/temperature są edytowalne — kolejne
   // odświeżenia cache nie mogą nadpisać niezapisanych zmian użytkownika).
@@ -437,13 +469,36 @@ export function ChatView({ conn }: { conn: Conn }) {
     settingsInit.current = true
     setSystemPrompt(settings.system_prompt || '')
     setTemperature(typeof settings.chat_temperature === 'number' ? settings.chat_temperature : 0.7)
-    setModel((prev) => prev || settings.chat_model)
     if (settings.chat_search_mode) setSearchMode(settings.chat_search_mode)
     if (settings.chat_search_sources?.length) setSources(settings.chat_search_sources)
     if (settings.chat_effort !== undefined) setEffort(settings.chat_effort) // M19-B9
     // M12-F4: read-aloud używa domyślnego głosu z ustawień (fallback: /models).
     if (settings.voice) setDefaultVoice(settings.voice)
   }, [settings])
+
+  // Provider i model są zapisywane per rozmowa. Stare rozmowy bez tych pól
+  // zachowują dotychczasowy xAI i globalny chat_model.
+  useEffect(() => {
+    if (!convo.activeId || !modelsResp) return
+    // Nowa rozmowa startuje od domyślnego modelu z Ustawień — także wtedy, gdy jest
+    // on z Google/OpenAI, stąd `chat_provider` obok `chat_model`.
+    const nextProvider = activeConversationProvider || settings?.chat_provider || 'xai'
+    const available = nextProvider === 'xai'
+      ? modelsResp.chat
+      : allChatModels.filter((item) => item.provider === nextProvider).map((item) => item.id)
+    const savedDefault = settings?.chat_model && available.includes(settings.chat_model)
+      && nextProvider === (settings?.chat_provider || 'xai')
+      ? settings.chat_model
+      : ''
+    const fallback = savedDefault || allChatModels.find(
+      (item) => item.provider === nextProvider && item.is_default
+    )?.id || (nextProvider === 'xai' ? modelsResp.default_chat : '')
+    setProvider(nextProvider)
+    setModel(available.includes(activeConversationModel || '')
+      ? activeConversationModel!
+      : fallback || available[0] || '')
+  }, [activeConversationModel, activeConversationProvider, allChatModels,
+    convo.activeId, modelsResp, settings?.chat_model, settings?.chat_provider])
 
   // Auto-scroll na dół przy zmianie treści — TYLKO gdy user jest blisko dołu (S35-i).
   useEffect(() => {
@@ -502,6 +557,7 @@ export function ChatView({ conn }: { conn: Conn }) {
     stream.start(
       {
         messages: toApiMessages(history),
+        provider,
         model,
         temperature,
         system_prompt: systemPrompt,
@@ -610,7 +666,24 @@ export function ChatView({ conn }: { conn: Conn }) {
 
   function onModelChange(value: string): void {
     setModel(value)
-    void saveSettings(conn, { chat_model: value }).catch(() => undefined)
+    convo.patchActive((current) => ({ ...current, provider, model: value }))
+    // Ostatni wybór staje się domyślnym modelem czatu — razem z dostawcą, bo sam
+    // identyfikator nie mówi, do kogo należy (Ustawienia → General czytają obie wartości).
+    void saveSettings(conn, { chat_model: value, chat_provider: provider }).catch(() => undefined)
+  }
+
+  function onProviderChange(value: string): void {
+    if (!isChatProvider(value)) return
+    const nextProvider = value
+    const available = nextProvider === 'xai'
+      ? modelsResp?.chat || []
+      : allChatModels.filter((item) => item.provider === nextProvider).map((item) => item.id)
+    const nextModel = allChatModels.find(
+      (item) => item.provider === nextProvider && item.is_default
+    )?.id || (nextProvider === 'xai' ? modelsResp?.default_chat || '' : '') || available[0] || ''
+    setProvider(nextProvider)
+    setModel(nextModel)
+    convo.patchActive((current) => ({ ...current, provider: nextProvider, model: nextModel }))
   }
 
   // M10-F3: live-search mode/source choices persist as the app-wide default.
@@ -651,7 +724,7 @@ export function ChatView({ conn }: { conn: Conn }) {
 
   function newChat(): void {
     // M22: nowa rozmowa należy do aktywnego projektu czatu (lub „bez projektu").
-    convo.createChat(hub.currentProjectId)
+    convo.createChat(hub.currentProjectId, provider, model)
     setInput('')
   }
 
@@ -785,12 +858,28 @@ export function ChatView({ conn }: { conn: Conn }) {
             icon={convosCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             onClick={toggleConvos}
           />
+          <span className="text-xs font-medium text-muted">Provider</span>
+          <div className="w-36">
+            <Select
+              size="sm"
+              aria-label="Chat provider"
+              value={provider}
+              disabled={stream.streaming}
+              onChange={(event) => onProviderChange(event.target.value)}
+            >
+              {CHAT_PROVIDER_OPTIONS.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
+            </Select>
+          </div>
           <span className="text-xs font-medium text-muted">Model</span>
-          <div className="w-52">
-            <ModelSelect value={model} models={models} onChange={onModelChange} />
+          <div className="w-56">
+            <ModelSelect value={model} models={models} onChange={onModelChange} disabled={stream.streaming} />
           </div>
           <div className="ml-auto flex items-center gap-1">
-            <EffortSelect effort={effort} onSelect={changeEffort} side="bottom" align="end" model={model} />
+            {provider === 'xai' || descriptor?.capabilities.thinking ? (
+              <EffortSelect effort={effort} onSelect={changeEffort} side="bottom" align="end" model={model} />
+            ) : null}
             <IconButton
               label="Export chat as Markdown"
               icon={<Download size={18} />}
@@ -800,7 +889,7 @@ export function ChatView({ conn }: { conn: Conn }) {
               onClick={exportChat}
             />
             <ProjectSwitcher conn={conn} onAttach={att.add} />
-            <Popover
+            {provider === 'xai' || provider === 'openai' ? <Popover
               align="end"
               label="Live search"
               trigger={({ toggle, open, triggerProps }) => (
@@ -819,7 +908,9 @@ export function ChatView({ conn }: { conn: Conn }) {
             >
               {() => (
                 <div className="w-64 p-2">
-                  <div className="mb-2 text-xs font-medium text-muted">Search the web &amp; X</div>
+                  <div className="mb-2 text-xs font-medium text-muted">
+                    {provider === 'openai' ? 'Search the web' : 'Search the web & X'}
+                  </div>
                   <div className="flex gap-0.5 rounded-lg bg-surface-2 p-0.5">
                     {(['auto', 'on', 'off'] as SearchMode[]).map((mo) => (
                       <button
@@ -846,7 +937,7 @@ export function ChatView({ conn }: { conn: Conn }) {
                     {[
                       { k: 'web', label: 'Web' },
                       { k: 'x', label: 'X' }
-                    ].map(({ k, label }) => (
+                    ].filter(({ k }) => provider === 'xai' || k === 'web').map(({ k, label }) => (
                       <label
                         key={k}
                         className="flex cursor-pointer items-center gap-2 py-1 text-sm text-fg"
@@ -866,11 +957,13 @@ export function ChatView({ conn }: { conn: Conn }) {
                       ? 'Caelo answers from its own knowledge.'
                       : searchMode === 'on'
                         ? 'Caelo always searches before answering.'
-                        : 'Caelo searches the web/X when it needs fresh info.'}
+                        : provider === 'openai'
+                          ? 'Caelo searches the web when it needs fresh info.'
+                          : 'Caelo searches the web/X when it needs fresh info.'}
                   </p>
                 </div>
               )}
-            </Popover>
+            </Popover> : null}
             <Popover
               align="end"
               label="System & temperature"
@@ -895,24 +988,28 @@ export function ChatView({ conn }: { conn: Conn }) {
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     placeholder="Optional instructions that steer the assistant…"
                   />
-                  <label
-                    htmlFor="chat-temperature"
-                    className="mb-1.5 mt-3 block text-xs font-medium text-muted"
-                  >
-                    Temperature: {temperature.toFixed(2)}
-                  </label>
-                  <input
-                    id="chat-temperature"
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={temperature}
-                    aria-label="Temperature"
-                    aria-valuetext={temperature.toFixed(2)}
-                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                    className="w-full accent-accent"
-                  />
+                  {provider === 'xai' || descriptor?.capabilities.supports_temperature ? (
+                    <>
+                      <label
+                        htmlFor="chat-temperature"
+                        className="mb-1.5 mt-3 block text-xs font-medium text-muted"
+                      >
+                        Temperature: {temperature.toFixed(2)}
+                      </label>
+                      <input
+                        id="chat-temperature"
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={temperature}
+                        aria-label="Temperature"
+                        aria-valuetext={temperature.toFixed(2)}
+                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                        className="w-full accent-accent"
+                      />
+                    </>
+                  ) : null}
                   <div className="mt-3 flex justify-end">
                     <Button
                       size="sm"
@@ -935,7 +1032,9 @@ export function ChatView({ conn }: { conn: Conn }) {
             <BrandMark size={60} className="mb-5" />
             <h2 className="text-xl font-semibold">Start a conversation</h2>
             <p className="mt-1.5 text-sm text-muted">
-              Streaming chat powered by xAI models via the local backend.
+              Streaming chat powered by {
+                provider === 'google' ? 'Google Gemini' : provider === 'openai' ? 'OpenAI' : 'xAI'
+              } via the local backend.
             </p>
           </div>
         ) : (

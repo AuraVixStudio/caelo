@@ -1,8 +1,9 @@
 # Security Policy
 
-Caelo is a local-first desktop client. Your xAI credentials stay on your machine
-("bring your own key", BYO-key) and are sent **only** to `api.x.ai`. We take the
-handling of those credentials seriously and welcome responsible disclosure.
+Caelo is a local-first, multi-provider desktop client. Credentials are stored on
+your machine and are sent only to the provider selected for a request: xAI,
+Google Gemini / Vertex AI, or OpenAI. We take their handling seriously and welcome
+responsible disclosure.
 
 ## Reporting a vulnerability
 
@@ -25,12 +26,13 @@ the issue before any public disclosure.
 
 ## Never commit secrets
 
-- **Never commit `caelo_auth.json`** (OAuth tokens), `.env`, API keys, or any
-  `caelo_*.json` data file. They are gitignored on purpose — keep them that way.
+- **Never commit `secrets.dat`, legacy `caelo_auth.json`, `.env`, API keys, or any
+  `caelo_*.json` data file.** They are gitignored on purpose. `secrets.dat` is
+  tied to the current OS user and is not a portable backup.
 - The repository ships a **gitleaks** configuration (`.gitleaks.toml`) and a
   pre-commit hook; CI scans every push/PR for leaked secrets.
 - If you ever accidentally commit a secret, **rotate it immediately** (revoke the
-  xAI key / re-authenticate) and tell the maintainers so history can be scrubbed
+  affected provider key / re-authenticate) and tell the maintainers so history can be scrubbed
   before the change is published.
 
 ## Security model (what protects you)
@@ -43,12 +45,21 @@ These properties are part of the design and must not be regressed:
   WebSockets take the token in the query string and validate the `Origin`. With no
   configured token, both REST and WS **deny** unless `CAELO_CORE_ALLOW_NO_TOKEN=1`
   is set explicitly (a logged dev opt-in).
-- **Key never leaves the host.** The xAI bearer token is sent only to `api.x.ai`;
-  it is **never returned** by `/settings` (only `has_api_key`) and is **never**
-  exposed to the renderer (the voice routes inject `Authorization` server-side).
+- **OS-backed credential vault.** Saved xAI/Google/OpenAI keys and xAI OAuth tokens are
+  encrypted by Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, a
+  supported Secret Service backend on Linux). The encrypted `secrets.dat` is
+  written atomically; plaintext fields are removed from legacy settings/auth JSON.
+- **Memory-only sidecar credentials.** Electron sends the decrypted snapshot over
+  a private loopback channel authenticated by a separate token delivered through
+  sidecar stdin. That token is not exposed by preload or placed in process arguments
+  or environment variables. The sidecar never persists provider secrets.
+- **Provider scope.** xAI credentials are sent only to xAI endpoints; Google API
+  keys/ADC credentials only to Google endpoints; OpenAI keys only to OpenAI endpoints.
+  `/settings` and `/auth/status`
+  return presence/status flags, never credential values.
 - **Scrubbed environment.** Agent `run_command`, the terminal PTY, and MCP
   subprocesses run with a secret-free environment (no `CAELO_CORE_TOKEN` /
-  `XAI_API_KEY` / token-like vars).
+  `XAI_API_KEY` / `OPENAI_API_KEY` / token-like vars).
 - **Sandboxed file tools.** Agent file operations are confined to the workspace
   root (symlink/junction escapes rejected); mutating operations and shell commands
   require user approval.
@@ -61,9 +72,15 @@ See `CLAUDE.md` for the full architecture and the hardening history
 ## Telemetry
 
 Caelo collects and transmits **no telemetry**. There is no analytics endpoint and
-no usage reporting. A fresh install talks only to `api.x.ai` (with your key) and to
-GitHub Releases for update checks (which you can disable). See the README's
-*Privacy & telemetry* section.
+no usage reporting. Network traffic consists of requests to the xAI, Google or OpenAI
+provider selected by the user, plus GitHub Releases for optional update checks.
+Google Cloud ADC may independently use Google authentication endpoints when its
+credential library refreshes a session. See the README's privacy section.
+
+OpenAI Chat and Agent requests explicitly set `store: false`; Caelo keeps conversation
+history locally and resends the required context. This does not mean the provider has
+zero operational retention: OpenAI documents that abuse-monitoring logs may normally be
+retained for up to 30 days. See [OpenAI — Your data](https://developers.openai.com/api/docs/guides/your-data).
 
 ## Supported versions
 

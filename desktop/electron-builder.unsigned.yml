@@ -1,0 +1,6 @@
+extends: ./electron-builder.yml
+
+# Awaryjny lokalny build, gdy wirtualna karta SimplySign nie jest zalogowana.
+# Zwykły `npm run dist:full` nadal używa podpisu z electron-builder.yml.
+win:
+  signtoolOptions: null

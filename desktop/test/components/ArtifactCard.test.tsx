@@ -57,6 +57,11 @@ function renderCard(art: HubArtifact, navigate = vi.fn()) {
 }
 
 describe('ArtifactCard — reuse prompt', () => {
+  it('używa małej miniatury dla obrazu zamiast pełnego pliku', () => {
+    renderCard(artifact())
+    expect(screen.getByRole('presentation')).toHaveAttribute('src', 'caelo-media://thumbnail/a1')
+  })
+
   it('pokazuje zapisany prompt', () => {
     renderCard(artifact())
     expect(screen.getByText('A neon city at night')).toBeInTheDocument()

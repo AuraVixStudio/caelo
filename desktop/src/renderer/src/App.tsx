@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Activity,
   Code2,
   History as HistoryIcon,
   Image as ImageIcon,
@@ -41,6 +42,7 @@ const Settings = lazy(() => import('./components/Settings').then((m) => ({ defau
 const Extensions = lazy(() =>
   import('./components/Extensions').then((m) => ({ default: m.Extensions }))
 )
+const DiagnosticsPage = lazy(() => import('./components/DiagnosticsPage').then((m) => ({ default: m.DiagnosticsPage })))
 
 const MODULES = [
   { id: 'Chat', label: 'Chat', icon: MessageSquare },
@@ -51,6 +53,7 @@ const MODULES = [
   { id: 'Voice', label: 'Voice', icon: Mic },
   { id: 'History', label: 'History', icon: HistoryIcon },
   { id: 'Extensions', label: 'Extensions', icon: Puzzle },
+  { id: 'Diagnostics', label: 'Diagnostics', icon: Activity },
   { id: 'Settings', label: 'Settings', icon: SettingsIcon }
 ] as const
 
@@ -86,9 +89,9 @@ function ConnStatusBar({
   )
 }
 
-/** Gdy sidecar jest gotowy, stopka odzwierciedla TAKŻE stan auth: brak aktywnego
- *  źródła (po wylogowaniu/usunięciu klucza) → bursztyn „Not signed in", a nie zielone
- *  „Connected" (które myliło — to status backendu, nie konta xAI). */
+/** Gdy lokalny sidecar jest gotowy, stopka pokazuje stan poświadczeń xAI:
+ *  OAuth/API key/.env → „Connected", brak aktywnego źródła → „Not signed in".
+ *  Nie jest to status galerii, kolejki ani Google ADC. */
 function ConnStatusReady({
   conn,
   status,
@@ -138,6 +141,8 @@ function moduleFor(active: Module, c: Conn, conn: CoreConnection) {
       return <History conn={c} />
     case 'Extensions':
       return <Extensions conn={c} />
+    case 'Diagnostics':
+      return <DiagnosticsPage conn={c} />
     case 'Settings':
       return <Settings conn={c} />
     default:
@@ -147,6 +152,10 @@ function moduleFor(active: Module, c: Conn, conn: CoreConnection) {
 
 export default function App() {
   const [active, setActive] = useState<Module>('Chat')
+  // Image and Video are the two data-heavy workspaces. Once opened, keep their
+  // React trees alive and only hide them. This preserves controls/previews and
+  // prevents rapid navigation from repeatedly mounting all data hooks.
+  const visitedMedia = useRef(new Set<Module>())
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(RAIL_KEY) === '1'
@@ -211,13 +220,33 @@ export default function App() {
         </main>
       )
     }
+    const isMedia = active === 'Image' || active === 'Video'
+    if (isMedia) visitedMedia.current.add(active)
+
     // Per-module boundary: a crash in one module shows a fallback in the content
     // area instead of blanking the window; switching modules (resetKeys) recovers it.
     // Suspense (P2-4): pokaż loader, gdy chunk leniwego modułu się doczytuje.
     return (
-      <ErrorBoundary label={active} resetKeys={[active]}>
-        <Suspense fallback={<ModuleFallback />}>{moduleFor(active, c, conn)}</Suspense>
-      </ErrorBoundary>
+      <>
+        {(['Image', 'Video'] as const)
+          .filter((module) => visitedMedia.current.has(module))
+          .map((module) => (
+            <div
+              key={module}
+              aria-hidden={active !== module}
+              className={cn('min-w-0 flex-1 overflow-hidden', active === module ? 'flex' : 'hidden')}
+            >
+              <ErrorBoundary label={module} resetKeys={[module, c.baseUrl]}>
+                <Suspense fallback={<ModuleFallback />}>{moduleFor(module, c, conn)}</Suspense>
+              </ErrorBoundary>
+            </div>
+          ))}
+        {!isMedia ? (
+          <ErrorBoundary label={active} resetKeys={[active, c.baseUrl]}>
+            <Suspense fallback={<ModuleFallback />}>{moduleFor(active, c, conn)}</Suspense>
+          </ErrorBoundary>
+        ) : null}
+      </>
     )
   }
 

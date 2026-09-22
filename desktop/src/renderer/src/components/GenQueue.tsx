@@ -1,6 +1,6 @@
 import { RotateCw, Trash2, X } from 'lucide-react'
 import type { GenJob } from '../lib/api'
-import { isActive, isTerminal, jobPrompt, opLabel, statusLabel, statusTone } from '../lib/genjobs'
+import { isActiveJob, isTerminal, jobPrompt, jobState, jobStateLabel, opLabel, statusTone } from '../lib/genjobs'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
@@ -38,25 +38,29 @@ export function GenQueue({
       </div>
       <div className="flex flex-col gap-1.5">
         {jobs.map((j) => {
-          const active = isActive(j.status)
-          const retriable = j.status === 'failed' || j.status === 'cancelled'
+          const active = isActiveJob(j)
+          const state = jobState(j)
+          const retriable = j.status === 'failed' || j.status === 'cancelled' || state === 'UNKNOWN_REMOTE_STATE'
+          const uncertain = state === 'UNKNOWN_REMOTE_STATE'
           return (
             <div
               key={j.id}
-              className="grid grid-cols-[110px_1fr_auto_auto] items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5"
+              className={`grid grid-cols-[120px_1fr_auto_auto] items-center gap-3 rounded-xl border px-4 py-2.5 ${uncertain ? 'border-warn bg-warn/5' : 'border-border bg-surface'}`}
             >
-              <Badge tone={statusTone(j.status)}>{statusLabel(j.status)}</Badge>
+              <Badge tone={uncertain ? 'warn' : statusTone(j.status)}>{jobStateLabel(j)}</Badge>
               <div className="min-w-0">
                 <p className="truncate text-sm" title={jobPrompt(j)}>
                   {jobPrompt(j) || `(${opLabel(j.op)})`}
                 </p>
-                {j.error ? (
+                {uncertain ? <p className="text-xs text-warn">The provider may have accepted this paid request, but Caelo has no remote handle. Check the provider before retrying.</p> : j.error ? (
                   <p className="truncate text-xs text-error" title={j.error}>
                     {j.error}
                   </p>
                 ) : (
                   <p className="text-xs text-muted">{opLabel(j.op)}</p>
                 )}
+                {active && j.progress != null ? <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2"><div className="h-full bg-accent transition-all" style={{ width: `${Math.max(0, Math.min(100, j.progress))}%` }} /></div> : null}
+                <p className="mt-1 text-[11px] text-muted">{j.provider} · attempt {j.attempt}/{j.max_attempts}</p>
               </div>
               <CostBadge cost={j.cost} approx={j.status !== 'done'} />
               <div className="flex items-center gap-1">

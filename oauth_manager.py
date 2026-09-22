@@ -100,14 +100,19 @@ class OAuthManager:
     # ponawiałoby sieciowy refresh pod lockiem (30 s), serializując/dławiąc wszystkie żądania.
     _REFRESH_BACKOFF_S = 30.0
 
-    def __init__(self):
+    def __init__(self, initial_tokens=None, on_tokens_changed=None, persist_file=True):
         self.tokens = {}
+        self._on_tokens_changed = on_tokens_changed
+        self._persist_file = bool(persist_file)
         # S31-g: RLock (nie Lock) — get_access_token trzyma lock i woła _refresh→
         # _store_token_response; login też bierze lock wokół exchange+userinfo. Reentrancja
         # zapobiega samo-zakleszczeniu, a jeden lock chroni WSZYSTKIE mutacje self.tokens.
         self._lock = threading.RLock()
         self._refresh_fail_until = 0.0
-        self._load()
+        if initial_tokens is None:
+            self._load()
+        else:
+            self.tokens = dict(initial_tokens)
 
     # --- trwałość ---
     def _load(self):
@@ -117,10 +122,24 @@ class OAuthManager:
     def _save(self):
         # P1-11: zapis ATOMOWY (temp + os.replace) — crash w trakcie nie zostawi
         # uszkodzonego pliku z tokenami (był prosty write_text z połykaniem błędu).
-        try:
-            atomic_write_text(AUTH_FILE, json.dumps(self.tokens, indent=2))
-        except Exception:
-            log.warning("Failed to save %s", AUTH_FILE.name, exc_info=True)
+        if self._persist_file:
+            try:
+                atomic_write_text(AUTH_FILE, json.dumps(self.tokens, indent=2))
+            except Exception:
+                log.warning("Failed to save %s", AUTH_FILE.name, exc_info=True)
+        if self._on_tokens_changed is not None:
+            try:
+                self._on_tokens_changed(dict(self.tokens))
+            except Exception:
+                log.warning("Failed to update the in-memory OAuth vault", exc_info=True)
+
+    def replace_tokens(self, tokens, notify=False):
+        """Wstrzyknij tokeny odszyfrowane przez Electron bez zapisu plaintextu."""
+        with self._lock:
+            self.tokens = dict(tokens or {})
+            self._refresh_fail_until = 0.0
+            if notify:
+                self._save()
 
     # --- stan ---
     def is_authenticated(self) -> bool:
@@ -134,11 +153,13 @@ class OAuthManager:
         with self._lock:
             self.tokens = {}
             self._refresh_fail_until = 0.0
-            try:
-                if AUTH_FILE.exists():
-                    AUTH_FILE.unlink()
-            except Exception:
-                pass
+            self._save()
+            if self._persist_file:
+                try:
+                    if AUTH_FILE.exists():
+                        AUTH_FILE.unlink()
+                except Exception:
+                    pass
 
     # --- przepływ logowania (blokujący — uruchamiać w wątku tła) ---
     def login(self, status_cb=None, timeout=300):

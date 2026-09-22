@@ -1716,6 +1716,8 @@ def test_reasoning_effort() -> None:
 
     from caelo_core import validation as V
     from caelo_core.agent import llm as _llm
+    # `_llm.stream_chat_with_tools` deleguje do adaptera xAI i to TAM zyje `requests`.
+    from caelo_core.providers.xai import tools as _xai_tools
     from caelo_core.agent.roles import RoleRegistry, _clean_role
 
     check("B9: normalize_effort accepts valid (case-insensitive)",
@@ -1793,8 +1795,8 @@ def test_reasoning_effort() -> None:
         captured["json"] = kw.get("json")
         return _Resp()
 
-    orig = _llm.requests
-    _llm.requests = _types.SimpleNamespace(post=_post, get=getattr(orig, "get", None))
+    orig = _xai_tools.requests
+    _xai_tools.requests = _types.SimpleNamespace(post=_post, get=getattr(orig, "get", None))
     try:
         _llm.stream_chat_with_tools("k", "http://x", [{"role": "user", "content": "hi"}],
                                     "grok", 0.2, [], reasoning_effort="high")
@@ -1803,7 +1805,7 @@ def test_reasoning_effort() -> None:
                                     "grok", 0.2, [], reasoning_effort="bogus")
         omitted = "reasoning_effort" not in (captured.get("json") or {})
     finally:
-        _llm.requests = orig
+        _xai_tools.requests = orig
     check("B9: llm payload carries valid reasoning_effort", with_eff == "high")
     check("B9: llm payload omits invalid reasoning_effort", omitted)
 
@@ -1839,13 +1841,13 @@ def test_reasoning_effort() -> None:
             return _RespFb(400)  # model (np. grok-build-0.1) odrzuca reasoning_effort
         return _RespFb(200, [b'data: {"choices":[{"delta":{"content":"hi"}}]}', b"data: [DONE]"])
 
-    _llm.requests = _types.SimpleNamespace(post=_post_fb, get=getattr(orig, "get", None),
-                                           HTTPError=orig.HTTPError)
+    _xai_tools.requests = _types.SimpleNamespace(post=_post_fb, get=getattr(orig, "get", None),
+                                                 HTTPError=orig.HTTPError)
     try:
         msg = _llm.stream_chat_with_tools("k", "http://x", [{"role": "user", "content": "hi"}],
                                           "grok-build-0.1", 0.2, [], reasoning_effort="high")
     finally:
-        _llm.requests = orig
+        _xai_tools.requests = orig
     check("B9: reasoning_effort 4xx -> retry WITHOUT it (turn survives unsupported model)",
           msg.get("content") == "hi" and fb_calls == [True, False])
 

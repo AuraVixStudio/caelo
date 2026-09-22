@@ -1,12 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell } from 'electron'
 import { spawn, execFileSync, ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
+import { registerMediaProtocol } from './mediaProtocol'
+import { performCoreRequest, type CoreRequestInput, type CoreRequestResult } from './coreRequest'
+import {
+  deleteNativeReference,
+  getNativeReferenceDataUri,
+  importNativeReferences,
+  listNativeReferences,
+  registerReferenceLibraryProtocol
+} from './referenceLibrary'
+import { SecretVault, type SecretSnapshot } from './secrets'
 
 // Linia handshake wypisywana przez sidecara (patrz caelo_core/__main__.py).
 const HANDSHAKE_PREFIX = '__CAELO_CORE_READY__'
+const SECRET_CHANNEL_PREFIX = '__CAELO_CORE_SECRET_CHANNEL__'
 
 // Nadzór sidecara: po nagłym padzie restartujemy z narastającym backoffem.
 const MAX_RESTARTS = 5
@@ -27,6 +39,10 @@ export interface CoreConnection {
 let coreProcess: ChildProcess | null = null
 let connection: CoreConnection = { status: 'starting' }
 let mainWindow: BrowserWindow | null = null
+let secretVault: SecretVault | null = null
+let secretVaultError = ''
+let secretChannelToken = ''
+let secretSyncRunning = false
 
 let manualStop = false // true gdy zatrzymujemy sidecar celowo (quit) — nie restartuj
 let restarts = 0 // kolejne restarty po padzie (reset po udanym /whoami)
@@ -34,10 +50,43 @@ let healthTimer: ReturnType<typeof setInterval> | null = null
 let healthFails = 0
 let handshakeTimer: ReturnType<typeof setTimeout> | null = null
 let stableTimer: ReturnType<typeof setTimeout> | null = null
+let healthProbeRunning = false
 
 /** Katalog główny repo (monorepo) — w dev main jest w desktop/out/main. */
 function repoRoot(): string {
   return resolve(__dirname, '..', '..', '..')
+}
+
+/** Ten sam DATA_DIR po obu stronach granicy procesu. */
+function coreDataDir(): string {
+  if (!app.isPackaged) return repoRoot()
+  if (process.platform === 'win32') {
+    return join(process.env.LOCALAPPDATA || homedir(), 'Caelo')
+  }
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'Caelo')
+  }
+  return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'Caelo')
+}
+
+function initializeSecretVault(): void {
+  try {
+    const dataDir = coreDataDir()
+    secretVault = new SecretVault(safeStorage, dataDir)
+    secretVault.load()
+    const result = secretVault.migratePlaintext(
+      join(dataDir, 'caelo_settings.json'),
+      join(dataDir, 'caelo_auth.json')
+    )
+    if (result.migrated) console.log('[vault] migrated legacy plaintext credentials')
+    secretVaultError = ''
+  } catch (reason) {
+    secretVault = null
+    secretVaultError = `Secure credential storage is unavailable: ${String(
+      (reason as Error | undefined)?.message || reason
+    )}`
+    console.error('[vault]', secretVaultError)
+  }
 }
 
 /** Ikona okna/paska zadań. W spakowanej aplikacji ikonę nosi sam plik .exe/.app
@@ -79,6 +128,9 @@ function broadcast(): void {
   }
 }
 
+/** Strumieniowy, uwierzytelniony most do plików artefaktów. `net.fetch` zachowuje
+ * Response body jako stream i przekazuje Range, więc Chromium może przewijać 4K
+ * bez tworzenia pełnego Blob-a w pamięci renderera. */
 /** Ubija proces I jego drzewo potomków (agent `run_command` spawnuje wnuki).
  *  Windows: `taskkill /T /F`; POSIX: SIGTERM + SIGKILL (fallback). `sync=true`
  *  (na quit) blokuje do zabicia, by nie zostawić osieroconych procesów. */
@@ -172,6 +224,8 @@ async function verifyConnection(): Promise<void> {
         signal: AbortSignal.timeout(5000) // P2-10: nie czekaj w nieskończoność na zawieszony socket
       })
       if (!res.ok) throw new Error(`/whoami -> HTTP ${res.status}`)
+      if (!secretVault) throw new Error(secretVaultError || 'secret vault is unavailable')
+      await pushSecretsToCore()
       connection = { ...connection, status: 'ready' }
       healthFails = 0
       startHealthMonitor()
@@ -194,6 +248,7 @@ async function verifyConnection(): Promise<void> {
 function startCore(): void {
   const { command, args, cwd } = resolveSidecar()
   const token = randomBytes(32).toString('hex')
+  secretChannelToken = randomBytes(32).toString('hex')
   manualStop = false
   connection = { status: 'starting' }
   broadcast()
@@ -204,6 +259,8 @@ function startCore(): void {
     env: {
       ...process.env,
       CAELO_CORE_TOKEN: token,
+      CAELO_CORE_SECRET_STDIN: '1',
+      CAELO_CORE_DATA_DIR: coreDataDir(),
       // P3-4: wersja PRODUKTU (desktop/package.json) wstrzyknięta do sidecara, by
       // raportował ją w handshake/`/health` także w spakowanym buildzie (gdzie nie
       // może odczytać package.json). To JEDNO źródło prawdy dla wersji.
@@ -212,6 +269,10 @@ function startCore(): void {
       PYTHONUTF8: '1'
     }
   })
+
+  // Osobny token kanału sekretów nigdy nie trafia do argumentów ani środowiska
+  // procesu i nie jest eksponowany przez preload. Sidecar odczytuje jedną linię stdin.
+  coreProcess.stdin?.write(`${SECRET_CHANNEL_PREFIX} ${secretChannelToken}\n`)
 
   coreProcess.on('error', (err) => {
     connection = { status: 'error', error: `Failed to start sidecar (${command}): ${err.message}` }
@@ -238,7 +299,10 @@ function startCore(): void {
             handshakeTimer = null
           }
           connection = {
-            status: 'ready',
+            // Handshake oznacza tylko, że lokalny proces podał port. Nie udostępniaj
+            // jeszcze renderera; /whoami potwierdzi gotowość Caelo Core. Widoczny
+            // status dostawcy renderer wylicza później, osobno z /auth/status.
+            status: 'starting',
             port: info.port,
             token, // token z procesu głównego jest autorytatywny
             version: info.version,
@@ -308,28 +372,89 @@ function stopCore(): void {
   }
 }
 
-/** Cykliczny health-check: 3 kolejne porażki /health -> ubij proces (wywoła restart). */
+/**
+ * Techniczny health-check lokalnego Caelo Core. Nie opisuje stanu dostawcy:
+ * widoczne „Connected” jest wyliczane osobno z `/auth/status` w rendererze.
+ */
+async function authenticatedCoreProbe(baseUrl: string, token: string): Promise<void> {
+  const response = await fetch(baseUrl + '/whoami', {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5000)
+  })
+  await response.arrayBuffer()
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+}
+
+async function secretRequest(path: string, init: RequestInit = {}): Promise<unknown> {
+  if (!connection.baseUrl || !secretChannelToken) throw new Error('Secret channel is unavailable')
+  const response = await fetch(new URL(path, connection.baseUrl), {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Caelo-Secret-Token': secretChannelToken,
+      ...(init.headers || {})
+    },
+    signal: AbortSignal.timeout(10_000)
+  })
+  const text = await response.text()
+  const data: unknown = text ? JSON.parse(text) : null
+  if (!response.ok) throw new Error(`Secret channel failed with HTTP ${response.status}`)
+  return data
+}
+
+async function pushSecretsToCore(): Promise<void> {
+  if (!secretVault) throw new Error(secretVaultError || 'Secret vault is unavailable')
+  await secretRequest('/internal/secrets/import', {
+    method: 'POST',
+    body: JSON.stringify(secretVault.getSnapshot())
+  })
+}
+
+async function syncSecretsFromCore(): Promise<void> {
+  if (secretSyncRunning || !secretVault || connection.status !== 'ready') return
+  secretSyncRunning = true
+  try {
+    const current = secretVault.getSnapshot()
+    const result = await secretRequest(`/internal/secrets/export?since=${current.revision}`) as {
+      changed?: boolean
+      snapshot?: SecretSnapshot
+    }
+    if (result.changed && result.snapshot) secretVault.replace(result.snapshot)
+  } finally {
+    secretSyncRunning = false
+  }
+}
+
+/** Cykliczny health-check: 3 kolejne porażki Caelo Core -> restart procesu. */
 function startHealthMonitor(): void {
   stopHealthMonitor()
-  healthTimer = setInterval(() => {
-    if (!coreProcess || connection.status !== 'ready' || !connection.baseUrl) return
+  healthTimer = setInterval(async () => {
+    if (healthProbeRunning || !coreProcess || connection.status !== 'ready' ||
+        !connection.baseUrl || !connection.token) return
+    healthProbeRunning = true
     // P2-10: timeout — sidecar żywy, ale nieodpowiadający nie może opóźniać detekcji
     // pada poza zamierzone ~30 s (3× interwał) do czasu TCP-timeoutu OS.
-    fetch(`${connection.baseUrl}/health`, { signal: AbortSignal.timeout(5000) })
-      .then((res) => {
-        if (res.ok) {
-          healthFails = 0
-        } else {
-          throw new Error(`HTTP ${res.status}`)
-        }
-      })
-      .catch(() => {
-        healthFails += 1
-        if (healthFails >= HEALTH_FAILS_BEFORE_KILL && coreProcess) {
-          healthFails = 0
-          killCoreForRestart('health-check failed') // tree-kill; 'exit' zajmie się restartem
-        }
-      })
+    try {
+      await authenticatedCoreProbe(connection.baseUrl, connection.token)
+      healthFails = 0
+    } catch {
+      healthFails += 1
+      if (healthFails >= HEALTH_FAILS_BEFORE_KILL && coreProcess) {
+        healthFails = 0
+        killCoreForRestart('authenticated core health-check failed') // exit uruchomi restart
+      }
+      return
+    } finally {
+      healthProbeRunning = false
+    }
+    // OAuth can rotate during any provider call.  Credential persistence is
+    // intentionally independent from process health: a vault write failure must
+    // not make a healthy sidecar enter a restart loop.
+    try {
+      await syncSecretsFromCore()
+    } catch (reason) {
+      console.error('[vault] OAuth token sync failed:', reason)
+    }
   }, HEALTH_INTERVAL_MS)
 }
 
@@ -370,7 +495,7 @@ function createWindow(): void {
     minHeight: 720,
     show: false,
     backgroundColor: '#0f1323',
-    title: 'Caelo',
+    title: 'Caelo 2.0',
     icon: windowIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -513,6 +638,78 @@ function createWindow(): void {
 
 ipcMain.handle('core:get', () => connection)
 
+// Wszystkie typowe żądania JSON interfejsu przechodzą przez proces główny.
+// To usuwa zawodną ścieżkę renderer -> localhost i zachowuje token poza kodem UI.
+ipcMain.handle('core:request', async (_event, request: CoreRequestInput): Promise<CoreRequestResult> => {
+  if (connection.status !== 'ready' || !connection.baseUrl || !connection.token) {
+    return { ok: false, status: 0, error: connection.error || 'Caelo Core is not ready' }
+  }
+  // Renderer nie ma dostępu do prywatnego endpointu nawet przez bezpieczny most.
+  if (request.path.startsWith('/internal/')) {
+    return { ok: false, status: 0, error: 'Internal core path is not available to the renderer' }
+  }
+  if (!secretVault) return { ok: false, status: 0, error: secretVaultError || 'Secret vault unavailable' }
+
+  try {
+    let forwarded = request
+    if (request.path === '/settings' && String(request.method || 'GET').toUpperCase() === 'PUT' && request.body) {
+      const body = JSON.parse(request.body) as Record<string, unknown>
+      const patch: Partial<Pick<
+        SecretSnapshot,
+        'xai_api_key' | 'google_api_key' | 'openai_api_key'
+      >> = {}
+      if (typeof body.api_key === 'string') {
+        patch.xai_api_key = body.api_key.trim()
+        delete body.api_key
+      }
+      if (typeof body.google_api_key === 'string') {
+        patch.google_api_key = body.google_api_key.trim()
+        delete body.google_api_key
+      }
+      if (typeof body.openai_api_key === 'string') {
+        patch.openai_api_key = body.openai_api_key.trim()
+        delete body.openai_api_key
+      }
+      if (Object.keys(patch).length) {
+        secretVault.patch(patch)
+        await pushSecretsToCore()
+      }
+      forwarded = { ...request, body: JSON.stringify(body) }
+    } else if (request.path === '/settings/api-key' &&
+        String(request.method || '').toUpperCase() === 'DELETE') {
+      secretVault.patch({ xai_api_key: '' })
+      await pushSecretsToCore()
+    } else if (request.path === '/settings/google-api-key' &&
+        String(request.method || '').toUpperCase() === 'DELETE') {
+      secretVault.patch({ google_api_key: '' })
+      await pushSecretsToCore()
+    } else if (request.path === '/settings/openai-api-key' &&
+        String(request.method || '').toUpperCase() === 'DELETE') {
+      secretVault.patch({ openai_api_key: '' })
+      await pushSecretsToCore()
+    }
+
+    const result = await performCoreRequest(connection.baseUrl, connection.token, forwarded)
+    if (result.ok && (request.path === '/auth/login' || request.path === '/auth/logout')) {
+      await syncSecretsFromCore()
+    }
+    return result
+  } catch (reason) {
+    return {
+      ok: false,
+      status: 0,
+      error: `Secure credential operation failed: ${String((reason as Error | undefined)?.message || reason)}`
+    }
+  }
+})
+
+// Biblioteka referencji jest celowo natywna i plikowa. Nie czeka na sidecar,
+// HTTP ani bazę danych, więc działa również podczas restartu Caelo Core.
+ipcMain.handle('reference-library:list', () => listNativeReferences())
+ipcMain.handle('reference-library:import', () => importNativeReferences(mainWindow))
+ipcMain.handle('reference-library:data-uri', (_event, id: string) => getNativeReferenceDataUri(id))
+ipcMain.handle('reference-library:delete', (_event, id: string) => deleteNativeReference(id))
+
 // Natywny wybór folderu (np. folder wyjściowy mediów w Settings).
 ipcMain.handle('dialog:selectFolder', async () => {
   const options = { properties: ['openDirectory'] as Array<'openDirectory'> }
@@ -597,7 +794,16 @@ app.whenReady().then(() => {
   // (obsługuje je Chromium). Na macOS zostawiamy domyślne menu systemowe, bo jego
   // brak łamie standardowe skróty (Cmd+Q, kopiuj/wklej w menu aplikacji).
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
-  startCore()
+  registerMediaProtocol(() => connection)
+  registerReferenceLibraryProtocol()
+  initializeSecretVault()
+  if (secretVault) {
+    startCore()
+  } else {
+    // Fail closed.  Starting the sidecar without its credential owner would
+    // reintroduce plaintext persistence or an endless handshake restart loop.
+    connection = { status: 'error', error: secretVaultError }
+  }
   createWindow()
   initAutoUpdate() // M15-8: sprawdź aktualizacje (no-op w dev / bez electron-updater)
 

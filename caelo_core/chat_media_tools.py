@@ -5,7 +5,7 @@ narzędzia image-gen (jak `web_search`). Dajemy więc WŁASNE function-tools do 
 function-calling czatu (`responses_client`), reużywając prymitywy generacji z
 `backend_media` (obraz) i `genjobs` (wideo) — zero nowej logiki generacji.
 
-- `generate_image`: SYNCHRONICZNIE (`api.generate_image` → artefakty M9). Wynik renderuje
+- `generate_image`: SYNCHRONICZNIE (provider obrazu → artefakty M9). Wynik renderuje
   się inline w czacie — handler emituje ramkę WS `artifact` per obraz.
 - `generate_video`: render trwa minuty → ZAKOLEJKOWANIE w `GenJobManager` (jak panel
   Video); narzędzie zwraca id zadania, user śledzi je w zakładce Video/Gallery.
@@ -127,10 +127,22 @@ def handle_media_tool(backend, name: str, args: dict,
         if name == "generate_image":
             n = max(1, min(4, int(args.get("n", 1) or 1)))
             ratio = str(args.get("aspect_ratio") or "auto")
-            urls = backend.api.generate_image(prompt, n, ratio, "1k", model=None)
-            results = backend.save_media_urls(
-                urls, prompt, "generate", ".png", project_id=project_id,
-                meta_extra={"gen_op": "text2img", "source": "chat"})
+            # Produkcyjny Backend zawsze ma neutralna warstwe providerow. Fallback
+            # zachowuje lekkie atrapy starszych self-checkow.
+            if hasattr(backend, "get_provider"):
+                from caelo_core.providers import ImageGenerationRequest
+
+                generated = backend.get_provider("xai").generate_image(
+                    ImageGenerationRequest(prompt=prompt, count=n, aspect_ratio=ratio)
+                )
+                results = backend.save_provider_outputs(
+                    generated.outputs, prompt, "generate", ".png", project_id=project_id,
+                    meta_extra={"gen_op": "text2img", "source": "chat", "provider": "xai"})
+            else:
+                urls = backend.api.generate_image(prompt, n, ratio, "1k", model=None)
+                results = backend.save_media_urls(
+                    urls, prompt, "generate", ".png", project_id=project_id,
+                    meta_extra={"gen_op": "text2img", "source": "chat", "provider": "xai"})
             ids = [r["artifact_id"] for r in results if r.get("artifact_id")]
             for aid in ids:
                 emit_artifact({"id": aid, "kind": "image", "mime": "image/png"})
@@ -142,7 +154,7 @@ def handle_media_tool(backend, name: str, args: dict,
         if name == "generate_video":
             duration = max(1, min(12, int(args.get("duration", 6) or 6)))
             ratio = str(args.get("aspect_ratio") or "Original")
-            params = {"prompt": prompt, "duration": duration,
+            params = {"provider": "xai", "prompt": prompt, "duration": duration,
                       "resolution": "480p", "aspect_ratio": ratio,
                       # Czat uzywa BAZOWEGO modelu (wiecej mozliwosci niz 1.5-preview).
                       "model": getattr(config, "CHAT_VIDEO_MODEL", "grok-imagine-video")}

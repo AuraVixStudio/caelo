@@ -44,12 +44,13 @@ describe('modelSupportsEffort', () => {
   })
 })
 
-// `xhigh` doszedł z grok-4.6; przeciwna polityka niż wyżej — pokazujemy tylko tam,
+// `xhigh` jest udokumentowany dla 4.6 i multi-agent; przeciwna polityka niż wyżej — pokazujemy tylko tam,
 // gdzie wiemy, że działa (inaczej wybór cicho degraduje się do domyślnego).
 describe('modelSupportsXhighEffort', () => {
-  it('tylko rodzina 4.6 → true', () => {
+  it('rodzina 4.6 i multi-agent → true', () => {
     expect(modelSupportsXhighEffort('grok-4.6')).toBe(true)
     expect(modelSupportsXhighEffort('  GROK-4.6 ')).toBe(true)
+    expect(modelSupportsXhighEffort('grok-4.20-multi-agent-0309')).toBe(true)
   })
 
   it('starsze/nieznane modele → false', () => {
@@ -60,8 +61,9 @@ describe('modelSupportsXhighEffort', () => {
 })
 
 describe('effortOptionsFor', () => {
-  it('pokazuje xHigh tylko dla 4.6', () => {
+  it('pokazuje xHigh tylko dla modeli, które je dokumentują', () => {
     expect(effortOptionsFor('grok-4.6').map((o) => o.id)).toContain('xhigh')
+    expect(effortOptionsFor('grok-4.20-multi-agent-0309').map((o) => o.id)).toContain('xhigh')
     expect(effortOptionsFor('grok-4.5').map((o) => o.id)).not.toContain('xhigh')
     expect(effortOptionsFor(undefined).map((o) => o.id)).not.toContain('xhigh')
   })

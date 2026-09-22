@@ -3,6 +3,7 @@
 // zarządza frontend i wysyła pełną historię wiadomości do WS /chat/stream.
 
 import type { ChatMessage } from './api'
+import type { ChatProvider } from './providerIds'
 
 export interface Conversation {
   id: string
@@ -11,6 +12,9 @@ export interface Conversation {
   /** M22: projekt czatu, do którego należy rozmowa. Brak/undefined = bez projektu
    *  (widoczna pod „All projects"). Stare rozmowy (przed M22) nie mają tego pola. */
   project_id?: string | null
+  /** Caelo 2.1: wybór silnika jest częścią rozmowy, nie globalnym przełącznikiem. */
+  provider?: ChatProvider
+  model?: string
   messages: ChatMessage[]
 }
 
@@ -73,8 +77,15 @@ function uid(): string {
   return 'c_' + Math.floor(performance.now()).toString(36) + Math.floor(performance.now() * 7).toString(36)
 }
 
-export function newConversation(projectId?: string | null): Conversation {
-  return { id: uid(), title: 'New chat', created: Date.now(), project_id: projectId ?? null, messages: [] }
+export function newConversation(
+  projectId?: string | null,
+  provider: ChatProvider = 'xai',
+  model?: string
+): Conversation {
+  return {
+    id: uid(), title: 'New chat', created: Date.now(), project_id: projectId ?? null,
+    provider, model, messages: []
+  }
 }
 
 /** M22: rozmowy należące do projektu czatu. `projectId === null` → „All projects"

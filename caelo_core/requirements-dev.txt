@@ -2,3 +2,6 @@
 # P3-13: pytest jako runner self-checków (discovery + jedna komenda + wpięcie w CI).
 #   pip install -r caelo_core/requirements-dev.txt
 pytest>=8.0
+# `starlette.testclient` (starlette 1.2.x) wymaga pakietu `httpx2`, NIE `httpx` —
+# bez niego testy tras nie zbieraja sie wcale (RuntimeError przy imporcie).
+httpx2>=2.12

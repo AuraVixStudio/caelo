@@ -173,6 +173,7 @@ class SubAgent:
                 # M19-B9: effort roli ma pierwszeństwo; brak → globalny effort przebiegu.
                 reasoning_effort=(self.role.get("reasoning_effort")
                                   or self.team.reasoning_effort or None),
+                provider_id_provider=self.team.provider_id_provider,
             )
             # Mutująca rola pracuje w worktree → auto-akceptuj edycje (przegląd przy
             # scalaniu, B4 — nie pytaj per-edit). run_command nadal pyta (routowane do
@@ -390,6 +391,7 @@ class TeamManager:
                  emit: Callable[[dict], None], request_approval: Callable[..., str],
                  orchestrator_stop: Callable[[], bool],
                  merges_provider: Callable[[], MergeStore],
+                 provider_id_provider: Optional[Callable[[], str]] = None,
                  on_report: Optional[Callable[[dict], None]] = None) -> None:
         self.registry = registry
         self.gate = gate
@@ -403,6 +405,7 @@ class TeamManager:
         self.orchestrator_stop = orchestrator_stop
         self.merges_provider = merges_provider
         self.on_report = on_report
+        self.provider_id_provider = provider_id_provider or (lambda: "xai")
 
         self.limits = registry.limits()
         # M19-B9: globalny reasoning_effort tego przebiegu (fallback, gdy rola nie ma

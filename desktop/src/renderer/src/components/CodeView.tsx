@@ -23,7 +23,8 @@ import {
   setPermissionRules,
   type Conn
 } from '../lib/api'
-import { saveSettings, useModels } from '../lib/serverState'
+import { saveSettings, useModels, useSettings } from '../lib/serverState'
+import { agentModelIds, defaultAgentModel, type AgentProvider } from '../lib/agentModels'
 import { useWorkspace } from '../lib/useWorkspace'
 import { cn } from '../lib/cn'
 import { FileTree } from './code/FileTree'
@@ -55,7 +56,9 @@ export function CodeView({ conn }: { conn: Conn }) {
   const [showGit, setShowGit] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const [model, setModel] = useState<string>('grok-build-0.1')
+  const [provider, setProvider] = useState<AgentProvider>('xai')
   const { models: modelsResp } = useModels(conn) // P2-2: współdzielony cache /models
+  const { settings } = useSettings(conn)
 
   // P2-3: katalog roboczy, zakładki edytora i Git wydzielone do useWorkspace.
   const ws = useWorkspace(conn)
@@ -87,9 +90,13 @@ export function CodeView({ conn }: { conn: Conn }) {
   // P2-2: modele ze współdzielonego cache.
   useEffect(() => {
     if (!modelsResp) return
-    setModels(modelsResp.chat)
-    setModel(modelsResp.default_code || 'grok-build-0.1')
-  }, [modelsResp])
+    const selectedProvider = settings?.code_provider || 'xai'
+    const available = agentModelIds(modelsResp, selectedProvider)
+    const selectedModel = defaultAgentModel(modelsResp, selectedProvider, settings?.code_model)
+    setProvider(selectedProvider)
+    setModels(available)
+    setModel(selectedModel || 'grok-build-0.1')
+  }, [modelsResp, settings?.code_model, settings?.code_provider])
 
   // Skróty: Ctrl+S zapis, Ctrl+` terminal, Ctrl+Shift+G panel Git.
   useEffect(() => {
@@ -119,6 +126,17 @@ export function CodeView({ conn }: { conn: Conn }) {
   function onModelChange(m: string): void {
     setModel(m)
     void saveSettings(conn, { code_model: m }).catch(() => undefined)
+  }
+
+  function onProviderChange(next: AgentProvider): void {
+    if (!modelsResp) return
+    const available = agentModelIds(modelsResp, next)
+    const nextModel = defaultAgentModel(modelsResp, next)
+    setProvider(next)
+    setModels(available)
+    if (nextModel) setModel(nextModel)
+    void saveSettings(conn, { code_provider: next, ...(nextModel ? { code_model: nextModel } : {}) })
+      .catch(() => undefined)
   }
 
   // M13-F4: otwórz CAELO.md (reguły projektu) w edytorze; utwórz z szablonu, gdy brak.
@@ -333,7 +351,9 @@ export function CodeView({ conn }: { conn: Conn }) {
             conn={conn}
             workspacePath={ws.workspacePath}
             model={model}
+            provider={provider}
             models={models}
+            onProviderChange={onProviderChange}
             onModelChange={onModelChange}
             onFilesChanged={ws.onFilesChanged}
             onOpenWorkspace={(p) => void ws.selectWorkspace(p)}

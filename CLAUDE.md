@@ -2,6 +2,97 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+# ⚠️ READ FIRST — this repo is Caelo 2.0, not Caelo 1.x
+
+This repository is a **clone of `grok_desktop_app` (Caelo 0.1.5)** taken as the foundation for
+**Caelo 2.0**, whose goal is merging Caelo with `gemini-desktop-studio` into **one multi-provider
+app (xAI + Google)**. Everything below this banner still describes the code as it stands, and is
+accurate — but the **target** architecture is different, and the decisions in this section
+**override** anything below them when the two disagree.
+
+**Plan (source of truth for the integration):** [`docs/plans/PLAN_INTEGRACJI.md`](docs/plans/PLAN_INTEGRACJI.md)
+
+**Git:** the remote `caelo-1x` points at the local 1.x repo (for cherry-picking fixes). There is
+**no `origin`** and **no upstream tracking** on purpose — so nothing here can be pushed into the 1.x
+repo or a public GitHub repo by accident. Caelo 2.0 is intended to be public, but do not add an
+`origin` until the user explicitly provides or selects its repository URL.
+
+## The central idea
+
+> **Caelo is the host. `gemini-desktop-studio` is the donor of the media architecture.
+> xAI loses its privileged path.**
+
+The last part is the one that gets missed. Today `api_manager.APIManager` is called directly from
+`backend_media.py`, and `responses_client.py` says in its own docstring that it is *„nie
+multi-provider"*. If Google is simply bolted on next to that, we get two parallel code paths inside
+one process — the exact problem the merge exists to remove. **So xAI moves behind the new provider
+abstraction too. Refactoring xAI is part of the work, not a side effect.**
+
+## Architecture decisions (ADR-1…8)
+
+Full context and consequences in the plan; this is the binding summary.
+
+| # | Decision | Consequence for you |
+|---|---|---|
+| **ADR-1** | **Google via raw REST (`requests`), not an SDK.** | Every xAI call in this repo is already hand-rolled `requests` — no SDK anywhere. Keep it that way. `@google/genai` is **documentation of the wire shape only**. GCP/Vertex AI through ADC is required; `google-auth` is allowed only for acquiring/refreshing ADC credentials, while API calls remain raw `requests`. **Phase-0 live result:** Omni works through Agent Platform `v1beta1` global Interactions with `delivery: inline` (URI requires `gcs_uri`) — but on Vertex the model id is `gemini-omni-1.1-flash-preview`, NOT the bare `gemini-omni-1.1-flash` the AI Studio catalog uses (LIVE 2026-09-01: bare id → 400 `Unsupported model interaction`). Mapped on the wire by `VERTEX_OMNI_IDS`, like `VERTEX_VEO_IDS` — the catalog/pricing id stays bare. Omni also needs a **Vertex quota increase** for that preview base model; with the default 0 quota every submit is 429; Veo uses regional Vertex `v1`, `predictLongRunning` + `fetchPredictOperation`, and the GA `veo-3.1-fast-generate-001` model. |
+| **ADR-2** | **The Gemini queue model wins; `caelo_core/genjobs.py` is replaced, not extended.** | Port the state machine from `JobQueue.ts` + `JobRecovery.ts` + `RetryPolicy.ts`. xAI becomes a handler under it, exactly like Google. |
+| **ADR-3** | **Gemini's normalized media schema wins; Caelo's history/FTS5/embeddings stay.** | Add `generations` / `generation_inputs` / `generation_outputs` / `jobs` / … to `caelo_history.db`. Do **not** touch `history_events`, `history_fts`, `event_embeddings`. `artifacts` stays as the gallery index. |
+| **ADR-4** | **Model registry + capability guard live in Python and are the only source of truth.** | The renderer holds **no** model lists. It reads `/providers` + `/models` at runtime; TS types are generated from the Python definitions and checked in CI. |
+| **ADR-5** | **Electron `safeStorage` is the secret vault; the sidecar receives secrets in memory.** | No more plaintext keys in `caelo_settings.json` / `caelo_auth.json`. Pass them over the authenticated handshake channel — **never** via environment variables (they leak to the process list). |
+| **ADR-6** | **Gemini's React pages are NOT ported — only their logic.** | Caelo's UI kit (Tailwind 4, `components/ui/*`) is the target. Zustand and TanStack Query do **not** enter. Exceptions: Asset Inspector and Diagnostics are new screens, built from scratch in Caelo's kit. |
+| **ADR-7** | **No Google code in the repo-root modules.** | Nothing Google-related may touch `config.py`, `api_manager.py`, `oauth_manager.py`, `chats_manager.py`, `history_manager.py` (see "The single most important structural fact" below). Google lives only in `caelo_core/providers/google/`. The xAI provider is an **adapter wrapping** `APIManager`, not a rewrite of it. |
+| **ADR-8** | **Neutral tool-calling format at the agent boundary.** | `agent/session.py` must see only the neutral format; each provider supplies a two-way adapter. xAI is OpenAI-shaped; Google uses `functionCall`/`functionResponse` parts. **Phase-0 live result (`gemini-3.5-flash`):** preserve native `functionCall.id` and copy it to `functionResponse.id`; synthesize an id only for older responses that omit it. Preserve the full model part with `thoughtSignature`, keep all parallel calls before their responses, and assemble streamed `partialArgs` by JSONPath. |
+
+## Product decisions (O-1…O-5, resolved 2026-08-28)
+
+- **Publication:** Caelo 2.0 remains a public Apache-2.0 project. The donor's internal detailed
+  specification is not part of the public release scope.
+- **Privacy wording:** rewrite the xAI-only outbound claim. The UI and documentation must state
+  that data goes to the provider selected by the user: xAI or Google. Local-first, bring-your-own-
+  credentials, and zero-telemetry promises remain.
+- **Release split:** Caelo 2.0 delivers the xAI + Google media studio. Google chat and the Google
+  coding-agent engine follow in Caelo 2.1.
+- **Source repositories:** `grok_desktop_app` and `gemini-desktop-studio` remain separate projects.
+  Do not archive, delete, or modify them as part of Caelo 2.0 work.
+- **Google auth:** GCP/Vertex AI through ADC is required; AI Studio API key is optional. Do not
+  port service-account JSON file support into the Caelo 2.0 scope.
+
+## Non-negotiable queue rules (ADR-2)
+
+Caelo 1.x gets this wrong and it costs real money: `GenJobManager._reap_stale()` marks jobs
+interrupted by a restart as `failed("interrupted")`, and no remote handle is persisted — so a Veo
+job **the user already paid for** is simply abandoned. The ported rules:
+
+- The job is persisted in the DB **before** the request goes out.
+- The remote handle is persisted **the moment it arrives**.
+- A restart **never** re-sends a request whose remote state is unknown → `UNKNOWN_REMOTE_STATE`,
+  waiting for a deliberate user retry.
+- `retry` with an existing handle **resumes polling** — it does not pay twice.
+- Cancel stops local polling but does not pretend the remote generation didn't happen.
+- A row still locked at startup means a process that died → `RECOVERY_PENDING`.
+
+## Safety gate on the coding agent (ADR-8)
+
+The agent has file and shell access. **Google as the agent engine stays behind a flag until the
+equivalence test suite passes on both providers** — same session, same tool sequence, covering the
+approval gate, loop guard, checkpoints, synthetic results for interrupted tool calls, and the
+scrubbed env. This is not a place for "mostly works".
+
+## What changes outside the code
+
+Two accepted consequences that must be reflected during implementation (plan §8):
+
+- **The privacy promise no longer holds as written.** README says literally *„talks only to
+  `api.x.ai`"* with a diagram captioned „← the only outbound destination". After Google is added
+  that is false and must be **rewritten, not qualified**. The local-first / BYO-key / zero-telemetry
+  claims remain true.
+- **Licensing.** Caelo is Apache-2.0 and public; `gemini-desktop-studio` is `UNLICENSED` / `private`.
+  Port concepts and reimplement them in Caelo 2.0; do not change the donor repository.
+
+---
+
 ## What this is
 
 Desktop app for **Grok (xAI)** in the style of Claude Code / Codex: chat, image/video
@@ -32,14 +123,15 @@ the PyInstaller build, and (via `config.py`) every data-file path. New backend c
 Electron main (desktop/src/main/index.ts)
   • spawns the sidecar (dev: `python -m caelo_core`; packaged: resources/caelo-core/caelo-core.exe)
   • generates a session token → CAELO_CORE_TOKEN env; reads handshake line from sidecar stdout
+  • owns `secrets.dat` via safeStorage; a separate secret-channel token goes through sidecar stdin
   • /health monitor every 10s, auto-restart on crash (≤5 tries); kills sidecar on quit
         │  preload (contextBridge) exposes window.caelo  →  Renderer (React 19 + TS)
         ▼  HTTP REST + WebSocket — 127.0.0.1 only, bearer/query token
 Python sidecar "caelo-core" (FastAPI/uvicorn, caelo_core/)
   • server.py mounts routers; state.py Backend wraps reused legacy managers + keys/settings
   • agent/ = coding-agent engine (workspace sandbox, permission gate, tools, llm, session loop)
-        │  Bearer token (OAuth access token → API key → XAI_API_KEY) — only to api.x.ai
-        ▼  xAI / Grok API
+        │  Credential selected per request (xAI or Google), held in sidecar memory only
+        ▼  Selected xAI / Grok or Google Gemini / Vertex API
 ```
 
 **Handshake:** the sidecar binds a free port on `127.0.0.1` and prints exactly one line to
@@ -48,10 +140,10 @@ stdout stays clean. Electron parses this; the token it generated (passed via `CA
 is authoritative. See [`caelo_core/__main__.py`](caelo_core/__main__.py) and `index.ts`.
 
 **Auth precedence** (`Backend.get_api_key`/`_resolve_auth` in [`caelo_core/state.py`](caelo_core/state.py)):
-the default (`auth_source="auto"`) is OAuth access token → saved `api_key` from settings → `XAI_API_KEY`
+the default (`auth_source="auto"`) is OAuth access token → API key injected from `safeStorage` → `XAI_API_KEY`
 from `.env`. A **hard source switch** (`auth_source` in `caelo_settings.json`, set via Settings →
 "Model source": auto/oauth/api_key) overrides this: `oauth` uses **only** the account token, `api_key`
-uses **only** a key (settings → `.env`) — neither silently falls back to the other, so picking "API key"
+uses **only** a key (vault → `.env`) — neither silently falls back to the other, so picking "API key"
 with no key fails clearly instead of quietly using OAuth (the live A3 gap). `active_auth_source()` reports
 the source actually in effect (`oauth|api_key|env|none`) — surfaced in `/auth/status` (+`has_stored_key`/
 `has_env_key`); the renderer footer shows "Not signed in" when the sidecar is up but no source is active,
@@ -388,6 +480,44 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   bwrap/`web_fetch`. The **B0 `cli-chat-proxy` spike is NOT started** (separate experiment in
   `PLAN_M19_PARYTET_GROK_CLI.md` §7). Don't regress P0-1…P0-8 / M5–M6 / M13 / M14.
 
+**Media-path invariants found LIVE on 2026-09-01 (2.0.8) — don't regress these:**
+- **Google image responses carry DRAFT images.** Nano Banana with `thinkingConfig` returns interim
+  previews flagged `thought: true` in the same response, and they are **always 1K regardless of
+  `imageConfig.imageSize`**. `extract_inline_media` skips `thought` parts and `generate_image` takes
+  the **LAST** image; taking `found[0]` silently returned the draft, so every Google image came out
+  1K while the user paid the 2K/4K rate. (`chat.py`/`tools.py` already filtered `thought` for text —
+  the image path was the only place that didn't.)
+- **Gemini Omni's model id differs per surface.** Vertex Interactions needs
+  `gemini-omni-1.1-flash-preview`; the bare `gemini-omni-1.1-flash` (AI Studio's id, and the one in
+  the catalog) returns `400 Unsupported model interaction`. Mapped on the wire by `VERTEX_OMNI_IDS`
+  exactly like `VERTEX_VEO_IDS`, so the catalog/pricing/artifact id stays single. Omni additionally
+  needs a **Vertex quota increase** — the default quota for that preview base model is 0 and every
+  submit returns 429.
+- **`ArtifactMedia` must load eagerly and retry.** The `caelo-media://` protocol replaced the
+  original blob fetch, and with `loading="lazy"` the request for a freshly added card could never
+  fire — the thumbnail appeared only after an app restart. No `loading="lazy"` on thumbnails, and
+  `onError` retries with a cache-busting `?retry=N` (the protocol returns 503 while the sidecar
+  restarts, and without a retry the `<img>` stayed blank forever).
+- **The send-to bus must re-encode oversized images, not 413 them.** `/artifacts/{id}/input-block`
+  builds a base64 data-URI and validates it against `validation.MAX_IMAGE_URI` (12 M chars ≈ 9 MB
+  raw). Google 2K/4K PNGs are 9–18 MB, so every "Send to…" (and Gallery → Variations, same route)
+  on a freshly generated image returned 413 and the menu showed the generic "Send failed.".
+  `storage/images.fit_image_to_uri_budget` now re-encodes to JPEG (quality ladder, then downscale —
+  the server-side mirror of `lib/imageCompress.ts`) so full resolution usually survives; the file on
+  disk is never touched, and the payload's `mime` reports the encoding actually in `data_uri`.
+- **`listRecentArtifacts(force=true)` must issue a NEW request.** Joining an in-flight one answered
+  with a list fetched before the job finished and then stamped it fresh for 15 s. Responses are
+  sequenced so a late one can't overwrite a newer one.
+- **The model catalog is a verified snapshot, not a guess.** `caelo_core/tests/test_model_catalog.py`
+  pins the per-provider id lists checked on 2026-09-01 against the provider docs and the live Vertex
+  publisher listing. Retired xAI slugs (`grok-4`/`grok-4-0709`, `grok-3`, `grok-code-fast-1`, the
+  `*-fast-*` families, `grok-imagine-image-pro`) still resolve but **silently redirect to `grok-4.3`
+  and bill at its rates**, so they must not return to the menu. Approval-gated OpenAI models
+  (`gpt-5.6-cyber`, `gpt-daybreak-*`) are deliberately absent.
+- **`chat_provider` exists because a model id doesn't say whose it is.** The default chat model can
+  come from any provider, so `chat_model` travels with `chat_provider` (mirroring `code_provider`);
+  ChatView reads both when starting a new conversation.
+
 ## Commands
 
 All paths below are relative to the repo root. The frontend npm scripts run from `desktop/`.
@@ -485,10 +615,12 @@ run external copy would use its own `config.py`, hence its own data dir.)
 
 - `caelo_config.json` — **owned exclusively by `HistoryManager`**, rewritten wholesale (history /
   chat_history / save_path only). Never write anything else here — it wipes the data.
-- `caelo_settings.json` — API key (fallback), `auth_source` (auto/oauth/api_key — the hard source switch),
+- `secrets.dat` — Electron `safeStorage` envelope for xAI/Google keys and xAI OAuth tokens. Owned
+  exclusively by the main process; the sidecar receives a versioned snapshot in memory.
+- `caelo_settings.json` — non-secret `auth_source` (auto/oauth/api_key — the hard source switch),
   chat/code model, system prompt, temperature, `recent_workspaces`, `current_project_id`,
   `chat_search_mode`/`chat_search_sources` (M10 live-search defaults).
-- `caelo_auth.json` — OAuth tokens (gitignored; never commit).
+- `caelo_auth.json` — legacy only; migrated into `secrets.dat` and removed on first secure start.
 - `caelo_chats.json` — legacy conversation store. **No longer written by the sidecar** (P2-8: `ChatStore`
   removed from `Backend`); chat conversations now live in the renderer's `localStorage` (`useConversations`).
   `chats_manager.py` stays in the root (reusable) but is not instantiated.

@@ -18,9 +18,16 @@ if (-not (Test-Path $venvPy)) {
     & $venvPy -m pip install -r (Join-Path $root 'caelo_core\requirements.txt')
 }
 
-# Narzędzia budowania (PyInstaller) + opcjonalny pywinpty dla terminala.
-& $venvPy -m pip install --upgrade pyinstaller
-& $venvPy -m pip install "pywinpty>=2.0"
+# Narzędzia budowania instaluj tylko wtedy, gdy naprawdę ich brakuje. Dzięki temu
+# powtarzalny build działa także offline i nie czeka na nieosiągalny PyPI.
+& $venvPy -c "import PyInstaller" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    & $venvPy -m pip install "pyinstaller>=6.0"
+}
+& $venvPy -c "import winpty" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    & $venvPy -m pip install "pywinpty>=2.0"
+}
 
 Write-Host "Buduję sidecar (PyInstaller onedir)…" -ForegroundColor Cyan
 Push-Location $root

@@ -26,6 +26,7 @@ import uvicorn
 from caelo_core.server import APP_VERSION, create_app
 
 HANDSHAKE_PREFIX = "__CAELO_CORE_READY__"
+SECRET_CHANNEL_PREFIX = "__CAELO_CORE_SECRET_CHANNEL__"
 
 
 def _free_port() -> int:
@@ -47,6 +48,13 @@ def main() -> None:
     )
     token = os.environ.get("CAELO_CORE_TOKEN") or secrets.token_urlsafe(32)
     port = int(os.environ.get("CAELO_CORE_PORT") or _free_port())
+    secret_channel_token = ""
+    # Electron przekazuje token kanału sekretów przez stdin, aby nie pojawił się
+    # w argumentach procesu ani środowisku. Flaga w env nie jest sekretem.
+    if os.environ.get("CAELO_CORE_SECRET_STDIN") == "1":
+        line = sys.stdin.readline().strip()
+        if line.startswith(SECRET_CHANNEL_PREFIX):
+            secret_channel_token = line[len(SECRET_CHANNEL_PREFIX):].strip()
 
     def announce() -> None:
         line = HANDSHAKE_PREFIX + " " + json.dumps(
@@ -54,7 +62,12 @@ def main() -> None:
         )
         print(line, flush=True)
 
-    app = create_app(token=token, port=port, on_startup=announce)
+    app = create_app(
+        token=token,
+        port=port,
+        secret_channel_token=secret_channel_token,
+        on_startup=announce,
+    )
 
     # host wymuszony na 127.0.0.1 — backend nie może być osiągalny z sieci.
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

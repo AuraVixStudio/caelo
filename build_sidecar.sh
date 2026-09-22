@@ -25,9 +25,12 @@ if [ ! -x "$PY" ] && [ ! -f "$PY" ]; then
   "$PY" -m pip install -r "$ROOT/caelo_core/requirements.txt"
 fi
 
-# Narzędzie budowania (PyInstaller). pywinpty NIE jest potrzebne poza Windows —
-# terminal używa stdlib `pty` (M15-5), a spec pomija winpty (collect_all w try/except).
-"$PY" -m pip install --upgrade pyinstaller
+# Narzędzie budowania instaluj wyłącznie, gdy brakuje go w venv. Powtarzalny build
+# nie powinien wymagać sieci tylko po to, by sprawdzić dostępność nowszej wersji.
+# pywinpty NIE jest potrzebne poza Windows — terminal używa stdlib `pty` (M15-5).
+if ! "$PY" -c 'import PyInstaller' >/dev/null 2>&1; then
+  "$PY" -m pip install 'pyinstaller>=6.0'
+fi
 
 echo "Buduję sidecar (PyInstaller onedir)…"
 cd "$ROOT"

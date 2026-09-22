@@ -33,6 +33,12 @@ describe('newConversation', () => {
     expect(newConversation('p1').project_id).toBe('p1')
     expect(newConversation().project_id).toBe(null)
   })
+
+  it('stores the selected provider and model per conversation', () => {
+    const conversation = newConversation('p1', 'google', 'gemini-3.7-flash')
+    expect(conversation.provider).toBe('google')
+    expect(conversation.model).toBe('gemini-3.7-flash')
+  })
 })
 
 describe('conversationsForProject (M22)', () => {

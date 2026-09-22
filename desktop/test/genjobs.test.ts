@@ -5,6 +5,8 @@ import {
   formatCost,
   isActive,
   isTerminal,
+  isActiveJob,
+  jobStateLabel,
   jobPrompt,
   mergeJob,
   mergeJobs,
@@ -27,6 +29,15 @@ function job(over: Partial<GenJob>): GenJob {
     project_id: null,
     created_at: 0,
     updated_at: 0,
+    state: 'QUEUED',
+    generation_id: 'g1',
+    provider: 'xai',
+    remote_operation_id: null,
+    remote_file_uri: null,
+    remote_metadata: {},
+    attempt: 0,
+    max_attempts: 3,
+    progress: null,
     ...over
   }
 }
@@ -59,6 +70,13 @@ describe('status helpers', () => {
     expect(opLabel('text2img')).toBe('Generate')
     expect(opLabel('variation')).toBe('Variations')
     expect(opLabel('img2video')).toBe('Image → video')
+  })
+
+  it('surfaces the uncertain paid-request state as terminal and retriable by the UI', () => {
+    const uncertain = job({ status: 'unknown_remote_state', state: 'UNKNOWN_REMOTE_STATE' })
+    expect(isTerminal(uncertain.status)).toBe(true)
+    expect(isActiveJob(uncertain)).toBe(false)
+    expect(jobStateLabel(uncertain)).toBe('Needs decision')
   })
 })
 

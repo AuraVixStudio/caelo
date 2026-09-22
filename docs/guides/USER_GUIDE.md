@@ -1,10 +1,10 @@
 # Caelo — User Guide
 
-Caelo is a desktop client for **xAI's Grok** models: chat with live web/X search, image &
-video generation, voice (TTS/STT/realtime), and an **agentic coding module** with local file
+Caelo is a desktop client for **xAI Grok, Google Gemini / Vertex AI and OpenAI GPT** models: chat,
+image & video generation, voice (TTS/STT/realtime), and an **agentic coding module** with local file
 access — in the spirit of Claude Code / Codex. It runs as an **Electron** app talking to a
-local **Python sidecar** that holds your credentials; **your API key never reaches the UI and
-never leaves your machine**, and there is **no telemetry**.
+local **Python sidecar**. Saved keys and xAI OAuth tokens are encrypted by the operating system,
+decrypted only into sidecar memory, never returned after saving, and there is **no telemetry**.
 
 > New here? Read **[Getting Started](#getting-started)** first, then jump to the module you need.
 > Developers / integrators: see **[API.md](API.md)** for the REST/WebSocket reference.
@@ -27,18 +27,20 @@ never leaves your machine**, and there is **no telemetry**.
 1. **Install / run.** Launch the installed app, or run from source (`cd desktop; npm run dev`).
    On start, the app spawns the local sidecar and shows a connection status in the lower-left
    rail: **Starting backend… → Connected**.
-2. **Authenticate (one of two ways).** Open **Settings**:
-   - **Sign in with xAI** (OAuth) — recommended; no key to paste, or
-   - **API key** — paste an `xai-…` key from the xAI console (stored locally; never shown back).
-   - You can also set `XAI_API_KEY` in a local `.env` as a fallback.
-   - Precedence used by the backend: **OAuth token → saved API key → `XAI_API_KEY`**.
+2. **Configure at least one provider.** Open **Settings**:
+   - **xAI:** sign in with xAI OAuth or paste an `xai-…` API key.
+   - **Google:** configure Google Cloud ADC/project or paste a Google AI Studio key.
+   - **OpenAI:** paste an OpenAI API key. A ChatGPT subscription/login is separate and cannot
+     authenticate or pay for OpenAI API requests.
+   - Development fallbacks are `XAI_API_KEY` and `OPENAI_API_KEY`; saved keys are stored locally
+     and never shown back by the interface.
 3. **(Optional) Create a Project.** Use the project switcher (top bar) to scope chats, media,
    and history together. See [Projects](#core-concepts).
 4. **Start using a module** from the left rail (Chat, Code, Image, …).
 
-> **Costs:** Caelo is *bring-your-own-key* — every request bills your xAI account. Modules that
+> **Costs:** Caelo is *bring-your-own-credentials* — every request bills the selected provider account. Modules that
 > can spend money (Image, Video, Voice) show an **estimate** before you run. Estimates are
-> approximate; the authoritative cost is on your xAI dashboard.
+> approximate; the authoritative cost is on the corresponding provider dashboard.
 
 ---
 
@@ -78,20 +80,26 @@ inline card. You can **Allow once** or **Always allow** a specific normalized co
 allowlist is saved locally. See [Code](#code-agent).
 
 **Privacy & security.** The backend binds to `127.0.0.1` only and is protected by a per-session
-token. Your API key / OAuth token stay in the sidecar and are **never returned to the UI**.
-No analytics or telemetry are collected. See the repo `SECURITY.md`.
+token. Saved API keys and xAI OAuth tokens live in the operating-system credential vault and are
+injected into the sidecar in memory. Prompts and attachments go directly to the selected xAI or
+Google endpoint, or to OpenAI when OpenAI is selected. OpenAI Chat and Agent calls use
+`store: false`; provider-side abuse-monitoring retention may still apply. No analytics or telemetry
+are collected. See the repo `SECURITY.md`.
 
 ---
 
 ## Chat
 
-General conversation with Grok, backed by the **Responses API**.
+Streaming conversation with **xAI Grok**, **Google Gemini** or **OpenAI GPT**. Provider and model are
+remembered separately for every conversation.
 
 **What you can do**
-- **Live search.** Toggle search mode **Auto / On / Off**. When active, Grok can search the
-  **web** and **X** and the reply shows **citations** (sources) you can open.
-- **Vision.** Attach images (grok-4 family) and ask about them.
-- **Document Q&A.** Attach a file, or use **project knowledge** ("Attach all") to ground answers
+- **Live search.** Toggle search mode **Auto / On / Off**. xAI can search the **web** and **X**;
+  OpenAI can use web search. Replies can include clickable citations. X-specific controls are not
+  offered to Google or OpenAI.
+- **Vision.** Attach images and ask about them with a compatible Grok, Gemini or GPT model.
+- **Document Q&A.** Gemini and OpenAI accept compatible document inputs; xAI retains its attachment
+  support. Attach a file, or use **project knowledge** ("Attach all") to ground answers
   in your project's documents (stored locally — see [Extensions ▸ knowledge](#code-agent) and the
   knowledge popover in the composer).
 - **Slash commands.** Type `/` in the composer for prompt templates (e.g. `/plan`, `/review`,
@@ -103,14 +111,20 @@ General conversation with Grok, backed by the **Responses API**.
 
 **Tips**
 - Conversations are stored locally (in the renderer), scoped to the active project.
-- Pick the chat model and default search mode in **Settings**.
+- Pick the provider and model in the Chat toolbar. The selection is stored with the conversation.
 
 ---
 
 ## Code (agent)
 
-A coding workspace with a Grok-powered agent that can read and modify files in a folder you
-choose — sandboxed to that folder.
+A coding workspace with an xAI Grok-, Google Gemini- or OpenAI GPT-powered agent that can read and modify
+files in a folder you choose — sandboxed to that folder.
+
+**Provider and model.** Use the two selectors in the Agent header to choose **xAI**,
+**Google Gemini / Vertex AI** or **OpenAI** and a compatible function-calling model. The selection
+is saved, and reopening a saved agent session restores its provider and model. Google and OpenAI
+use the credentials configured in Settings. Filesystem, command, MCP, plan, checkpoint and
+subagent safeguards are identical for all three providers.
 
 **Layout**
 - **File tree + editor** (CodeMirror) — browse and edit files.
@@ -157,12 +171,17 @@ Generate and edit images via a unified job queue (M11).
 - **Text → image** — prompt only.
 - **Edit** — prompt + reference image(s).
 - **Variation** — produce variations of a reference.
-- Up to **3 reference images** can be staged.
+- The reference limit follows the selected model: xAI accepts up to 3, while Google
+  and OpenAI models expose their own larger model-aware limits.
 
-**Models.** `grok-imagine-image` (standard, the default), **`grok-imagine-image-2.0`** (newer
-generation), and `grok-imagine-image-quality`. They differ in price per image, so the model stays
-your choice — the estimate updates with it. Picking **2.0** reveals a **Quality** control
-(low / medium); no other model accepts it, so the control is hidden for them.
+**Reference library.** The reference library keeps imported images so you can reuse them without
+picking them from disk again. A tile can be previewed or **deleted** — deleting asks for
+confirmation first, because it removes the file from disk for good.
+
+**Models.** The provider/model picker includes xAI Grok Imagine, Google Nano Banana and
+OpenAI **GPT Image 2**. Controls follow the selected model. GPT Image 2 exposes exact output
+sizes, quality (`low` / `medium` / `high` / `auto`), PNG/JPEG/WebP, background mode and
+moderation (`low` is the least restrictive option; OpenAI does not provide an OFF setting).
 
 **How it works.** Submitting creates a **job** in the queue (queued → running → done/failed).
 A **cost estimate** is shown before you run. Finished images are saved and registered as
@@ -268,10 +287,20 @@ Make the hub programmable. Tools added here serve **both** Chat and the agent. T
 
 ## Settings
 
-- **Authentication** — Sign in with xAI (OAuth) or paste an **API key** (stored locally; only a
-  `has_api_key` flag is ever returned). Sign out.
-- **Models** — choose the **chat** model and the **code/agent** model. The default chat model is
-  **`grok-4.6`** (500k context, vision, live search).
+Settings is split into four sub-tabs — **xAI / Grok**, **Google**, **OpenAI** and **General** —
+so each provider's sign-in lives on its own tab instead of one long list. The privacy card stays
+above the tabs because it applies to all three. The last tab you used is remembered.
+
+- **Authentication** (per-provider tab) — Sign in with xAI (OAuth), configure Google Cloud ADC, or
+  paste an xAI, Google AI Studio or OpenAI API key. Saved secrets are encrypted by Electron
+  `safeStorage`; only presence flags are returned to the interface. On the first upgraded start,
+  legacy plaintext key/token fields are migrated to `secrets.dat` and removed from
+  `caelo_settings.json` / `caelo_auth.json`.
+- **Default Models** (General tab) — the starting model for a new chat and for the coding agent,
+  picked from **every** configured provider, grouped by provider. The Code list shows only models
+  that support tool calling. Caelo stores the provider alongside the model, so a Gemini or OpenAI
+  default actually starts there; Chat and Code can still switch provider per conversation. The
+  default chat model is **`grok-4.6`** (500k context, vision, live search).
 - **Reasoning effort** — the gauge next to the chat and agent composers overrides how hard the
   model thinks for the next turn (Auto / Low / Medium / High, plus **xHigh** on `grok-4.6`). Only
   levels the selected model actually supports are offered; if one isn't, the selector says so and
@@ -297,7 +326,8 @@ Make the hub programmable. Tools added here serve **both** Chat and the agent. T
 - **Terminal tab does nothing.** Install `pywinpty` in the backend venv. The agent's
   `run_command` tool does not require it.
 - **Live search / vision / generation errors.** These need valid credentials and network. Verify
-  you're authenticated (Settings) and that your xAI account has access/credits.
+  the selected provider in Settings and that the corresponding xAI, Google or OpenAI account has access
+  and billing/credits where required.
 - **Microphone not working in Voice.** Grant the microphone permission when prompted (the app
   only requests `media` and `fullscreen`).
 

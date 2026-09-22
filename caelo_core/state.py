@@ -40,6 +40,7 @@ from caelo_core.auth_tokens import (  # noqa: F401
 # (self-checki patchują je tam: `caelo_core.backend_media`).
 from caelo_core.backend_collections import CollectionsMixin
 from caelo_core.backend_media import MediaMixin
+from caelo_core.runtime_secrets import RuntimeSecrets
 
 
 class Backend(MediaMixin, CollectionsMixin):
@@ -79,13 +80,23 @@ class Backend(MediaMixin, CollectionsMixin):
         from caelo_core.agent.permissions import PermissionGate
 
         self.history = HistoryManager()
-        self.oauth = OAuthManager()
+        # ADR-5: sidecar nie jest sejfem. Sekrety startują puste i są wstrzykiwane
+        # po handshake'u z procesu głównego Electron; nigdy nie trafiają do JSON/env.
+        self._runtime_secrets = RuntimeSecrets()
+        self.oauth = OAuthManager(
+            initial_tokens={},
+            on_tokens_changed=self._on_oauth_tokens_changed,
+            persist_file=False,
+        )
         # P2-8: rozmowy czatu są przechowywane w localStorage renderera (świadomy
         # wybór — patrz useConversations). Backend ich NIE utrwala; `ChatStore`
         # usunięto, bo żadna trasa go nie wystawiała, a tworzył caelo_chats.json
         # przy każdym starcie (martwy kod robiący I/O). `chats_manager.py` pozostaje
         # w rdzeniu (reużywalny), ale sidecar go nie instancjonuje.
         self.api = APIManager(self.get_api_key)
+        # Faza 1 integracji: adaptery dostawcow sa leniwe. `api` pozostaje publiczne
+        # dla kompatybilnosci, ale media przechodza przez neutralny kontrakt.
+        self._provider_instances = {}
         self._workspace = None  # agent/IDE workspace (Workspace | None)
         # M13-B3/B5: menedżer checkpointów bieżącego workspace, współdzielony przez
         # WS (/agent/stream) i REST (/agent/checkpoints,/agent/undo) — jeden mechanizm,
@@ -263,13 +274,21 @@ class Backend(MediaMixin, CollectionsMixin):
         # RMW POD lockiem: bez tego dwa równoległe zapisy (np. model + voice z różnych
         # paneli) mogły się nadpisać (last-writer-wins gubił pole). atomic_write_text
         # czyni sam zapis atomowym, ale NIE serializuje sekwencji read→modify→write.
+        # ADR-5: również wywołania wewnętrzne nie mogą zapisać sekretów do JSON.
+        patch = dict(patch)
+        xai_api_key = patch.pop("api_key", None)
+        google_api_key = patch.pop("google_api_key", None)
         with self._settings_lock:
             s = self.read_settings()
             for key, value in patch.items():
                 if value is not None:
                     s[key] = value
             self.write_settings(s)
-            return s
+        if xai_api_key is not None:
+            self.set_api_key(str(xai_api_key))
+        if google_api_key is not None:
+            self.set_google_api_key(str(google_api_key))
+        return s
 
     # --- klucze / uwierzytelnianie (jak app.get_api_key/is_authenticated) ---
     # Preferencja zrodla ("przelacznik trybow"): 'auto' = dotychczasowa precedencja
@@ -279,8 +298,11 @@ class Backend(MediaMixin, CollectionsMixin):
     _AUTH_SOURCES = ("auto", "oauth", "api_key")
 
     def _stored_key(self) -> str:
-        """Klucz API zapisany w ustawieniach (usuwalny z UI)."""
-        return (self.read_settings().get("api_key") or "").strip()
+        """Klucz API z pamięci, dostarczony z systemowego sejfu Electron."""
+        runtime = getattr(self, "_runtime_secrets", None)
+        if runtime is None:  # zgodność lekkich atrap Backend.__new__ w self-checkach
+            return (self.read_settings().get("api_key") or "").strip()
+        return runtime.xai_api_key().strip()
 
     def _env_key(self) -> str:
         """Klucz z XAI_API_KEY (.env) — nieusuwalny z UI (plik usera)."""
@@ -304,8 +326,10 @@ class Backend(MediaMixin, CollectionsMixin):
         {oauth, api_key, env, none}. Ustawienia czytane RAZ (gorace wywolanie na kazde
         zadanie API). Token OAuth pobierany leniwie (moze odswiezac) — tylko gdy potrzebny."""
         s = self.read_settings()
-        stored = (s.get("api_key") or "").strip()
-        env = (os.getenv("XAI_API_KEY") or "").strip()
+        # Sekret zapisany przez Electron żyje wyłącznie w RuntimeSecrets. Nie wolno
+        # wracać do historycznego pola `api_key` w niesekretnym pliku ustawień.
+        stored = self._stored_key()
+        env = self._env_key()
         pref = (s.get("auth_source") or "auto").strip().lower()
         if pref not in self._AUTH_SOURCES:
             pref = "auto"
@@ -337,10 +361,60 @@ class Backend(MediaMixin, CollectionsMixin):
         return self._resolve_auth()[0]
 
     def clear_api_key(self) -> None:
-        """Usun zapisany klucz API z ustawien (nie dotyka .env ani OAuth)."""
-        s = self.read_settings()
-        if s.pop("api_key", None) is not None:
-            self.write_settings(s)
+        """Usuń klucz runtime (nie dotyka .env ani OAuth)."""
+        self._runtime_secrets.set_xai_api_key("")
+
+    def set_api_key(self, value: str) -> None:
+        self._runtime_secrets.set_xai_api_key(value)
+
+    def set_google_api_key(self, value: str) -> None:
+        self._runtime_secrets.set_google_api_key(value)
+
+    def clear_google_api_key(self) -> None:
+        self._runtime_secrets.set_google_api_key("")
+
+    def has_google_api_key(self) -> bool:
+        return bool(self._runtime_secrets.google_api_key().strip())
+
+    def set_openai_api_key(self, value: str) -> None:
+        self._runtime_secrets.set_openai_api_key(value)
+
+    def clear_openai_api_key(self) -> None:
+        self._runtime_secrets.set_openai_api_key("")
+
+    def get_openai_api_key(self) -> str:
+        """Klucz OpenAI z sejfu; zmienna środowiskowa jest fallbackiem dev."""
+        return (
+            self._runtime_secrets.openai_api_key().strip()
+            or (os.getenv("OPENAI_API_KEY") or "").strip()
+        )
+
+    def openai_auth_source(self) -> str:
+        if self._runtime_secrets.openai_api_key().strip():
+            return "vault"
+        if (os.getenv("OPENAI_API_KEY") or "").strip():
+            return "env"
+        return "none"
+
+    def has_openai_api_key(self) -> bool:
+        return bool(self.get_openai_api_key())
+
+    def _on_oauth_tokens_changed(self, tokens: dict) -> None:
+        self._runtime_secrets.set_oauth_tokens(tokens)
+
+    def import_secret_snapshot(self, data: dict) -> dict:
+        snapshot = self._runtime_secrets.import_snapshot(data)
+        self.oauth.replace_tokens(snapshot.get("oauth_tokens") or {}, notify=False)
+        return snapshot
+
+    def export_secret_snapshot(self) -> dict:
+        return self._runtime_secrets.snapshot()
+
+    def google_settings(self) -> dict:
+        """Niesekretne ustawienia + klucz Google wyłącznie w kopii w pamięci."""
+        settings = self.read_settings()
+        settings["google_api_key"] = self._runtime_secrets.google_api_key()
+        return settings
 
     def is_authenticated(self) -> bool:
         # S31-h: pochodna TWARDEGO przełącznika auth_source — `active_auth_source()`
@@ -358,6 +432,63 @@ class Backend(MediaMixin, CollectionsMixin):
             if m not in merged:
                 merged.append(m)
         return merged
+
+    # --- dostawcy modeli/mediow (neutralna warstwa fazy 1) -----------------
+    def get_provider(self, provider_id: str = "xai"):
+        """Zwraca adapter dostawcy; xAI zawsze opakowuje aktualne ``self.api``.
+
+        Odświezanie po zmianie `self.api` utrzymuje kompatybilnosc self-checkow,
+        ktore wstrzykuja atrape API do instancji utworzonej przez ``__new__``.
+        """
+        provider_id = (provider_id or "xai").strip().lower()
+        instances = getattr(self, "_provider_instances", None)
+        if instances is None:
+            instances = {}
+            self._provider_instances = instances
+        def load_xai():
+            from caelo_core.providers.xai import XAIProvider
+
+            current = instances.get("xai")
+            if current is None or current.api is not self.api:
+                current = XAIProvider(self.api)
+                instances["xai"] = current
+            return current
+
+        def load_mock():
+            from caelo_core.providers.mock import MockProvider
+
+            if "mock" not in instances:
+                instances["mock"] = MockProvider()
+            return instances["mock"]
+
+        def load_google():
+            from caelo_core.providers.google import GoogleProvider
+
+            if "google" not in instances:
+                # Callback odczytuje ustawienia przy kazdym wywolaniu, wiec zmiana
+                # projektu, regionu lub trybu auth nie wymaga restartu sidecara.
+                from caelo_core.providers.google import RemoteFileCache
+                cache = RemoteFileCache(self.history_store.media.remote_files)
+                instances["google"] = GoogleProvider(self.google_settings, remote_cache=cache)
+            return instances["google"]
+
+        def load_openai():
+            from caelo_core.providers.openai import OpenAIProvider
+
+            if "openai" not in instances:
+                instances["openai"] = OpenAIProvider(self.get_openai_api_key)
+            return instances["openai"]
+
+        factories = {
+            "xai": load_xai,
+            "google": load_google,
+            "openai": load_openai,
+            "mock": load_mock,
+        }
+        try:
+            return factories[provider_id]()
+        except KeyError as exc:
+            raise KeyError(f"Unknown provider: {provider_id}") from exc
 
     # --- M9-B2: wspólna historia huba (artefakty + zdarzenia, SQLite/FTS5) ---
     @property
@@ -406,9 +537,11 @@ class Backend(MediaMixin, CollectionsMixin):
         """Leniwy `GenJobManager` (per proces) z egzekutorem związanym z tym Backendem.
         Egzekutor reużywa `api`/`save_media_urls` (zero drugiego magazynu media)."""
         from caelo_core.genjobs import GenJobManager
+        from caelo_core.services.generation import GenerationApplicationService
 
         return self._lazy("_genjobs",
-                          lambda: GenJobManager(self._gen_executor, store=self.history_store))
+                          lambda: GenJobManager(GenerationApplicationService(self),
+                                                store=self.history_store))
 
     # --- M14-B1: menedżer serwerów MCP (rozszerzalność) ----------------------
     @property
@@ -574,6 +707,12 @@ class Backend(MediaMixin, CollectionsMixin):
 
     def shutdown(self) -> None:
         """Sprzątanie na zamknięciu sidecara: ubij podprocesy serwerów MCP (tree-kill)."""
+        jobs = getattr(self, "_genjobs", None)
+        if jobs is not None:
+            try:
+                jobs.close()
+            except Exception:  # noqa: BLE001
+                log.warning("Generation queue shutdown failed", exc_info=True)
         mgr = getattr(self, "_mcp", None)
         if mgr is not None:
             try:

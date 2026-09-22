@@ -22,7 +22,7 @@ export function VideoSendMenu({ conn, art }: { conn: Conn; art: HubArtifact }) {
     setError(null)
     try {
       const uri = await getArtifactDataUri(conn, art.id)
-      hub.sendVideoToVideo({ name, uri, mode })
+      hub.sendVideoToVideo({ name, uri, mode, artifactId: art.id })
       close()
     } catch (e) {
       const status = (e as { status?: number }).status

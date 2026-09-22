@@ -1,7 +1,7 @@
 // Statyczne listy opcji mediów — odwzorowane z caelo_core/config.py.
 export const ASPECT_RATIOS = [
   'auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3',
-  '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20'
+  '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2'
 ]
 
 export const RESOLUTIONS = ['1k', '2k']
@@ -19,13 +19,13 @@ export const IMAGE_MODELS = [
 
 // Parametr `quality` przyjmuje WYŁĄCZNIE grok-imagine-image-2.0 (docs.x.ai); inne
 // modele zwracają 4xx, więc backend go dla nich pomija, a UI nie pokazuje pola.
-export const IMAGE_QUALITY_LEVELS = ['low', 'medium']
+export const IMAGE_QUALITY_LEVELS = ['low', 'medium', 'auto']
 export function imageModelSupportsQuality(model: string): boolean {
   return model === 'grok-imagine-image-2.0'
 }
 
 // Maks. liczba obrazów referencyjnych w edycji (limit API).
-export const EDIT_MAX_IMAGES = 3
+export const EDIT_MAX_IMAGES = 5
 
 // Pełny zbiór; 1080p obsługuje tylko model 1.5 (bazowy kończy się na 720p).
 // Źródło prawdy: caelo_core/config.py -> VIDEO_RESOLUTIONS(_BY_MODEL).

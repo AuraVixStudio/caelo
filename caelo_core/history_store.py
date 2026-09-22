@@ -58,12 +58,15 @@ class Artifact:
     meta: dict = field(default_factory=dict)
     project_id: Optional[str] = None
     created_at: float = 0.0
+    favorite: bool = False
+    tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id, "type": self.type, "mode": self.mode, "mime": self.mime,
             "path": self.path, "thumb_path": self.thumb_path, "meta": self.meta,
             "project_id": self.project_id, "created_at": self.created_at,
+            "favorite": self.favorite, "tags": self.tags,
         }
 
 
@@ -149,6 +152,7 @@ class HistoryStore:
         self.db_path = Path(db_path) if db_path is not None else config.HISTORY_DB_FILE
         self._lock = threading.RLock()
         self._conn = self._connect_or_backup(self.db_path)
+        self._backup_before_schema_migration()
         self._init_schema()
 
     # --- otwarcie + odporność na korupcję -------------------------------------
@@ -218,6 +222,55 @@ class HistoryStore:
                        path.name, exc)
             self._backup_corrupt(path)
             return self._configure(sqlite3.connect(str(path), check_same_thread=False))
+
+    def _backup_before_schema_migration(self) -> Optional[Path]:
+        """Utwórz spójny backup SQLite PRZED zmianą schematu.
+
+        SQLite backup API obejmuje także zatwierdzone strony z WAL. Backup powstaje
+        raz dla docelowej wersji i jest atomowo podmieniany z pliku tymczasowego.
+        Brak miejsca/błąd zapisu przerywa start zamiast ryzykować migrację bez kopii.
+        """
+        from caelo_core.storage.migrations import LATEST_SCHEMA_VERSION
+
+        tables = {
+            str(row[0]) for row in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        if not tables:  # świeża pusta baza — nie ma czego zabezpieczać
+            return None
+        current = 0
+        if "schema_migrations" in tables:
+            row = self._conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+            current = int(row[0] or 0)
+        if current >= LATEST_SCHEMA_VERSION:
+            return None
+
+        backup = self.db_path.with_suffix(
+            self.db_path.suffix + f".pre-migration-v{LATEST_SCHEMA_VERSION}.bak"
+        )
+        if backup.exists():
+            return backup
+        temporary = backup.with_name(backup.name + f".{os.getpid()}.tmp")
+        target: Optional[sqlite3.Connection] = None
+        try:
+            target = sqlite3.connect(str(temporary))
+            self._conn.backup(target)
+            target.execute("PRAGMA integrity_check")
+            target.close()
+            target = None
+            os.replace(temporary, backup)
+            _log.info("History db backup before migration: %s", backup.name)
+            return backup
+        except Exception:
+            if target is not None:
+                target.close()
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            _log.exception("Could not create pre-migration backup for %s", self.db_path.name)
+            raise
 
     def _init_schema(self) -> None:
         with self._lock, self._conn:
@@ -316,6 +369,18 @@ class HistoryStore:
                 self._conn.execute("ALTER TABLE collection_files ADD COLUMN path TEXT NOT NULL DEFAULT ''")
             if "mime" not in ccols:
                 self._conn.execute("ALTER TABLE collection_files ADD COLUMN mime TEXT NOT NULL DEFAULT ''")
+            from caelo_core.storage.migrations import run_migrations
+            run_migrations(self._conn)
+
+    @property
+    def media(self):
+        """Repozytoria Fazy 3 współdzielą połączenie i blokadę tego magazynu."""
+        cached = getattr(self, "_media_repositories", None)
+        if cached is None:
+            from caelo_core.storage import MediaRepositories
+            cached = MediaRepositories(self._conn, self._lock)
+            self._media_repositories = cached
+        return cached
 
     # --- artefakty ------------------------------------------------------------
 
@@ -346,7 +411,11 @@ class HistoryStore:
             row = self._conn.execute(
                 "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
             ).fetchone()
-        return self._row_to_artifact(row) if row else None
+        if not row:
+            return None
+        art = self._row_to_artifact(row)
+        art.tags = self._artifact_tags([artifact_id]).get(artifact_id, [])
+        return art
 
     def delete_artifact(self, artifact_id: str) -> int:
         """Usuń rekord artefaktu (plik na dysku kasuje warstwa wyżej — sandbox).
@@ -354,6 +423,76 @@ class HistoryStore:
         with self._lock, self._conn:
             cur = self._conn.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
         return cur.rowcount
+
+    def set_artifact_favorite(self, artifact_id: str, favorite: bool) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE artifacts SET favorite=? WHERE id=?",
+                (1 if favorite else 0, artifact_id),
+            )
+        return bool(cur.rowcount)
+
+    def set_artifact_tags(self, artifact_id: str, tags: list[str]) -> list[str]:
+        clean = list(dict.fromkeys(t.strip()[:64] for t in tags if t.strip()))[:20]
+        with self._lock, self._conn:
+            exists = self._conn.execute(
+                "SELECT 1 FROM artifacts WHERE id=?", (artifact_id,)
+            ).fetchone()
+            if not exists:
+                raise KeyError(artifact_id)
+            self._conn.execute("DELETE FROM artifact_tags WHERE artifact_id=?", (artifact_id,))
+            for name in clean:
+                row = self._conn.execute("SELECT id FROM tags WHERE name=?", (name,)).fetchone()
+                tag_id = str(row[0]) if row else uuid.uuid4().hex
+                if not row:
+                    self._conn.execute(
+                        "INSERT INTO tags(id,name,created_at) VALUES (?,?,?)",
+                        (tag_id, name, time.time()),
+                    )
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO artifact_tags(artifact_id,tag_id) VALUES (?,?)",
+                    (artifact_id, tag_id),
+                )
+        return clean
+
+    def artifact_lineage(self, artifact_id: str) -> dict:
+        with self._lock:
+            parents = self._conn.execute(
+                "SELECT source_artifact_id,role FROM asset_references WHERE artifact_id=? ORDER BY created_at",
+                (artifact_id,),
+            ).fetchall()
+            children = self._conn.execute(
+                "SELECT artifact_id,role FROM asset_references WHERE source_artifact_id=? ORDER BY created_at",
+                (artifact_id,),
+            ).fetchall()
+        return {
+            "parents": [{"artifact_id": str(r[0]), "role": str(r[1])} for r in parents],
+            "children": [{"artifact_id": str(r[0]), "role": str(r[1])} for r in children],
+        }
+
+    def media_diagnostics(self) -> dict:
+        with self._lock:
+            migrations = [
+                {"version": int(r[0]), "name": str(r[1]), "applied_at": float(r[2])}
+                for r in self._conn.execute(
+                    "SELECT version,name,applied_at FROM schema_migrations ORDER BY version"
+                ).fetchall()
+            ]
+            states = {
+                str(r[0]): int(r[1])
+                for r in self._conn.execute(
+                    "SELECT state,COUNT(*) FROM jobs GROUP BY state"
+                ).fetchall()
+            }
+            artifacts = int(self._conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0])
+            generations = int(self._conn.execute("SELECT COUNT(*) FROM generations").fetchone()[0])
+        return {
+            "database": str(self.db_path),
+            "migrations": migrations,
+            "job_states": states,
+            "artifacts": artifacts,
+            "generations": generations,
+        }
 
     def list_artifacts(
         self, *, mode: Optional[str] = None, project_id: Optional[str] = None,
@@ -368,7 +507,27 @@ class HistoryStore:
         params += [int(limit), int(offset)]
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
-        return [self._row_to_artifact(r) for r in rows]
+        artifacts = [self._row_to_artifact(r) for r in rows]
+        tags = self._artifact_tags([a.id for a in artifacts])
+        for artifact in artifacts:
+            artifact.tags = tags.get(artifact.id, [])
+        return artifacts
+
+    def _artifact_tags(self, artifact_ids: list[str]) -> dict[str, list[str]]:
+        if not artifact_ids:
+            return {}
+        marks = ",".join("?" for _ in artifact_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT at.artifact_id,t.name FROM artifact_tags at "
+                "JOIN tags t ON t.id=at.tag_id "
+                f"WHERE at.artifact_id IN ({marks}) ORDER BY t.name",
+                artifact_ids,
+            ).fetchall()
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(str(row[0]), []).append(str(row[1]))
+        return result
 
     # --- zdarzenia historii ---------------------------------------------------
 
@@ -699,6 +858,24 @@ class HistoryStore:
                        error: str = "", cost: float = 0.0,
                        project_id: Optional[str] = None,
                        created_at: float, updated_at: float) -> None:
+        state = {"queued": "QUEUED", "running": "PREPARING", "done": "COMPLETED",
+                 "failed": "FAILED", "cancelled": "CANCELLED"}.get(status, status.upper())
+        if self.media.jobs.get(id) is None:
+            self.media.generations.create(
+                id=id, provider=str((params or {}).get("provider") or "xai"), kind=kind,
+                operation=op, request=params or {}, status=state, project_id=project_id,
+                estimated_cost=cost, created_at=created_at,
+            )
+            self.media.jobs.create(id=id, generation_id=id, queue_type=kind,
+                                   state=state, created_at=created_at)
+        else:
+            self.media.jobs.update(id, state=state, last_error=error or "")
+            self.media.generations.update(id, status=state, error=error or "")
+        existing = set(self.media.generations.artifact_ids(id))
+        for artifact_id in artifact_ids or []:
+            if artifact_id not in existing:
+                self.media.generations.add_output(id, artifact_id)
+        return
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO gen_jobs "
@@ -717,6 +894,17 @@ class HistoryStore:
         bez przepisywania wielomegabajtowego `params` (data-URI) przy każdej zmianie
         statusu (queued→running→done = 3×). Wiersz już istnieje (`submit` robił INSERT),
         więc brak dopasowania = nieszkodliwy no-op (zadanie usunięte/zreapowane)."""
+        row = self.media.jobs.get(id)
+        if row:
+            state = {"queued": "QUEUED", "running": "PREPARING", "done": "COMPLETED",
+                     "failed": "FAILED", "cancelled": "CANCELLED"}.get(status, status.upper())
+            self.media.jobs.update(id, state=state, last_error=error or "")
+            self.media.generations.update(row["generation_id"], status=state, error=error or "")
+            existing = set(self.media.generations.artifact_ids(row["generation_id"]))
+            for artifact_id in artifact_ids or []:
+                if artifact_id not in existing:
+                    self.media.generations.add_output(row["generation_id"], artifact_id)
+            return
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE gen_jobs SET status = ?, artifact_ids = ?, error = ?, updated_at = ? "
@@ -726,6 +914,9 @@ class HistoryStore:
             )
 
     def get_gen_job(self, job_id: str) -> Optional[dict]:
+        row = self.media.jobs.get(job_id)
+        if row:
+            return self._media_job_to_legacy(row)
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM gen_jobs WHERE id = ?", (job_id,)
@@ -735,6 +926,8 @@ class HistoryStore:
     def list_gen_jobs(self, *, active: Optional[bool] = None,
                       project_id: Optional[str] = None,
                       limit: int = 50, offset: int = 0) -> list[dict]:
+        return [self._media_job_to_legacy(row) for row in self.media.jobs.list(
+            active=active, project_id=project_id, limit=limit, offset=offset)]
         sql = "SELECT * FROM gen_jobs"
         where: list[str] = []
         params: list[Any] = []
@@ -756,6 +949,7 @@ class HistoryStore:
         return [self._row_to_gen_job(r) for r in rows]
 
     def count_active_gen_jobs(self) -> int:
+        return self.media.jobs.count_active()
         with self._lock:
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM gen_jobs WHERE status IN (?, ?)", self._GEN_ACTIVE
@@ -764,6 +958,7 @@ class HistoryStore:
 
     def delete_gen_job(self, job_id: str) -> int:
         """Usuń rekord zadania (NIE rusza artefaktów — wygenerowane media zostają)."""
+        return self.media.jobs.delete(job_id)
         with self._lock, self._conn:
             cur = self._conn.execute("DELETE FROM gen_jobs WHERE id = ?", (job_id,))
         return cur.rowcount
@@ -772,6 +967,7 @@ class HistoryStore:
                                  project_id: Optional[str] = None) -> int:
         """Wyczyść ZAKOŃCZONE zadania (done/failed/cancelled) — opcjonalnie po `kind`/
         projekcie. Aktywne (queued/running) zostają. Artefakty NIE są usuwane."""
+        return self.media.jobs.delete_terminal(kind=kind, project_id=project_id)
         sql = "DELETE FROM gen_jobs WHERE status NOT IN (?, ?)"
         params: list[Any] = list(self._GEN_ACTIVE)
         if kind:
@@ -801,6 +997,17 @@ class HistoryStore:
             "created_at": row["created_at"], "updated_at": row["updated_at"],
         }
 
+    def _media_job_to_legacy(self, row: dict) -> dict:
+        state = row.get("state") or "QUEUED"
+        status = {"COMPLETED": "done", "FAILED": "failed", "CANCELLED": "cancelled",
+                  "UNKNOWN_REMOTE_STATE": "failed", "QUEUED": "queued", "RETRY_WAIT": "queued"}.get(state, "running")
+        return {"id": row["id"], "kind": row.get("kind") or row.get("queue_type"),
+                "op": row.get("operation"), "params": row.get("request") or {}, "status": status,
+                "artifact_ids": self.media.generations.artifact_ids(row["generation_id"]),
+                "error": row.get("last_error") or row.get("error") or "",
+                "cost": row.get("estimated_cost") or 0, "project_id": row.get("project_id"),
+                "created_at": row.get("created_at") or 0, "updated_at": row.get("updated_at") or 0}
+
     # --- helpery --------------------------------------------------------------
 
     @staticmethod
@@ -827,10 +1034,13 @@ class HistoryStore:
             meta = json.loads(row["meta"]) if row["meta"] else {}
         except (ValueError, TypeError):
             meta = {}
+        keys = row.keys()
         return Artifact(
             id=row["id"], type=row["type"], mode=row["mode"], mime=row["mime"],
             path=row["path"], thumb_path=row["thumb_path"], meta=meta,
             project_id=row["project_id"], created_at=row["created_at"],
+            favorite=bool(row["favorite"]) if "favorite" in keys else False,
+            tags=[],
         )
 
     @staticmethod

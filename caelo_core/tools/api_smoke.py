@@ -139,6 +139,15 @@ def main() -> int:
         if ok_models:
             print(f"  [info] models.default_chat={body.get('default_chat')} default_code={body.get('default_code')} chat_count={len(body['chat'])}")
 
+        # Faza 1 integracji: neutralny katalog dostawcow i mozliwosci modeli.
+        s, providers = _get(base, "/providers", token)
+        checks.append(("/providers == 200 + xai/mock",
+                       s == 200 and {p.get("id") for p in (providers or {}).get("providers", [])}
+                       >= {"xai", "mock"}))
+        s, caps = _get(base, "/capabilities?provider=xai&media_type=video", token)
+        checks.append(("/capabilities == 200 + video model capabilities",
+                       s == 200 and bool((caps or {}).get("capabilities"))))
+
         s, body = _get(base, "/settings", token)
         checks.append(("/settings == 200", s == 200 and body is not None and "chat_model" in body))
 

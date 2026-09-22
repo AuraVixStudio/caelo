@@ -328,44 +328,49 @@ DEFAULT_CHAT_MODELS = [
     "grok-4.20-0309-reasoning",
     "grok-4.20-multi-agent-0309",
     "grok-build-0.1",
-    "grok-4",
-    "grok-3",
 ]
 DEFAULT_CHAT_MODEL = "grok-4.6"
 
-# Przybliżony rozmiar okna kontekstowego modelu (do miernika UI agenta). To SZACUNEK
-# (xAI nie udostępnia tego stabilnie per-model) — używany tylko do paska „X/Y (Z%)".
+# Przybliżony rozmiar okna kontekstowego modelu (do miernika UI agenta). Dla modeli
+# OpenAI korzystamy z wartości opublikowanej w katalogu modeli; pozostałe wpisy są
+# informacyjnym szacunkiem używanym tylko do paska „X/Y (Z%)".
 _CONTEXT_WINDOW_DEFAULT = 256_000
 
 
 def context_window_for(model: str) -> int:
-    """Przybliżony rozmiar okna kontekstowego (tokeny) dla miernika UI. Szacunek —
-    rodzina grok-3 ma mniejsze okno; grok-4.5 / grok-4.6 = 500k (docs); grok-4.x /
-    grok-build / nieznane → duże okno."""
+    """Przybliżony rozmiar okna kontekstowego (tokeny) dla miernika UI. Wg katalogów
+    dostawców (2026-09-01): grok-4.6/4.5 = 500k, grok-4.3 i grok-4.20-* = 1M,
+    grok-build-0.1 = 256k, gpt-5.6-* = 1.05M, gemini-3.x = 1 048 576. Nieznane → 256k."""
     m = (model or "").lower()
+    if m.startswith("gpt-5.6"):
+        return 1_050_000
     if m.startswith("grok-3"):
         return 131_072
     if m.startswith("grok-4.5") or m.startswith("grok-4.6"):
         return 500_000
+    if m.startswith("grok-4.3") or m.startswith("grok-4.20"):
+        return 1_000_000
+    if m.startswith("gemini-"):
+        return 1_048_576
     return _CONTEXT_WINDOW_DEFAULT
 
 # --- Modele obrazu (zakładka Image: generowanie + edycja) ---
 # "quality" daje lepszą jakość za wyższą cenę; standard jest tańszy i jest domyślny.
-# 2.0 (docs 2026-08) to nowsza generacja — $0.04/obraz i JAKO JEDYNY przyjmuje parametr
-# `quality` (low|medium). Domyślnego modelu NIE zmieniamy: 2.0 kosztuje 2× standard,
-# a to wybór usera (BYO-key), nie milcząca podwyżka.
+# 2.0 (docs 2026-08) to nowsza generacja i jako jedyny przyjmuje parametr
+# `quality` (low|medium|auto). Koszt zależy także od jakości i rozdzielczości.
 IMAGE_MODELS = [
     "grok-imagine-image",
     "grok-imagine-image-2.0",
     "grok-imagine-image-quality",
 ]
-DEFAULT_IMAGE_MODEL = "grok-imagine-image"
+DEFAULT_IMAGE_MODEL = "grok-imagine-image-2.0"
 
 # Modele przyjmujące parametr `quality` i jego dozwolone wartości (docs.x.ai:
-# „The parameter is only supported for grok-imagine-image-2.0", low|medium, domyślnie
-# medium). Wysłanie go do innego modelu = 4xx, więc filtrujemy po tej liście.
+# „The parameter is only supported for grok-imagine-image-2.0"; od 2026-08
+# low|medium|auto, przy czym auto dobiera low dla generation i medium dla edit.
+# Wysłanie go do innego modelu = 4xx, więc filtrujemy po tej liście.
 IMAGE_QUALITY_MODELS = ["grok-imagine-image-2.0"]
-IMAGE_QUALITY_LEVELS = ["low", "medium"]
+IMAGE_QUALITY_LEVELS = ["low", "medium", "auto"]
 
 
 def image_model_supports_quality(model: str) -> bool:
@@ -404,7 +409,9 @@ CHAT_VIDEO_MODEL = (os.environ.get("CAELO_CHAT_VIDEO_MODEL", "").strip()
 VOICE_VOICES = ["eve", "ara", "rex", "sal", "leo"]
 DEFAULT_VOICE = "eve"
 # Model agenta głosowego realtime (wss://api.x.ai/v1/realtime).
-VOICE_REALTIME_MODEL = "grok-voice-latest"
+# Pinujemy WERSJE zamiast aliasu `grok-voice-latest` (docs zalecaja pin; alias
+# przeskoczyl z 1.0 na 2.0 dnia 2026-08-05 i zmienil sie pod aplikacja).
+VOICE_REALTIME_MODEL = "grok-voice-think-fast-2.0"
 # URL WebSocket realtime wyprowadzony z API_BASE ("https://…/v1" -> "wss://…/v1/realtime").
 REALTIME_URL = API_BASE.replace("http", "ws") + "/realtime"
 # M12-B1: strumieniowe STT na żywo (wss://api.x.ai/v1/stt). Most sidecara dokłada
@@ -468,7 +475,7 @@ FONTS = {
 }
 
 # --- Default Settings ---
-ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20"]
+ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20", "21:9", "5:2"]
 RESOLUTIONS = ["1k", "2k"]
 # Wideo: 1080p doszło w modelu 1.5 (docs x.ai 2026-07). Lista domyślna = pełny zbiór;
 # rozdzielczości zależą od modelu — bazowy grok-imagine-video kończy się na 720p.

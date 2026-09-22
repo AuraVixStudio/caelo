@@ -8,8 +8,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from caelo_core.state import Backend, get_backend
+from caelo_core.models.registry import get_model_registry
 
 router = APIRouter(tags=["system"])
+
+
+@router.get("/diagnostics/media")
+def media_diagnostics(b: Backend = Depends(get_backend)) -> dict:
+    data = b.history_store.media_diagnostics()
+    output = Path(b.history.get_save_path()).expanduser()
+    data["output_directory"] = str(output)
+    data["output_directory_exists"] = output.is_dir()
+    data["providers"] = [
+        {"id": p.id, "label": p.label, "status": p.status}
+        for p in get_model_registry().providers()
+        if p.id != "mock"
+    ]
+    return data
 
 
 @router.get("/history/generations")

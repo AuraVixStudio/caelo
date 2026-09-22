@@ -4,6 +4,223 @@ All notable changes to **Caelo** are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `agent_selfcheck` podstawiał atrapę HTTP w `caelo_core/agent/llm.py`, który jest dziś
+  cienkim delegatem — `requests` żyje w adapterze `providers/xai/tools.py`. Test wywalał
+  się na `AttributeError` i przerywał cały self-check.
+- `headless_check` i zależny od niego `acp_check` używały stubu backendu bez
+  `get_openai_api_key`, którego `AgentRunner._credential` wymaga od czasu dodania OpenAI.
+  Tura padała, a asercja raportowała mylący brak pliku zamiast prawdziwej przyczyny.
+- Testy używające `tmp_path` przewracały się na `PermissionError`, gdy systemowy
+  `pytest-of-<user>` zostanie z uszkodzonym ACL-em (naprawa wymaga podniesionych
+  uprawnień). `conftest.py` wykrywa nieczytelną bazę i kieruje pytest na własną.
+- `requirements-dev.txt` prosił o `httpx`, podczas gdy `starlette.testclient` w tej wersji
+  wymaga `httpx2`. Bez niego testy tras (`test_phase3_queue_storage`, `test_phase7_hardening`)
+  nie zbierały się w ogóle.
+- Spec PyInstallera wyklucza `starlette.testclient`/`fastapi.testclient` oraz `httpx2`,
+  `httpcore2` i `truststore`. Sama obecność klienta testowego w venv dokładała ~3 MiB
+  martwego kodu do instalatora — sidecar rozmawia z siecią wyłącznie przez `requests`.
+
+## [2.0.8] — 2026-09-01
+
+### Added
+- Ustawienia mają podkarty dostawców (xAI / Grok, Google, OpenAI, General), więc
+  logowanie i klucze każdego dostawcy są osobno zamiast jednej długiej listy kart.
+- Domyślne modele czatu i agenta wybiera się w zakładce General z katalogu **wszystkich**
+  dostawców, pogrupowanego per dostawca; nowa preferencja `chat_provider` zapamiętuje,
+  do kogo należy wybrany model czatu (dotąd wiedział to tylko moduł Code).
+- Obrazy w bibliotece referencji można usunąć — kafelek prosi o potwierdzenie, bo plik
+  znika z dysku bezpowrotnie.
+
+- Generowanie, edycja wieloma obrazami referencyjnymi i wariacje OpenAI przez
+  `gpt-image-2`, z wyborem dokładnego rozmiaru, jakości, PNG/JPEG/WebP, tła oraz
+  poziomu moderacji `low`/`auto`.
+- Wyniki OpenAI Images API są dekodowane i zapisywane przez istniejącą kolejkę,
+  historię oraz Galerię, bez tworzenia osobnego magazynu mediów.
+- OpenAI jako trzeci dostawca w modułach Chat i Code/Agent, z szyfrowanym kluczem API,
+  migracją sejfu do schematu v2 oraz wyborem modeli GPT-5.6 Terra, Sol i Luna.
+- Adapter OpenAI Responses API ze streamingiem UTF-8, reasoning, cytowaniami, opcjonalnym
+  wyszukiwaniem WWW i wymuszonym `store: false`.
+- Function calling OpenAI w agencie zachowuje natywne `call_id`, równoległe wywołania,
+  zaszyfrowany stan reasoning oraz wszystkie istniejące bramki uprawnień Caelo.
+- Wersjonowany cennik modeli OpenAI i koszt wyliczany z rzeczywistych liczników tokenów,
+  z rozdzieleniem tokenów cache; nieznany model nie jest przedstawiany jako koszt zerowy.
+- Estymacja kosztu `gpt-image-2` odwzorowująca oficjalny kalkulator rozmiaru i jakości;
+  po wykonaniu zadania estymacja jest zastępowana kosztem policzonym z `usage` Images API.
+- Test kontraktu rzeczywistych błędów OpenAI obejmujący auth, nieznany model, rate limit,
+  wyczerpaną kwotę, moderację i timeout, bez zapisywania klucza lub surowej odpowiedzi.
+- Szyfrowany sejf poświadczeń w procesie głównym Electron (`safeStorage`) dla kluczy
+  xAI/Google/OpenAI i tokenów OAuth oraz osobny, uwierzytelniony kanał pamięciowy do sidecara.
+- Migracja schematu historii do wersji 4 z opcjonalnym `generation_output_id`, kopią
+  bezpieczeństwa SQLite przed zmianą oraz skryptem weryfikującym migrację na kopii bazy.
+- Testy hardeningu obejmujące migrację plaintextu, rozdzielenie tokenów sesji i sekretów,
+  trwałość sejfu oraz brak zapisu poświadczeń przez backend Python.
+- Moduł Chat obsługuje Google Gemini / Vertex AI obok xAI: odpowiedź jest
+  strumieniowana przez SSE, a historia rozmowy może zawierać obrazy oraz dokumenty PDF.
+- Dostawca i model czatu są wybierane i zapamiętywane osobno dla każdej rozmowy.
+- Rejestr możliwości obejmuje modele czatowe Gemini 2.5 i 3.x wraz z obsługiwanymi
+  poziomami rozumowania oraz parametrami generowania.
+- Moduł Code może używać xAI albo Google Gemini. Wspólny kontrakt wywołań narzędzi
+  zachowuje bramkę zatwierdzania, checkpointy, cofanie zmian, limit pętli i subagentów.
+- Sesje agenta zapisują dostawcę razem z modelem, a panel Code pozwala przełączyć
+  provider i pokazuje wyłącznie modele obsługujące function calling.
+
+### Changed
+- Katalog modeli zweryfikowany 2026-09-01 wobec dokumentacji dostawców oraz żywej listy
+  publisher models Vertex AI: usunięto `grok-4` wycofany 2026-05-15 (slug milcząco
+  przekierowuje na `grok-4.3` i jest po jego cenach), model głosowy przypięto do wersji
+  `grok-voice-think-fast-2.0` zamiast aliasu `-latest`, a `gemini-2.5-flash-image`
+  oznaczono jako `deprecated` przed wyłączeniem zapowiedzianym na 2026-10-02.
+- Okna kontekstu w mierniku agenta odpowiadają katalogom dostawców: `grok-4.3` i
+  `grok-4.20-*` mają 1M, modele `gemini-*` 1 048 576 (wcześniej wpadały w domyślne 256k).
+- Modele wymagające osobnej zgody (`gpt-5.6-cyber`, `gpt-daybreak-*` z programu Daybreak)
+  celowo nie trafiają do katalogu — dla zwykłego klucza byłyby pozycją zawsze kończącą
+  się błędem.
+- Panel Image trzyma ustawienia modelu w jednym rzędzie; „Reference library" i „From disk"
+  przeniesiono na koniec listy kontrolek.
+
+- Katalog modeli został zsynchronizowany z dokumentacją dostawców: Gemini 3.7 Flash
+  jest domyślnym modelem Google, zachowano 3.6/3.5 i modele Lite; usunięto emulowany
+  wpis `grok-3`, a możliwości reasoning i limity referencji xAI są opisane per model.
+- Cennik obrazów Google używa stawek per model i rozdzielczość, a xAI uwzględnia
+  jakość, rozdzielczość i koszt każdego obrazu referencyjnego.
+- `caelo_settings.json` nie przechowuje już kluczy API, a `caelo_auth.json` jest po
+  udanej migracji usuwany. Backend używa poświadczeń wyłącznie z pamięci procesu.
+- Dokumentacja prywatności i ekran Settings wskazują jawnie, że dane trafiają bezpośrednio
+  do wybranego dostawcy xAI albo Google; Caelo nie używa własnego proxy ani telemetrii.
+- Paczka PyInstaller deklaruje moduły fazy 7 i pomija testy runtime; sidecar Windows
+  zmniejszył się z 75,62 MiB do 70,85 MiB.
+- Kontrolki właściwe tylko dla xAI, w szczególności wyszukiwanie w X, są ukrywane po
+  wybraniu Google zamiast sugerować nieistniejącą zgodność funkcji.
+- Cztery konfigurowalne filtry bezpieczeństwa Gemini są jawnie wysyłane jako `OFF`,
+  zgodnie z ustawieniem przyjętym wcześniej dla generowania obrazów.
+- xAI-owe narzędzie live `web_search` nie jest udostępniane agentowi Gemini; wspólne
+  narzędzia plikowe, powłoka, MCP, plan i delegacja pozostają dostępne.
+
+### Fixed
+- Obrazy z modeli Google wychodziły zawsze w 1K niezależnie od wybranej rozdzielczości.
+  Nano Banana z włączonym `thinkingConfig` zwraca w tej samej odpowiedzi robocze podglądy
+  oznaczone `thought: true` — zawsze w 1K — a adapter brał pierwszy obraz. Części myślowe
+  są teraz pomijane, a wynikiem jest ostatni render.
+- Miniatury świeżo wygenerowanych obrazów i wideo pojawiały się dopiero po restarcie
+  aplikacji. Wymuszone odświeżenie listy dołączało do żądania wysłanego przed końcem
+  zadania i stemplowało starą listę jako świeżą, a kafelek ładował się leniwie i dla nowo
+  dołożonej karty potrafił nie wystartować. Podgląd pobiera się teraz od razu i ponawia
+  próbę po błędzie protokołu.
+- Generowanie wideo Gemini Omni na Vertex AI kończyło się błędem 400 „Unsupported model
+  interaction": ta powierzchnia wymaga id `gemini-omni-1.1-flash-preview`, podczas gdy
+  AI Studio używa nazwy bez sufiksu. Mapowanie działa wyłącznie na drucie (jak przy Veo),
+  więc katalog, cennik i artefakty zachowują jedno id.
+- Do metadanych artefaktu obrazu trafia żądana rozdzielczość i proporcje, bez czego nie
+  dało się sprawdzić po fakcie, czy dostawca uszanował ustawienie.
+
+- Zwykły egzekutor kolejki otrzymuje zmaterializowane dane obrazów i wideo, podczas gdy
+  SQLite oraz odpowiedzi REST nadal przechowują wyłącznie lekkie wskaźniki plikowe.
+- Błąd synchronizacji odświeżonego tokenu OAuth nie jest już traktowany jako awaria
+  zdrowego sidecara i nie może uruchomić pętli restartów procesu.
+- Selektor dostawcy w nagłówku modułu Code nie zajmuje już całej dostępnej szerokości,
+  dzięki czemu wybór modelu jest widoczny, a strzałki obu list nie nakładają się.
+- Lista modeli agenta toleruje starszą pamięć podręczną katalogu modeli, w której modele
+  Gemini nie miały jeszcze oznaczenia obsługi narzędzi.
+
+## [2.0.7] — 2026-08-29
+
+### Fixed
+- Karty obrazów w Galerii i „Recent images” pobierają miniatury WEBP zamiast dekodować
+  dziesiątki pełnowymiarowych PNG. Miniatury powstają na żądanie w wewnętrznym cache
+  Caelo, więc folder wynikowy nadal zawiera wyłącznie właściwe obrazy i filmy.
+
+## [2.0.6] — 2026-08-29
+
+### Fixed
+- Galeria, kolejka i polecenia generowania korzystają teraz ze stabilnego kanału procesu
+  głównego aplikacji zamiast bezpośrednich połączeń HTTP z interfejsu Chromium.
+- Techniczny monitor lokalnego Caelo Core korzysta z uwierzytelnionego testu procesu;
+  nie zmienia znaczenia wskaźnika „Connected”, który nadal wynika z aktywnych
+  poświadczeń xAI (OAuth, API key albo `.env`).
+- Plik z natywnej biblioteki referencji nie jest już błędnie traktowany jak artefakt galerii,
+  co usuwało nieprawidłowe powiązania i błąd podczas finalizacji wygenerowanego wyniku.
+- Wysłanie płatnego zadania generowania nie jest automatycznie ponawiane po timeoutcie,
+  dzięki czemu pojedyncze kliknięcie tworzy najwyżej jedno zadanie.
+
+## [2.0.5] — 2026-08-29
+
+### Fixed
+- Import obrazów referencyjnych jest teraz natywną operacją plikową aplikacji desktopowej:
+  wybrane obrazy są kopiowane bezpośrednio do folderu biblioteki, bez HTTP, kolejki i SQLite.
+- Lista, miniatury, pełny podgląd i ponowne użycie referencji są odczytywane bezpośrednio
+  z folderu biblioteki, więc nie zależą od szybkości ani stanu Caelo Core.
+- Anulowanie systemowego okna wyboru natychmiast przywraca przyciski i nie pozostawia
+  biblioteki w stanie „Working…”.
+
+## [2.0.4] — 2026-08-29
+
+### Fixed
+- Import do biblioteki obrazów referencyjnych wysyła teraz surowe bajty obrazu zamiast
+  rozbudowanego JSON/base64, dzięki czemu duże pliki nie kończą się timeoutem.
+- Równoległe pierwsze wczytywanie biblioteki nie może już nadpisać właśnie zaimportowanego
+  obrazu; każdy udany plik pojawia się od razu, także gdy kolejny import się nie powiedzie.
+- Odczyt biblioteki ma osobny, dłuższy limit czasu oraz przycisk ponowienia po błędzie.
+
+## [2.0.3] — 2026-08-29
+
+### Added
+- Trwała biblioteka obrazów referencyjnych wspólna dla formularzy Obraz i Wideo.
+  Obrazy można zaimportować raz, zaznaczać wielokrotnie i dodawać zgodnie z limitem
+  aktywnego modelu.
+- Pełnoekranowy podgląd obrazów referencyjnych z przełączaniem między dopasowaniem
+  do okna i rzeczywistym rozmiarem 1:1.
+
+### Changed
+- Gotowe obrazy i filmy są ponownie zapisywane bezpośrednio w wybranym folderze
+  wynikowym, bez automatycznych podfolderów, plików JSON i osobnych miniaturek.
+- Duże obrazy wejściowe kolejki są przechowywane jako zarządzane pliki danych aplikacji,
+  poza bazą historii i poza folderem wynikowym. Worker odtwarza je dopiero na czas
+  wywołania modelu, a ponawianie zadania nadal działa.
+
+### Fixed
+- Nowe zadania z obrazami referencyjnymi nie powiększają już bazy SQLite o zakodowane
+  kopie plików, które wcześniej mogły blokować zapytania Galerii i kolejki.
+
+## [2.0.2] — 2026-08-29
+
+### Fixed
+- Zakładki Obraz i Wideo po pierwszym otwarciu pozostają gotowe w pamięci interfejsu,
+  dzięki czemu szybkie przełączanie nie tworzy ponownie całych widoków.
+- Lista zadań, katalog modeli i ostatnie wyniki współdzielą krótkotrwałe migawki oraz
+  jedno trwające zapytanie zamiast nakładać kolejne odczyty backendu.
+- Formularze obrazu i wideo od razu korzystają z wbudowanego katalogu modeli, więc podczas
+  odświeżania połączenia nie pokazują pustych pól dostawcy i modelu.
+
+## [2.0.1] — 2026-08-29
+
+### Fixed
+- Usunięto blokowanie interfejsu przez listę zadań, która wczytywała i kopiowała do pamięci
+  wielomegabajtowe dane obrazów referencyjnych przy każdym odświeżeniu kolejki.
+- Historia zachowuje pełne wejścia potrzebne do audytu i Retry, ale odpowiedzi listy kolejki
+  zawierają tylko lekki prompt, model oraz metadane.
+- Migracja starszej kolejki przetwarza rekordy pojedynczo i nie tworzy drugiej kopii dużych
+  danych wejściowych dla zakończonych zadań.
+
+## [2.0.0] — 2026-08-29
+
+### Added
+- Zintegrowane generowanie obrazów i wideo przez Google Gemini / Vertex AI z logowaniem
+  Google Cloud ADC, obok istniejącej obsługi xAI.
+- Wspólna kolejka generowania, galeria, projekty i historia pochodzenia materiałów dla obu
+  dostawców.
+- Adaptacyjne formularze obrazu i wideo, które pokazują wyłącznie możliwości aktywnego modelu
+  i zapamiętują ostatnie ustawienia użytkownika.
+
+### Changed
+- Nazwa produktu, aplikacji Windows, skrótu i deinstalatora została ujednolicona jako
+  **Caelo 2.0**.
+- Ustawienia dostawców uporządkowano w osobnych sekcjach xAI i Google, zachowując wspólne
+  ustawienia aplikacji.
+- Obsługa referencji obrazu korzysta z ról wspieranych przez wybrany model Google lub xAI.
+
 ## [0.1.5] — 2026-08-12
 
 Picks up xAI's August model wave — **Grok 4.6**, **reference-to-video**, and
@@ -146,6 +363,11 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[2.0.4]: https://github.com/AuraVixStudio/caelo/compare/v2.0.3...v2.0.4
+[2.0.3]: https://github.com/AuraVixStudio/caelo/compare/v2.0.2...v2.0.3
+[2.0.2]: https://github.com/AuraVixStudio/caelo/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/AuraVixStudio/caelo/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/AuraVixStudio/caelo/releases/tag/v2.0.0
 [0.1.5]: https://github.com/AuraVixStudio/caelo/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/AuraVixStudio/caelo/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/AuraVixStudio/caelo/compare/v0.1.2...v0.1.3

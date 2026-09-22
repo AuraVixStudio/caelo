@@ -69,7 +69,7 @@ export function formatCostUsd(usd: number): string {
 }
 
 /** Compact usage summary, e.g. "2 searches · 1.2k tokens · $0.0234". Empty when nothing to show.
- *  cost_usd (4.1-g) is the REAL cost from xAI; shown only when present (no estimate in chat). */
+ *  cost_usd is provider-reported or derived from real token counters; shown only when present. */
 export function formatUsage(usage: ChatUsage | undefined): string {
   if (!usage) return ''
   const parts: string[] = []

@@ -3,9 +3,9 @@ WebSocket `/agent/stream`.
 
 Sesja = pełna historia rozmowy LLM (role user/assistant/tool) zapisana w
 `DATA_DIR/sessions/<id>.json`, dzięki czemu da się ją WZNOWIĆ z kontekstem
-(`AgentRunner.resume_session`) albo odtworzyć transkrypt w UI. Format v2:
+(`AgentRunner.resume_session`) albo odtworzyć transkrypt w UI. Format v3:
 
-    {"v":2, "id", "cwd", "project_id", "title", "model",
+    {"v":3, "id", "cwd", "project_id", "title", "provider", "model",
      "created_at", "updated_at", "history":[ {role, content, ...}, ... ]}
 
 `project_id` (M9-B5) pozwala filtrować listę sesji po projekcie. Loader toleruje
@@ -104,6 +104,7 @@ def load(sid: str) -> dict:
         "project_id": data.get("project_id"),
         "title": data.get("title") or title_from_history(history),
         "model": data.get("model"),
+        "provider": data.get("provider") or "xai",
         "created_at": data.get("created_at") or mtime,
         "updated_at": data.get("updated_at") or mtime,
         "history": history,
@@ -118,6 +119,7 @@ def load_history(sid: str) -> list:
 
 def save(*, id: str, cwd: str, history: list, project_id: Optional[str] = None,
          model: Optional[str] = None, title: Optional[str] = None,
+         provider: Optional[str] = None,
          created_at: Optional[int] = None) -> None:
     """Zapisz sesję (v2) atomowo. Przy istniejącym pliku ZACHOWUJE `created_at`
     i wcześniejsze `project_id`/`title`/`model` (gdy nowe nie podane), ustawia
@@ -133,12 +135,13 @@ def save(*, id: str, cwd: str, history: list, project_id: Optional[str] = None,
         existing = existing if isinstance(existing, dict) else {}
         now = int(time.time())
         payload = {
-            "v": 2,
+            "v": 3,
             "id": id,
             "cwd": cwd,
             "project_id": project_id if project_id is not None else existing.get("project_id"),
             "title": title or title_from_history(history) or existing.get("title"),
             "model": model or existing.get("model"),
+            "provider": provider or existing.get("provider") or "xai",
             "created_at": created_at or existing.get("created_at") or now,
             "updated_at": now,
             "history": history,
@@ -174,6 +177,7 @@ def list_meta(project_id: Optional[str] = None) -> List[dict]:
             "project_id": pid,
             "cwd": data.get("cwd") or "",
             "model": data.get("model"),
+            "provider": data.get("provider") or "xai",
             "created_at": data.get("created_at") or mtime,
             "updated_at": data.get("updated_at") or mtime,
             "message_count": _message_count(history),

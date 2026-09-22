@@ -73,7 +73,12 @@ import {
   type PlanPhase
 } from '../../lib/agentTrust'
 import { imageUris, inlineTextFiles } from '../../lib/attachments'
-import { formatTokens } from '../../lib/searchState'
+import {
+  AGENT_PROVIDER_OPTIONS,
+  isAgentProvider,
+  type AgentProvider
+} from '../../lib/providerIds'
+import { formatCostUsd, formatTokens } from '../../lib/searchState'
 import { useStickToBottom } from '../../lib/useStickToBottom'
 import { planCounts, type PlanItem } from '../../lib/agentPlan'
 import { filterSessions, historyToEntries, sessionsForWorkspace } from '../../lib/agentSession'
@@ -91,6 +96,7 @@ import { IconButton } from '../ui/IconButton'
 import { EffortSelect } from '../ui/EffortSelect'
 import { ModelSelect } from '../ui/ModelSelect'
 import { Popover } from '../ui/Popover'
+import { Select } from '../ui/Select'
 import { Textarea } from '../ui/Textarea'
 import { DiffView } from './DiffView'
 
@@ -153,7 +159,13 @@ function PlanWidget({ items }: { items: PlanItem[] }): ReactNode {
 function ContextMeter({
   usage
 }: {
-  usage: { input_tokens: number; output_tokens: number; context_tokens: number; max_context: number }
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    context_tokens: number
+    max_context: number
+    cost_usd: number
+  }
 }): ReactNode {
   const max = usage.max_context > 0 ? usage.max_context : 0
   const pct = max > 0 ? Math.min(100, Math.round((usage.context_tokens / max) * 100)) : 0
@@ -161,6 +173,7 @@ function ContextMeter({
   const title =
     `Context window ≈ ${usage.context_tokens.toLocaleString()} / ${max.toLocaleString()} tokens (${pct}%)` +
     (total > 0 ? `\nSession total: ${total.toLocaleString()} tokens` : '') +
+    (usage.cost_usd > 0 ? `\nEstimated API cost from usage: ${formatCostUsd(usage.cost_usd)}` : '') +
     `\n(approximate — context size is estimated)`
   return (
     <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted" title={title}>
@@ -176,6 +189,9 @@ function ContextMeter({
       <span className="tabular-nums">
         {formatTokens(usage.context_tokens)}
         {max > 0 ? <span className="opacity-60">/{formatTokens(max)}</span> : null}
+        {usage.cost_usd > 0 ? (
+          <span className="ml-1 opacity-70">· {formatCostUsd(usage.cost_usd)}</span>
+        ) : null}
       </span>
     </span>
   )
@@ -201,7 +217,9 @@ export function AgentPanel({
   conn,
   workspacePath,
   model,
+  provider,
   models,
+  onProviderChange,
   onModelChange,
   onFilesChanged,
   onOpenWorkspace
@@ -209,7 +227,9 @@ export function AgentPanel({
   conn: Conn
   workspacePath: string | null
   model: string
+  provider: AgentProvider
   models: string[]
+  onProviderChange: (provider: AgentProvider) => void
   onModelChange: (m: string) => void
   onFilesChanged: () => void
   // M21: wznowienie sesji z innego katalogu → przełącz workspace (selectWorkspace).
@@ -247,6 +267,7 @@ export function AgentPanel({
     output_tokens: number
     context_tokens: number
     max_context: number
+    cost_usd: number
   } | null>(null)
   // M14/M19: autouzupełnianie composera agenta — slash-komendy ("/") i @-pliki.
   const [fileList, setFileList] = useState<string[]>([])
@@ -389,6 +410,8 @@ export function AgentPanel({
           setEntries(historyToEntries(full.history))
           curAssistant.current = null
         }
+        if (full.provider) onProviderChange(full.provider)
+        if (full.model) onModelChange(full.model)
         setSessionId(sid)
         agentRef.current?.setSession(sid) // backend: wznów sid zamiast świeżej sesji
       } catch {
@@ -553,7 +576,8 @@ export function AgentPanel({
             input_tokens: e.input_tokens,
             output_tokens: e.output_tokens,
             context_tokens: e.context_tokens,
-            max_context: e.max_context
+            max_context: e.max_context,
+            cost_usd: e.cost_usd
           })
         }
         break
@@ -621,7 +645,7 @@ export function AgentPanel({
     setBusy(true)
     setInput('')
     att.clear()
-    agentRef.current?.sendMessage(inlineTextFiles(text, atts), model, imageUris(atts), effMode, effort)
+    agentRef.current?.sendMessage(inlineTextFiles(text, atts), provider, model, imageUris(atts), effMode, effort)
   }
 
   // M13-F2: zatwierdź plan i wykonaj go w trybie „accept edits" (plan był sprawdzony).
@@ -634,7 +658,7 @@ export function AgentPanel({
     curAssistant.current = null
     turnWasPlanRef.current = false
     setBusy(true)
-    agentRef.current?.sendMessage(text, model, [], 'accept-edits', effort)
+    agentRef.current?.sendMessage(text, provider, model, [], 'accept-edits', effort)
   }
 
   function approve(id: string, decision: 'accept' | 'reject' | 'always'): void {
@@ -723,6 +747,8 @@ export function AgentPanel({
       setPlan([])
       setUsage(null) // wznowiona sesja → licznik narośnie od kolejnej tury (backend kumuluje od 0)
       setSessionId(meta.id)
+      if (full.provider) onProviderChange(full.provider)
+      if (full.model) onModelChange(full.model)
       agentRef.current?.setSession(meta.id)
     } catch {
       pushInfo('Could not open the session.', 'warn')
@@ -823,8 +849,26 @@ export function AgentPanel({
     <div className="flex h-full min-h-0 flex-col bg-surface">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
         <span className="text-sm font-semibold">Agent</span>
-        <div className="ml-1 min-w-0 flex-1">
-          <ModelSelect value={model} models={models} onChange={onModelChange} />
+        {/* Select's own wrapper is w-full. Constrain it from outside; applying width
+            only to the inner <select> made this invisible wrapper consume the toolbar
+            and collapsed the model selector to two adjacent chevrons. */}
+        <div className="w-36 shrink-0">
+          <Select
+            aria-label="Agent provider"
+            size="sm"
+            value={provider}
+            disabled={busy}
+            onChange={(event) => {
+              if (isAgentProvider(event.target.value)) onProviderChange(event.target.value)
+            }}
+          >
+            {AGENT_PROVIDER_OPTIONS.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="min-w-40 max-w-80 flex-1">
+          <ModelSelect value={model} models={models} onChange={onModelChange} disabled={busy} />
         </div>
         <Popover
           align="end"
@@ -1440,7 +1484,7 @@ export function EntryView({
   if (entry.kind === 'assistant') {
     return (
       <div>
-        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Caelo</div>
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">Caelo 2.0</div>
         {entry.text ? (
           // Podczas streamingu renderuj TEKST ZWYKŁY (pre-wrap). Markdown re-parsowany
           // co chunk pokazuje puste wiersze tabel / <hr> z częściowych „---" jako „paski"

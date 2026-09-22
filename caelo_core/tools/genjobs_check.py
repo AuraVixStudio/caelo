@@ -590,9 +590,8 @@ def _unit_route_validation(checks: list) -> None:
     ok = True
     try:
         ImageJobReq(prompt="a cat")  # text2img bez referencji
-        ImageJobReq(op="edit", prompt="x",
-                    images=["data:image/png;base64,AA", "data:image/png;base64,BB",
-                            "data:image/png;base64,CC"])
+        ImageJobReq(op="edit", prompt="x", model="grok-imagine-image-2.0",
+                    images=["data:image/png;base64,AA"] * 5)
         VideoJobReq(prompt="drone")  # text2video
         VideoJobReq(op="img2video", prompt="motion", image="data:image/png;base64,AA")
         VideoJobReq(op="edit", prompt="restyle", video="https://x/v.mp4")
@@ -632,9 +631,11 @@ def _unit_route_validation(checks: list) -> None:
                                                images=["data:image/png;base64,AA"]))))
     checks.append(("genjobs/route: edit without images rejected",
                    rejects(lambda: ImageJobReq(op="edit", prompt="x"))))
-    checks.append(("genjobs/route: more than 3 refs rejected",
-                   rejects(lambda: ImageJobReq(op="edit", prompt="x",
-                                               images=["data:image/png;base64,AA"] * 4))))
+    checks.append(("genjobs/route: more than model ref limit rejected",
+                   rejects(lambda: ImageJobReq(
+                       op="edit", prompt="x", model="grok-imagine-image-2.0",
+                       images=["data:image/png;base64,AA"] * 6,
+                   ))))
     checks.append(("genjobs/route: non-data-URI ref rejected",
                    rejects(lambda: ImageJobReq(op="edit", prompt="x",
                                                images=["http://evil/x.png"]))))
@@ -645,8 +646,7 @@ def _unit_route_validation(checks: list) -> None:
 
 
 def _unit_blob_stripping(checks: list) -> None:
-    """P1-D: to_dict() (odpowiedzi REST) usuwa data-URI; pełne params zostają w bazie
-    (egzekutor/retry); update_gen_job_status nie zeruje params (write-amp)."""
+    """SQLite/REST stay lean while executors and Retry can materialize inputs."""
     from caelo_core.genjobs import GenJobManager
 
     big = "data:image/png;base64," + "A" * 200000
@@ -655,7 +655,10 @@ def _unit_blob_stripping(checks: list) -> None:
     with tempfile.TemporaryDirectory() as d:
         store = _store(d)
 
+        executed_payloads = []
+
         def exec_ok(job, cancel):
+            executed_payloads.append(job.params)
             return []
 
         mgr = GenJobManager(exec_ok, store=store, workers=2, max_active=16)
@@ -682,15 +685,17 @@ def _unit_blob_stripping(checks: list) -> None:
                     lean_ok = False
             checks.append(("P1-D: list/to_dict strips data-URI from params", lean_ok))
 
-            # (2) full=True zwraca realne bajty (egzekutor/retry)
-            checks.append(("P1-D: to_dict(full=True) keeps real bytes",
-                           len(mgr.get(ji.id).to_dict(full=True)["params"]["images"][0]) > 100000))
-
-            # (3/4) baza zachowuje pełne params po stanie terminalnym (update_gen_job_status nie zeruje)
-            checks.append(("P1-D: store keeps full image data-URI after terminal (no write-amp blanking)",
-                           store.get_gen_job(ji.id)["params"]["images"][0] == big))
-            checks.append(("P1-D: store keeps full video data-URI",
-                           store.get_gen_job(jv.id)["params"]["video"] == bigv))
+            stored_image = store.get_gen_job(ji.id)["params"]["images"][0]
+            stored_video = store.get_gen_job(jv.id)["params"]["video"]
+            checks.append(("P1-D: SQLite stores image file markers",
+                           isinstance(stored_image, dict)
+                           and bool(stored_image.get("_caelo_input_file"))))
+            checks.append(("P1-D: SQLite stores video file markers",
+                           isinstance(stored_video, dict)
+                           and bool(stored_video.get("_caelo_input_file"))))
+            checks.append(("P1-D: executor receives materialized image/video bytes",
+                           any(p.get("images", [None])[0] == big for p in executed_payloads)
+                           and any(p.get("video") == bigv for p in executed_payloads)))
         finally:
             mgr.close()
             store.close()
@@ -699,7 +704,10 @@ def _unit_blob_stripping(checks: list) -> None:
     with tempfile.TemporaryDirectory() as d:
         store = _store(d)
 
+        retry_payloads = []
+
         def exec_fail(job, cancel):
+            retry_payloads.append(job.params)
             raise RuntimeError("boom")
 
         mgr = GenJobManager(exec_fail, store=store, workers=1, max_active=8)
@@ -707,8 +715,13 @@ def _unit_blob_stripping(checks: list) -> None:
             jf = mgr.submit(kind="image", op="edit", params={"prompt": "x", "n": 1, "images": [big]})
             mgr.wait(jf.id, timeout=10)
             again = mgr.retry(jf.id)
-            checks.append(("P1-D: retry preserves real data-URI refs",
-                           again is not None and mgr.get(again.id).params["images"][0] == big))
+            mgr.wait(again.id, timeout=10)
+            retry_marker = mgr.get(again.id).params["images"][0]
+            checks.append(("P1-D: retry preserves managed input references",
+                           isinstance(retry_marker, dict)
+                           and bool(retry_marker.get("_caelo_input_file"))
+                           and len(retry_payloads) == 2
+                           and all(p["images"][0] == big for p in retry_payloads)))
         finally:
             mgr.close()
             store.close()
