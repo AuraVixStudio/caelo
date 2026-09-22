@@ -5,10 +5,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# Code generation needs only the model registry, which is pure stdlib + `config`.
+# Importing `caelo_core` normally would run its `__init__`, which builds the FastAPI
+# app — so `npm run typecheck` would demand the whole sidecar dependency tree on every
+# machine that only touches the renderer (and on the frontend CI job, which installs
+# no Python deps). Registering a bare package stub keeps the relative imports inside
+# `caelo_core.models` working while skipping that `__init__`.
+if "caelo_core" not in sys.modules:
+    _pkg = types.ModuleType("caelo_core")
+    _pkg.__path__ = [str(ROOT / "caelo_core")]  # type: ignore[attr-defined]
+    sys.modules["caelo_core"] = _pkg
 
 from caelo_core.models.registry import get_model_registry  # noqa: E402
 
