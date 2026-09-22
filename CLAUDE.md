@@ -14,10 +14,12 @@ accurate — but the **target** architecture is different, and the decisions in 
 
 **Plan (source of truth for the integration):** [`docs/plans/PLAN_INTEGRACJI.md`](docs/plans/PLAN_INTEGRACJI.md)
 
-**Git:** the remote `caelo-1x` points at the local 1.x repo (for cherry-picking fixes). There is
-**no `origin`** and **no upstream tracking** on purpose — so nothing here can be pushed into the 1.x
-repo or a public GitHub repo by accident. Caelo 2.0 is intended to be public, but do not add an
-`origin` until the user explicitly provides or selects its repository URL.
+**Git:** the remote `caelo-1x` points at the local 1.x repo (for cherry-picking fixes). Since
+2026-09-22 `origin` is the **public** repo `AuraVixStudio/caelo` (the user selected it) and Caelo
+2.0 lives on its `main`. **Upstream tracking is still deliberately off** — `git push` alone does
+nothing, so publishing is always an explicit `git push origin main`. Never push to `caelo-1x`, and
+treat every push to `origin` as publishing: `main` is protected by 6 required status checks, so a
+push that bypasses them leaves CI to catch up afterwards.
 
 ## The central idea
 
