@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.11] — 2026-10-12
+
 Dostosowanie do zmian xAI z 2026-09/10 (docs.x.ai: Video overview, Reference-to-video,
 migracja `imagine-image-quality-nov-2`, Public URLs).
 
@@ -427,6 +429,7 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[2.0.11]: https://github.com/AuraVixStudio/caelo/compare/v2.0.10...v2.0.11
 [2.0.10]: https://github.com/AuraVixStudio/caelo/compare/v2.0.9...v2.0.10
 [2.0.9]: https://github.com/AuraVixStudio/caelo/compare/v0.1.5...v2.0.9
 [2.0.4]: https://github.com/AuraVixStudio/caelo/compare/v2.0.3...v2.0.4
