@@ -143,6 +143,8 @@ def _video_model(model_id: str) -> ModelDescriptor:
             # Wszystkie trzy generują dźwięk; `generate_audio: false` = klip bez audio.
             native_audio=True,
             first_last_frame=pinned,
+            # docs.x.ai „Video overview": „Automatic: matches the input image" (wszystkie trzy).
+            image_to_video_auto_aspect=True,
             video_extension=is_base,
             extension_seconds=None,
             edit_uploaded_video=is_base,

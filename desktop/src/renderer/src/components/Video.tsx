@@ -107,6 +107,10 @@ export function Video({ conn }: { conn: Conn }) {
   const frameRefConflict = usesRefs && !!image && capability?.reference_with_first_frame === false
   // xAI numeruje tagi od <IMAGE_0>; wysłany kadr startowy zajmuje <IMAGE_0>.
   const refTagStart = image && !frameRefConflict ? 1 : 0
+  // Image→video: proporcje wynikają z kadru startowego, a `aspect_ratio` jest ignorowane —
+  // pokaż „Auto" i nie wysyłaj pola (wybór usera zostaje na czas bez kadru).
+  const autoAspect = mode === 'generate' && !!image && !frameRefConflict
+    && !!capability?.image_to_video_auto_aspect
   const needsSource = mode !== 'generate'
   const videoJobs = jobs.filter((job) => job.kind === 'video')
   const doneCount = videoJobs.filter((job) => job.status === 'done').length
@@ -216,7 +220,7 @@ export function Video({ conn }: { conn: Conn }) {
       ...refs.map((item) => ({ id: item.artifactId, role: item.role ?? 'character' }))
     ].filter((item): item is { id: string; role: string } => !!item.id)
     await submitVideo({ provider: caps.provider, model: caps.model, op: operation,
-      prompt: prompt.trim(), duration, resolution, aspect_ratio: ratio,
+      prompt: prompt.trim(), duration, resolution, aspect_ratio: autoAspect ? 'Original' : ratio,
       image: mode === 'generate' ? image?.uri : undefined,
       last_image: operation === 'first_last_frame' ? lastImage?.uri : undefined,
       video: needsSource ? source?.uri : undefined,
@@ -344,7 +348,10 @@ export function Video({ conn }: { conn: Conn }) {
             capability?.duration_min != null && durationMax != null ? <Field label={`Duration · ${duration}s`} className="w-40"><Slider min={capability.duration_min} max={durationMax} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></Field> : null}
           {resolutions.length ? <Field label="Resolution" className="w-24"><Select size="sm" value={resolution} onChange={(e) => setResolution(e.target.value)}>
             {resolutions.map((value) => <option key={value}>{value}</option>)}</Select></Field> : null}
-          {capability?.aspect_ratios.length ? <Field label="Aspect" className="w-24"><Select size="sm" value={ratio} onChange={(e) => setRatio(e.target.value)}>
+          {autoAspect ? <Field label="Aspect" className="w-40"><Select size="sm" value="auto" disabled
+            title="The clip matches the first frame's aspect ratio.">
+            <option value="auto">Auto · first frame</option></Select></Field> :
+            capability?.aspect_ratios.length ? <Field label="Aspect" className="w-24"><Select size="sm" value={ratio} onChange={(e) => setRatio(e.target.value)}>
             {capability.aspect_ratios.map((value) => <option key={value}>{value}</option>)}</Select></Field> : null}
           {capability?.supports_seed ? <Field label="Seed" className="w-28"><Input className="h-8" type="number" min="0" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="Random" /></Field> : null}
           {capability?.native_audio ? <label className="flex h-8 items-center gap-2 text-xs"><input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} /> Native audio</label> : null}

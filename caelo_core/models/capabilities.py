@@ -45,6 +45,9 @@ class ModelCapabilities:
     native_audio: bool = False
     supports_seed: bool = False
     first_last_frame: bool = False
+    # Image→video: proporcje klipu wynikają z kadru startowego, a `aspect_ratio` jest
+    # ignorowane (xAI). UI pokazuje wtedy „Auto" i nie wysyła pola.
+    image_to_video_auto_aspect: bool = False
     video_extension: bool = False
     extension_seconds: Optional[int] = None
     extension_resolutions: tuple[str, ...] = ()

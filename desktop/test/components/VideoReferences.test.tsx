@@ -43,7 +43,8 @@ vi.mock('../../src/renderer/src/lib/api', async (orig) => ({
       reference_with_first_frame: id.includes('1.5'),
       max_reference_audios: id.includes('1.5') ? 3 : 0,
       voices: id.includes('1.5') ? ['eve', 'ara', 'rex', 'sal', 'leo'] : [],
-      max_keyframes: id.includes('1.5') ? 4 : 0
+      max_keyframes: id.includes('1.5') ? 4 : 0,
+      image_to_video_auto_aspect: true
     }
   })) }))
 }))
@@ -160,6 +161,20 @@ describe('Video — obrazy referencyjne (reference-to-video)', () => {
     expect(await screen.findByText(/Reference images · 1\/3/)).toBeInTheDocument()
     expect(screen.getByText('<IMAGE_1>')).toBeInTheDocument()
     expect(screen.queryByText('<IMAGE_0>')).toBeNull()
+  })
+
+  // docs.x.ai: image→video zawsze dopasowuje proporcje do kadru — wybór 16:9 byłby fikcją.
+  it('z kadrem startowym proporcje są automatyczne', async () => {
+    hub.videoFrame = { name: 'opening.png', uri: 'data:image/png;base64,FRAME' }
+    render(<Video conn={conn} />)
+    const auto = await screen.findByDisplayValue('Auto · first frame')
+    expect(auto).toBeDisabled()
+  })
+
+  it('bez kadru startowego proporcje są wybieralne', async () => {
+    render(<Video conn={conn} />)
+    expect(await screen.findByDisplayValue('16:9')).toBeEnabled()
+    expect(screen.queryByDisplayValue('Auto · first frame')).toBeNull()
   })
 
   it('model 1.5 pokazuje głosy i klatki kluczowe, bazowy nie', async () => {

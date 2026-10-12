@@ -107,6 +107,7 @@ export interface ModelCapabilities {
   native_audio: boolean
   supports_seed: boolean
   first_last_frame: boolean
+  image_to_video_auto_aspect: boolean
   video_extension: boolean
   extension_seconds: number | null
   extension_resolutions: string[]

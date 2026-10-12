@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.12] — 2026-10-12
+
+### Changed
+- Panel **Video**: z kadrem startowym pole proporcji pokazuje **Auto · first frame** i nie wysyła
+  `aspect_ratio` — xAI zawsze dopasowuje klip do proporcji obrazu wejściowego, więc wybór np. 16:9
+  był tylko pozorny.
+
+### Fixed
+- Szacunek kosztu **`grok-imagine-video-1.5-lite`** liczył każdą rozdzielczość po stawce 480p
+  ($0.02/s). Teraz stosuje stawki ze strony modelu: 480p $0.02, 720p $0.03, 1080p $0.14 za sekundę
+  (klip 1080p był zaniżony 7×).
+
 ## [2.0.11] — 2026-10-12
 
 Dostosowanie do zmian xAI z 2026-09/10 (docs.x.ai: Video overview, Reference-to-video,
@@ -429,6 +441,7 @@ Initial public release.
   a community package marketplace, headless CLI, ACP and LSP integration.
 - Electron (frontend) + Python FastAPI sidecar (backend); Windows installer, signed.
 
+[2.0.12]: https://github.com/AuraVixStudio/caelo/compare/v2.0.11...v2.0.12
 [2.0.11]: https://github.com/AuraVixStudio/caelo/compare/v2.0.10...v2.0.11
 [2.0.10]: https://github.com/AuraVixStudio/caelo/compare/v2.0.9...v2.0.10
 [2.0.9]: https://github.com/AuraVixStudio/caelo/compare/v0.1.5...v2.0.9

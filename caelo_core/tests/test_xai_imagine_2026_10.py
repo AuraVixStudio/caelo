@@ -148,6 +148,19 @@ def test_video_route_keyframe_rules() -> None:
 
 
 def test_pricing_lite_and_retired_slug() -> None:
-    assert estimate_cost("video", "text2video", {"model": "grok-imagine-video-1.5-lite",
-                                                 "resolution": "1080p", "duration": 10}) == 0.2
+    # Stawki per rozdzielczość ze strony modelu: 480p $0.02, 720p $0.03, 1080p $0.14 /s.
+    lite = {"model": "grok-imagine-video-1.5-lite", "duration": 10}
+    assert estimate_cost("video", "text2video", {**lite, "resolution": "480p"}) == 0.2
+    assert estimate_cost("video", "text2video", {**lite, "resolution": "720p"}) == 0.3
+    assert estimate_cost("video", "text2video", {**lite, "resolution": "1080p"}) == 1.4
     assert estimate_cost("image", "text2img", {"model": "grok-imagine-image-quality"}) == 0.04
+
+
+def test_image_to_video_aspect_is_automatic(sent) -> None:
+    # docs.x.ai: „Automatic: matches the input image" — UI wysyła wtedy 'Original'.
+    for model in ("grok-imagine-video-1.5", "grok-imagine-video-1.5-lite", "grok-imagine-video"):
+        assert get_model_registry().find("xai", model).capabilities.image_to_video_auto_aspect
+        _validate("img2video", model, aspect_ratio="Original", image=IMG)
+    _api().create_video_job("x", 6, "720p", "Original", model="grok-imagine-video-1.5",
+                            image_data_uri=IMG)
+    assert "aspect_ratio" not in sent[-1][1]

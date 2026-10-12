@@ -31,8 +31,9 @@ XAI_IMAGE_INPUT_USD = {
 VIDEO_COST_PER_SECOND = {
     "grok-imagine-video": {"480p": 0.05, "720p": 0.07},
     "grok-imagine-video-1.5": {"480p": 0.08, "720p": 0.14, "1080p": 0.25},
-    # Lite: cennik podaje jedną stawkę $0.020/s bez rozbicia na rozdzielczości.
-    "grok-imagine-video-1.5-lite": {"480p": 0.02, "720p": 0.02, "1080p": 0.02},
+    # Lite: strona modelu (docs.x.ai/developers/models/grok-imagine-video-1.5-lite, tabela
+    # „pricing per second based on resolution", 2026-10-12). Nagłówkowe $0.020/s to stawka 480p.
+    "grok-imagine-video-1.5-lite": {"480p": 0.02, "720p": 0.03, "1080p": 0.14},
 }
 DEFAULT_IMAGE_COST_PER_IMAGE = 0.02
 DEFAULT_VIDEO_COST_PER_SECOND = 0.08
