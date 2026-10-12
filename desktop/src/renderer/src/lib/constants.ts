@@ -10,11 +10,11 @@ export const RESOLUTIONS = ['1k', '2k']
 export const IMAGE_VARIANTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 // Fallback listy modeli obrazu, gdy /models jeszcze nie odpowiedziało
-// (źródło prawdy: caelo_core/config.py -> IMAGE_MODELS).
+// (źródło prawdy: caelo_core/config.py -> IMAGE_MODELS). `grok-imagine-image-quality`
+// jest wycofany 2026-11-02 (backend przepisuje go na 2.0 + quality low).
 export const IMAGE_MODELS = [
   'grok-imagine-image',
-  'grok-imagine-image-2.0',
-  'grok-imagine-image-quality'
+  'grok-imagine-image-2.0'
 ]
 
 // Parametr `quality` przyjmuje WYŁĄCZNIE grok-imagine-image-2.0 (docs.x.ai); inne
@@ -31,21 +31,27 @@ export const EDIT_MAX_IMAGES = 5
 // Źródło prawdy: caelo_core/config.py -> VIDEO_RESOLUTIONS(_BY_MODEL).
 export const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p']
 
-// Rozdzielczości dostępne dla danego modelu wideo.
+// Rozdzielczości dostępne dla danego modelu wideo (rodzina 1.5 — także lite — ma 1080p).
 export function videoResolutionsFor(model: string): string[] {
   return model.includes('1.5') ? ['480p', '720p', '1080p'] : ['480p', '720p']
 }
 
-// Reference-to-video: do 3 obrazów przenoszących postać/ubranie/przedmiot do klipu
-// (BEZ blokowania pierwszej klatki — to osobna rzecz niż „First frame"). Obsługuje
-// je tylko grok-imagine-video-1.5. Źródło prawdy: config.py -> VIDEO_REFERENCE_MODELS.
-export const VIDEO_MAX_REFERENCE_IMAGES = 3
+// Reference-to-video: obrazy przenoszące postać/produkt/miejsce do klipu (BEZ blokowania
+// pierwszej klatki — to osobna rzecz niż „First frame"). 1.5: do 14, bazowy: do 7,
+// lite: brak. Źródło prawdy: config.py -> VIDEO_MAX_REFERENCE_IMAGES (UI czyta rejestr).
+export const VIDEO_MAX_REFERENCE_IMAGES_BY_MODEL: Record<string, number> = {
+  'grok-imagine-video-1.5': 14,
+  'grok-imagine-video': 7
+}
+export function videoMaxReferenceImages(model: string): number {
+  return VIDEO_MAX_REFERENCE_IMAGES_BY_MODEL[model] ?? 0
+}
 export function videoModelSupportsReferences(model: string): boolean {
-  return model.includes('1.5')
+  return videoMaxReferenceImages(model) > 0
 }
 
 // 'Original' = nie wysyłaj aspect_ratio (zachowaj kadr źródłowy / domyślny API).
-export const VIDEO_RATIOS = ['Original', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']
+export const VIDEO_RATIOS = ['Original', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9', '5:2']
 
 // Czas trwania (suwak). Generacja: 1-15 s (domyślnie 8). Przedłużenie: 1-10 s (domyślnie 6).
 export const VIDEO_DURATION_MIN = 1

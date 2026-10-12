@@ -26,6 +26,15 @@ class ModelCapabilities:
     max_character_reference_images: int = 0
     max_object_reference_images: int = 0
     max_style_reference_images: int = 0
+    # Ograniczenia klipu, gdy wysłano referencje (xAI: ≤720p; bazowy model ≤10 s i bez
+    # kadru startowego). Puste/None = brak dodatkowych ograniczeń.
+    reference_resolutions: tuple[str, ...] = ()
+    reference_duration_max: Optional[int] = None
+    reference_with_first_frame: bool = True
+    # Głosy presetowe z lip-synciem (xAI `reference_audios`) i przypięte klatki pośrednie.
+    max_reference_audios: int = 0
+    voices: tuple[str, ...] = ()
+    max_keyframes: int = 0
     supports_streaming: bool = False
     supports_tools: bool = False
     supports_temperature: bool = False
@@ -156,6 +165,46 @@ def validate_capabilities(
     if roles.count("starting_image") and "edit" not in capabilities.operations:
         violations.append(CapabilityViolation(
             "reference_roles", "Model does not support a starting image for editing.",
+        ))
+    if refs and p.get("reference_images"):
+        resolution = p.get("resolution")
+        if resolution and capabilities.reference_resolutions                 and resolution not in capabilities.reference_resolutions:
+            violations.append(CapabilityViolation(
+                "resolution",
+                f"Reference images allow resolution up to {capabilities.reference_resolutions[-1]}.",
+            ))
+        try:
+            ref_seconds = int(p.get("duration")) if p.get("duration") is not None else None
+        except (TypeError, ValueError):
+            ref_seconds = None
+        if capabilities.reference_duration_max is not None and ref_seconds is not None                 and ref_seconds > capabilities.reference_duration_max:
+            violations.append(CapabilityViolation(
+                "duration",
+                f"With reference images the clip can be at most {capabilities.reference_duration_max}s.",
+            ))
+        if p.get("image") and not capabilities.reference_with_first_frame:
+            violations.append(CapabilityViolation(
+                "image", "Model cannot combine a first frame with reference images.",
+            ))
+    voices = list(p.get("reference_audios") or [])
+    if len(voices) > capabilities.max_reference_audios:
+        violations.append(CapabilityViolation(
+            "reference_audios",
+            "Model does not support voice references." if capabilities.max_reference_audios == 0
+            else f"Model accepts at most {capabilities.max_reference_audios} voices.",
+        ))
+    unknown_voices = sorted({str(v) for v in voices
+                             if capabilities.voices and str(v).lower() not in capabilities.voices})
+    if unknown_voices:
+        violations.append(CapabilityViolation(
+            "reference_audios", f"Unknown voice(s): {', '.join(unknown_voices)}.",
+        ))
+    keyframes = list(p.get("keyframe_images") or [])
+    if len(keyframes) > capabilities.max_keyframes:
+        violations.append(CapabilityViolation(
+            "keyframes",
+            "Model does not support keyframes." if capabilities.max_keyframes == 0
+            else f"Model accepts at most {capabilities.max_keyframes} keyframes.",
         ))
     duration = p.get("duration")
     if duration is not None:

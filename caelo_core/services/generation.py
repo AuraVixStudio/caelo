@@ -6,6 +6,7 @@ import time
 
 from caelo_core.jobs.queue import GenJobCancelled
 from caelo_core.providers import VideoGenerationRequest, VideoSubmission
+from caelo_core.providers.base import keyframes_from_params
 
 
 class GenerationApplicationService:
@@ -128,6 +129,8 @@ class GenerationApplicationService:
             video=p.get("video"),
             reference_images=tuple(p.get("reference_images") or ()),
             reference_roles=tuple(p.get("reference_roles") or ()),
+            keyframes=keyframes_from_params(p),
+            reference_audios=tuple(p.get("reference_audios") or ()),
             generate_audio=bool(p.get("generate_audio", True)),
             seed=p.get("seed"),
             negative_prompt=p.get("negative_prompt") or None,

@@ -6,6 +6,7 @@ import { useHub } from '../lib/hub'
 import type { HubModule } from '../lib/hubQuery'
 import { ArtifactMedia } from './ArtifactMedia'
 import { SendToMenu } from './SendToMenu'
+import { ShareLinkButton, canSharePublicly } from './ShareLinkButton'
 import { VideoSendMenu } from './VideoSendMenu'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -191,11 +192,10 @@ export function ArtifactCard({
         {isImage ? <SendToMenu conn={conn} artifactId={art.id} imageActions side="top" /> : null}
         {isVideo ? <VideoSendMenu conn={conn} art={art} /> : null}
         {children}
-        {onDeleted ? (
-          <span className="ml-auto">
-            <DeleteButton conn={conn} art={art} onDeleted={onDeleted} />
-          </span>
-        ) : null}
+        <span className="ml-auto flex items-center gap-1">
+          {canSharePublicly(art) ? <ShareLinkButton conn={conn} art={art} /> : null}
+          {onDeleted ? <DeleteButton conn={conn} art={art} onDeleted={onDeleted} /> : null}
+        </span>
       </div>
       <PromptBar art={art} />
     </div>

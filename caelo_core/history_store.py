@@ -424,6 +424,28 @@ class HistoryStore:
             cur = self._conn.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
         return cur.rowcount
 
+    def update_artifact_meta(self, artifact_id: str, updates: dict) -> Optional[dict]:
+        """Scal `updates` z `meta` artefaktu (klucz z wartością None = usuń). None = brak
+        artefaktu. Odczyt i zapis pod jednym lockiem, więc równoległe zmiany się nie gubią."""
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT meta FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            if not row:
+                return None
+            try:
+                meta = json.loads(row["meta"]) if row["meta"] else {}
+            except (TypeError, ValueError):
+                meta = {}
+            for key, value in updates.items():
+                if value is None:
+                    meta.pop(key, None)
+                else:
+                    meta[key] = value
+            self._conn.execute("UPDATE artifacts SET meta = ? WHERE id = ?",
+                               (json.dumps(meta, ensure_ascii=False), artifact_id))
+        return meta
+
     def set_artifact_favorite(self, artifact_id: str, favorite: bool) -> bool:
         with self._lock, self._conn:
             cur = self._conn.execute(

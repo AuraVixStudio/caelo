@@ -81,8 +81,8 @@ Unified async queue for image & video (statuses: queued → running → done/fai
 |---|---|---|
 | `GET` | `/genjobs` | List jobs (+ `total_cost`). |
 | `DELETE` | `/genjobs` | Clear finished jobs. |
-| `POST` | `/genjobs/image` | Enqueue an image job (text2img / edit / variation; ≤3 refs). |
-| `POST` | `/genjobs/video` | Enqueue a video job (text2video / img2video / edit / extend). |
+| `POST` | `/genjobs/image` | Enqueue an image job (text2img / edit / variation; refs per model: 2.0 ≤5, 1.0 ≤3). |
+| `POST` | `/genjobs/video` | Enqueue a video job (text2video / img2video / reference_to_video / first_last_frame / edit / extend). |
 | `GET` | `/genjobs/{job_id}` | Get one job. |
 | `DELETE` | `/genjobs/{job_id}` | Remove a finished job. |
 | `POST` | `/genjobs/{job_id}/cancel` | Cancel a queued/running job. |
@@ -92,12 +92,26 @@ Unified async queue for image & video (statuses: queued → running → done/fai
 renderer hides the controls and the backend drops the field rather than break the call):
 
 - `quality` (`low` | `medium` | `auto`) on `/genjobs/image` — **`grok-imagine-image-2.0` only**; xAI's
-  default is `medium`.
-- `reference_images` (≤3 data-URIs) on `/genjobs/video` — **`grok-imagine-video-1.5` only**, and
-  only for `text2video` / `img2video` (`edit` / `extend` reject it with 422). Distinct from
-  `image`, which is the first frame: references carry a character/object into the clip without
-  locking the opening shot and are addressed in the prompt as `<IMAGE_1>`…`<IMAGE_3>`. Like other
-  data-URI fields they are stripped from `GET /genjobs` responses (P1-D).
+  default is `auto` (`low` for generation, `medium` for editing). The retired
+  `grok-imagine-image-quality` / `grok-imagine-image-pro` ids are rewritten to
+  `grok-imagine-image-2.0` with `quality: "low"` (what xAI does after 2026-11-02).
+- `reference_images` (data-URIs) on `/genjobs/video` — **≤14 on `grok-imagine-video-1.5`, ≤7 on
+  `grok-imagine-video`**, none on `-1.5-lite`; `edit` / `extend` reject them with 422. With
+  references the clip is ≤720p (≤10 s on the base model, which also rejects `image` alongside them).
+  Distinct from `image`, which is the first frame. Prompt tags start at `<IMAGE_0>`; a sent `image`
+  takes `<IMAGE_0>` and the references shift to `<IMAGE_1>`…. Like other data-URI fields they are
+  stripped from `GET /genjobs` responses (P1-D).
+- `reference_audios` (≤3 preset voice ids, the TTS roster), `last_image` (sent as `last_frame`) and
+  `keyframe_images` + `keyframe_times` (≤4, parallel lists; seconds on a ⅓-s grid strictly inside
+  the clip, ≥⅓ s apart) — **`grok-imagine-video-1.5` only**.
+- `generate_audio: false` produces a silent clip on any xAI video model.
+
+**Public links (xAI Files API)**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/artifacts/{id}/public-url` | Body `{confirm: true, expires_after?: 3600…2592000}` — uploads the file to xAI Files (once) and returns `{public_url, expires_at, file_id}`. PNG/JPEG/GIF/WebP/MP4/WebM/PDF ≤ 50 MiB. |
+| `DELETE` | `/artifacts/{id}/public-url` | Revokes the link; the file stays in xAI Files storage. |
 
 ## Voice (M12)
 

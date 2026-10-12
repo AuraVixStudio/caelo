@@ -1,12 +1,14 @@
-"""Snapshot katalogu modeli trzech dostawców — sprawdzony 2026-09-22.
+"""Snapshot katalogu modeli trzech dostawców — sprawdzony 2026-09-22 (xAI: 2026-10-12).
 
 Katalog jest ręcznie utrzymywaną listą, więc łatwo o ciche rozjechanie się z tym, co
 dostawca faktycznie serwuje. Te asercje pilnują ustaleń z ostatniej weryfikacji:
 
-* xAI — `docs.x.ai/developers/models` (8 modeli czatu, 3 obrazu, 2 wideo). Slugi
+* xAI — `docs.x.ai/developers/models` (8 modeli czatu, 2 obrazu, 3 wideo). Slugi
   wycofane 2026-05-15 (`grok-4-0709`/`grok-4`, `grok-3`, `grok-code-fast-1`,
   `grok-imagine-image-pro`, rodziny `*-fast-*`) NADAL się rozwiązują, ale milcząco
   przekierowują na `grok-4.3` i są po jego cenach — nie mogą wrócić do menu.
+  `grok-imagine-image-quality` jest wycofany 2026-11-02 (przekierowanie na 2.0 z
+  `quality: "low"`), więc też zniknął z menu; jego id przepisujemy jawnie.
 * Google — lista publisher models z Vertex AI (projekt użytkownika, ADC).
   `gemini-2.5-flash-image` ma ogłoszone wyłączenie 2026-10-02.
 * OpenAI — `developers.openai.com/api/docs/models`. `gpt-5.6-cyber` i `gpt-daybreak-*`
@@ -22,13 +24,14 @@ from caelo_core.models.registry import get_model_registry
 
 
 CATALOG_VERIFIED = "2026-09-22"
+XAI_CATALOG_VERIFIED = "2026-10-12"
 
 # Wycofane u dostawcy — pozycja w menu kłamałaby, który model faktycznie liczy.
 RETIRED_XAI_SLUGS = {
     "grok-4", "grok-4-0709", "grok-3", "grok-3-mini", "grok-code-fast-1",
     "grok-4-fast-reasoning", "grok-4-fast-non-reasoning",
     "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning",
-    "grok-imagine-image-pro",
+    "grok-imagine-image-pro", "grok-imagine-image-quality",
 }
 # Dostępne wyłącznie po zgodzie programu Daybreak — nie dla zwykłego klucza.
 GATED_OPENAI_MODELS = {"gpt-5.6-cyber", "gpt-daybreak-red-latest", "gpt-daybreak-blue-latest"}
@@ -44,10 +47,35 @@ def test_xai_catalog_matches_published_models() -> None:
         "grok-4.20-0309-non-reasoning", "grok-4.20-0309-reasoning",
         "grok-4.20-multi-agent-0309", "grok-build-0.1",
     ]
-    assert ids("xai", "image") == [
-        "grok-imagine-image", "grok-imagine-image-2.0", "grok-imagine-image-quality",
+    assert ids("xai", "image") == ["grok-imagine-image", "grok-imagine-image-2.0"]
+    assert ids("xai", "video") == [
+        "grok-imagine-video-1.5", "grok-imagine-video-1.5-lite", "grok-imagine-video",
     ]
-    assert ids("xai", "video") == ["grok-imagine-video-1.5", "grok-imagine-video"]
+
+
+def test_retired_image_quality_slug_is_rewritten_to_2_0_low() -> None:
+    # Ten sam łańcuch, który xAI zastosuje po 2026-11-02 — ale jawnie, przed wysłaniem.
+    assert config.normalize_image_model("grok-imagine-image-quality") == (
+        "grok-imagine-image-2.0", "low")
+    assert config.normalize_image_model("grok-imagine-image-pro", "medium") == (
+        "grok-imagine-image-2.0", "medium")
+    assert config.normalize_image_model("grok-imagine-image") == ("grok-imagine-image", None)
+
+
+def test_xai_video_capabilities_follow_the_video_overview() -> None:
+    registry = get_model_registry()
+    v15 = registry.find("xai", "grok-imagine-video-1.5").capabilities
+    lite = registry.find("xai", "grok-imagine-video-1.5-lite").capabilities
+    base = registry.find("xai", "grok-imagine-video").capabilities
+    assert (v15.max_reference_images, base.max_reference_images, lite.max_reference_images) == (14, 7, 0)
+    assert set(lite.operations) == {"text2video", "img2video"}
+    assert {"edit", "extend"} <= set(base.operations) and base.video_extension
+    assert "edit" not in v15.operations and "first_last_frame" in v15.operations
+    assert (v15.max_reference_audios, v15.max_keyframes) == (3, 4)
+    assert (base.max_reference_audios, base.max_keyframes) == (0, 0)
+    assert base.reference_duration_max == 10 and not base.reference_with_first_frame
+    assert "1080p" in lite.resolutions and "1080p" not in base.resolutions
+    assert {"21:9", "5:2"} <= set(v15.aspect_ratios)
 
 
 def test_retired_xai_slugs_are_not_offered() -> None:

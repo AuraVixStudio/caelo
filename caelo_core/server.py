@@ -51,6 +51,7 @@ from caelo_core.routes import (
     packages,
     permissions,
     projects,
+    public_urls,
     sandbox,
     secrets,
     sessions,
@@ -187,6 +188,7 @@ def create_app(
     app.include_router(fs.router, dependencies=guard)
     app.include_router(git.router, dependencies=guard)
     app.include_router(history.router, dependencies=guard)
+    app.include_router(public_urls.router, dependencies=guard)  # xAI Files: publiczne linki artefaktów
     app.include_router(projects.router, dependencies=guard)
     app.include_router(collections.router, dependencies=guard)
     app.include_router(permissions.router, dependencies=guard)

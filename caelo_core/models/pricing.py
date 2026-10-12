@@ -7,11 +7,14 @@ from decimal import Decimal, ROUND_HALF_UP
 from math import ceil
 from typing import Optional
 
+import config  # type: ignore
 
+
+# docs.x.ai/developers/pricing (2026-10). `grok-imagine-image-quality` jest wycofany
+# 2026-11-02 i liczony jak 2.0 `low` (patrz `config.RETIRED_IMAGE_MODELS`).
 IMAGE_COST_PER_IMAGE = {
     "grok-imagine-image": 0.02,
     "grok-imagine-image-2.0": 0.04,
-    "grok-imagine-image-quality": 0.05,
 }
 XAI_IMAGE_OUTPUT_USD = {
     "grok-imagine-image-2.0": {
@@ -20,19 +23,16 @@ XAI_IMAGE_OUTPUT_USD = {
         ("1k", "medium"): 0.06,
         ("2k", "medium"): 0.08,
     },
-    "grok-imagine-image-quality": {
-        ("1k", "default"): 0.05,
-        ("2k", "default"): 0.07,
-    },
 }
 XAI_IMAGE_INPUT_USD = {
     "grok-imagine-image": 0.002,
     "grok-imagine-image-2.0": 0.01,
-    "grok-imagine-image-quality": 0.01,
 }
 VIDEO_COST_PER_SECOND = {
     "grok-imagine-video": {"480p": 0.05, "720p": 0.07},
     "grok-imagine-video-1.5": {"480p": 0.08, "720p": 0.14, "1080p": 0.25},
+    # Lite: cennik podaje jedną stawkę $0.020/s bez rozbicia na rozdzielczości.
+    "grok-imagine-video-1.5-lite": {"480p": 0.02, "720p": 0.02, "1080p": 0.02},
 }
 DEFAULT_IMAGE_COST_PER_IMAGE = 0.02
 DEFAULT_VIDEO_COST_PER_SECOND = 0.08
@@ -268,9 +268,10 @@ def estimate_cost(kind: str, op: str, params: dict, provider: Optional[str] = No
     try:
         model = params.get("model") or ""
         if kind == "image":
+            model, quality_override = config.normalize_image_model(model, params.get("quality"))
             n = int(params.get("n", 1) or 1)
             resolution = str(params.get("resolution") or "1k").lower()
-            quality = str(params.get("quality") or "auto").lower()
+            quality = str(quality_override or "auto").lower()
             if model == "grok-imagine-image-2.0" and quality == "auto":
                 quality = "medium" if params.get("images") else "low"
             tiers = XAI_IMAGE_OUTPUT_USD.get(model, {})

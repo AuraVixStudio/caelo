@@ -357,15 +357,32 @@ def context_window_for(model: str) -> int:
     return _CONTEXT_WINDOW_DEFAULT
 
 # --- Modele obrazu (zakładka Image: generowanie + edycja) ---
-# "quality" daje lepszą jakość za wyższą cenę; standard jest tańszy i jest domyślny.
-# 2.0 (docs 2026-08) to nowsza generacja i jako jedyny przyjmuje parametr
+# 2.0 (docs 2026-08) to bieżąca generacja i jako jedyny przyjmuje parametr
 # `quality` (low|medium|auto). Koszt zależy także od jakości i rozdzielczości.
+# `grok-imagine-image-quality` jest WYCOFANY (docs.x.ai, migracja „imagine-image-quality-nov-2":
+# ogłoszone 2026-09-02, wyłączenie 2026-11-02) — po tej dacie xAI milcząco przekierowuje go
+# na 2.0 z `quality: "low"` (taniej o $0.01). Nie oferujemy go w menu; stare ustawienia,
+# zadania i retry przepisujemy jawnie przez `normalize_image_model`.
 IMAGE_MODELS = [
     "grok-imagine-image",
     "grok-imagine-image-2.0",
-    "grok-imagine-image-quality",
 ]
 DEFAULT_IMAGE_MODEL = "grok-imagine-image-2.0"
+
+# Wycofany slug → (model docelowy, wymuszona jakość). `grok-imagine-image-pro` już wcześniej
+# wskazywał na `-quality`, więc idzie tym samym łańcuchem.
+RETIRED_IMAGE_MODELS = {
+    "grok-imagine-image-quality": ("grok-imagine-image-2.0", "low"),
+    "grok-imagine-image-pro": ("grok-imagine-image-2.0", "low"),
+}
+
+
+def normalize_image_model(model, quality=None):
+    """(model, quality) po migracji wycofanych slugów. Jawna jakość użytkownika wygrywa."""
+    target = RETIRED_IMAGE_MODELS.get(model or "")
+    if target is None:
+        return model, quality
+    return target[0], quality or target[1]
 
 # Modele przyjmujące parametr `quality` i jego dozwolone wartości (docs.x.ai:
 # „The parameter is only supported for grok-imagine-image-2.0"; od 2026-08
@@ -374,33 +391,74 @@ DEFAULT_IMAGE_MODEL = "grok-imagine-image-2.0"
 IMAGE_QUALITY_MODELS = ["grok-imagine-image-2.0"]
 IMAGE_QUALITY_LEVELS = ["low", "medium", "auto"]
 
+# Edycja: maks. obrazów źródłowych (docs 2026-08: 2.0 przyjmuje 5, wcześniej 3).
+IMAGE_EDIT_MAX_SOURCES = {"grok-imagine-image-2.0": 5}
+IMAGE_EDIT_MAX_SOURCES_DEFAULT = 3
+
 
 def image_model_supports_quality(model: str) -> bool:
     """Czy dany model obrazu przyjmuje parametr `quality` (tylko rodzina 2.0)."""
     return (model or "") in IMAGE_QUALITY_MODELS
 
 # --- Modele wideo (zakładka Video + komendy czatu /video, narzędzie generate_video) ---
-# Nowszy model 1.5 daje lepszą jakość; bazowy zostawiamy jako wybór wsteczny.
-# (xAI zdjęło sufiks `-preview` — `grok-imagine-video-1.5` to teraz stabilne ID; docs 2026-06.)
+# docs.x.ai „Video overview" (2026-10):
+#   grok-imagine-video-1.5       — text/image/reference-to-video, first/last frame, keyframes;
+#                                  natywne 1080p; do 14 referencji (≤720p), 3 głosy.
+#   grok-imagine-video-1.5-lite  — tylko text/image-to-video, najtańszy; 1080p = upscale z 720p;
+#                                  bez referencji, głosów, przypiętych klatek.
+#   grok-imagine-video           — text/image/reference-to-video (do 7 referencji, ≤10 s),
+#                                  JEDYNY z edit + extend; do 720p.
 VIDEO_MODELS = [
     "grok-imagine-video-1.5",
+    "grok-imagine-video-1.5-lite",
     "grok-imagine-video",
 ]
 DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5"
 
-# Reference-to-video (docs.x.ai 2026-08, tylko grok-imagine-video-1.5): do 3 obrazów
-# referencyjnych w polu `reference_images` — postać/ubranie/przedmiot są przenoszone do
-# klipu BEZ blokowania pierwszej klatki (to inna rzecz niż `image` w image→video, gdzie
-# obraz JEST pierwszą klatką). W promptcie odwołujemy się do nich tagami <IMAGE_1>…
-MAX_VIDEO_REFERENCE_IMAGES = 3
-VIDEO_REFERENCE_MODELS = ["grok-imagine-video-1.5"]
+# Reference-to-video: obrazy w `reference_images` przenoszą postać/produkt/miejsce do klipu
+# BEZ blokowania pierwszej klatki (to co innego niż `image` w image→video). W promptcie
+# odwołujemy się do nich tagami od <IMAGE_0>; gdy `image` (pierwsza klatka) też jest wysłany,
+# to ON jest <IMAGE_0>, a referencje zaczynają się od <IMAGE_1>.
+VIDEO_MAX_REFERENCE_IMAGES = {
+    "grok-imagine-video-1.5": 14,
+    "grok-imagine-video": 7,
+}
+# Zgodność wsteczna: największy limit (walidacja wejścia tras); per model → funkcja niżej.
+MAX_VIDEO_REFERENCE_IMAGES = max(VIDEO_MAX_REFERENCE_IMAGES.values())
+VIDEO_REFERENCE_MODELS = list(VIDEO_MAX_REFERENCE_IMAGES)
+# Referencje ograniczają klip: ≤720p, a na bazowym modelu ≤10 s i bez `image`.
+VIDEO_REFERENCE_MAX_RESOLUTION = "720p"
+VIDEO_REFERENCE_MAX_DURATION = {"grok-imagine-video-1.5": 15, "grok-imagine-video": 10}
+# Głosy presetowe z lip-synciem (`reference_audios: [{"voice_id": …}]`), tylko 1.5, ≤3;
+# w promptcie <AUDIO_0>…<AUDIO_2>. Roster = głosy TTS (`VOICE_VOICES`).
+VIDEO_VOICE_MODELS = ["grok-imagine-video-1.5"]
+MAX_VIDEO_REFERENCE_AUDIOS = 3
+# Przypięte klatki (tylko 1.5): `last_frame` + `keyframes` [{image, timestamp_s}] (≤4,
+# timestamp na siatce 1/3 s, ściśle wewnątrz klipu, odstęp ≥1/3 s).
+VIDEO_PINNED_FRAME_MODELS = ["grok-imagine-video-1.5"]
+MAX_VIDEO_KEYFRAMES = 4
+# Proporcje wideo (wszystkie trzy modele, docs 2026-10). 'Original' = nie wysyłaj pola.
+VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9", "5:2"]
+
+
+def video_max_reference_images(model: str) -> int:
+    """Limit `reference_images` dla modelu (0 = model ich nie przyjmuje)."""
+    return VIDEO_MAX_REFERENCE_IMAGES.get(model or DEFAULT_VIDEO_MODEL, 0)
 
 
 def video_model_supports_references(model: str) -> bool:
-    """Czy dany model wideo przyjmuje `reference_images` (tylko 1.5)."""
-    return (model or DEFAULT_VIDEO_MODEL) in VIDEO_REFERENCE_MODELS
+    """Czy dany model wideo przyjmuje `reference_images` (1.5 i bazowy; NIE lite)."""
+    return video_max_reference_images(model) > 0
+
+
+def video_model_supports_voices(model: str) -> bool:
+    return (model or DEFAULT_VIDEO_MODEL) in VIDEO_VOICE_MODELS
+
+
+def video_model_supports_pinned_frames(model: str) -> bool:
+    return (model or DEFAULT_VIDEO_MODEL) in VIDEO_PINNED_FRAME_MODELS
 # Model wideo dla CZATU (narzedzie generate_video). Celowo BAZOWY, nie 1.5:
-# 1.5 ma mniej mozliwosci (tylko image->video, brak edit/extend) niz bazowy grok-imagine-video.
+# tylko bazowy grok-imagine-video ma edit/extend, a czat potrafi o nie poprosic.
 # Panel Video nadal pozwala wybrac dowolny model (domyslnie 1.5).
 # Override: env CAELO_CHAT_VIDEO_MODEL.
 CHAT_VIDEO_MODEL = (os.environ.get("CAELO_CHAT_VIDEO_MODEL", "").strip()
@@ -479,10 +537,12 @@ FONTS = {
 # --- Default Settings ---
 ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20", "21:9", "5:2"]
 RESOLUTIONS = ["1k", "2k"]
-# Wideo: 1080p doszło w modelu 1.5 (docs x.ai 2026-07). Lista domyślna = pełny zbiór;
+# Wideo: 1080p doszło w rodzinie 1.5 (docs x.ai 2026-07). Lista domyślna = pełny zbiór;
 # rozdzielczości zależą od modelu — bazowy grok-imagine-video kończy się na 720p.
 VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"]
 VIDEO_RESOLUTIONS_BY_MODEL = {
     "grok-imagine-video-1.5": ["480p", "720p", "1080p"],
+    # 1080p w lite to upscale z 720p (docs 2026-10) — nadal poprawna wartość pola.
+    "grok-imagine-video-1.5-lite": ["480p", "720p", "1080p"],
     "grok-imagine-video": ["480p", "720p"],
 }

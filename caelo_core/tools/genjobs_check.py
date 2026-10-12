@@ -596,7 +596,7 @@ def _unit_route_validation(checks: list) -> None:
         VideoJobReq(op="img2video", prompt="motion", image="data:image/png;base64,AA")
         VideoJobReq(op="edit", prompt="restyle", video="https://x/v.mp4")
         VideoJobReq(op="extend", prompt="more", video="https://x/v.mp4", duration=5)
-        # 2026-08: reference-to-video (do 3) i `quality` obrazu (2.0)
+        # reference-to-video (1.5: do 14, docs 2026-10) i `quality` obrazu (2.0)
         VideoJobReq(prompt="<IMAGE_1> walks in",
                     reference_images=["data:image/png;base64,AA"] * 3)
         VideoJobReq(op="img2video", prompt="motion", image="data:image/png;base64,AA",
@@ -605,9 +605,9 @@ def _unit_route_validation(checks: list) -> None:
     except Exception:
         ok = False
     checks.append(("genjobs/route: valid requests accepted", ok))
-    checks.append(("genjobs/route: more than 3 video reference images rejected",
+    checks.append(("genjobs/route: more than 14 video reference images rejected",
                    rejects(lambda: VideoJobReq(prompt="x",
-                                               reference_images=["data:image/png;base64,AA"] * 4))))
+                                               reference_images=["data:image/png;base64,AA"] * 15))))
     checks.append(("genjobs/route: non-data-URI video reference rejected",
                    rejects(lambda: VideoJobReq(prompt="x",
                                                reference_images=["http://evil/x.png"]))))

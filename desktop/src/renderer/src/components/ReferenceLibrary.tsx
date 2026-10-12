@@ -13,12 +13,16 @@ export function ReferenceLibrary({
   items,
   max,
   onChange,
-  options = VIDEO_REFERENCE_ROLE_OPTIONS
+  options = VIDEO_REFERENCE_ROLE_OPTIONS,
+  tagStart = 0
 }: {
   items: StagedImage[]
   max: number
   onChange: (items: StagedImage[]) => void
   options?: ReferenceRoleOption[]
+  /** Numer pierwszego tagu promptu: xAI liczy od <IMAGE_0>, a gdy wysłano też kadr
+   *  startowy, to on jest <IMAGE_0> i referencje zaczynają się od <IMAGE_1>. */
+  tagStart?: number
 }) {
   const [preview, setPreview] = useState<StagedImage | null>(null)
   if (!items.length) return null
@@ -35,7 +39,7 @@ export function ReferenceLibrary({
                   <Maximize2 size={18} />
                 </span>
               </button>
-              <span className="pointer-events-none absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 text-[10px] text-white">&lt;IMAGE_{index + 1}&gt;</span>
+              <span className="pointer-events-none absolute bottom-0 left-0 rounded-tr bg-black/70 px-1 text-[10px] text-white">&lt;IMAGE_{index + tagStart}&gt;</span>
               <button type="button" aria-label={`Remove ${item.name}`} onClick={() => onChange(items.filter((_, i) => i !== index))}
                 className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-error text-white">
                 <X size={12} />

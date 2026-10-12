@@ -91,6 +91,12 @@ export interface ModelCapabilities {
   max_character_reference_images: number
   max_object_reference_images: number
   max_style_reference_images: number
+  reference_resolutions: string[]
+  reference_duration_max: number | null
+  reference_with_first_frame: boolean
+  max_reference_audios: number
+  voices: string[]
+  max_keyframes: number
   supports_streaming: boolean
   supports_tools: boolean
   supports_temperature: boolean
@@ -482,11 +488,17 @@ export interface VideoGenJobBody {
   model?: string
   image?: string // data-URI: first frame for img2video
   video?: string // https URL or data:video — source for edit/extend
-  // Reference-to-video (grok-imagine-video-1.5, up to 3): carries a character, outfit
-  // or object into the clip WITHOUT locking the first frame. Referenced in the prompt
-  // as <IMAGE_1>…<IMAGE_3>. Orthogonal to `image` — both may be sent together.
+  // Reference-to-video (xAI 1.5: up to 14, base: up to 7): carries a character, product
+  // or place into the clip WITHOUT locking the first frame. Referenced in the prompt as
+  // <IMAGE_0>…; when `image` (first frame) is also sent it is <IMAGE_0> and references
+  // start at <IMAGE_1>. The base model cannot combine the two.
   reference_images?: string[]
   reference_roles?: string[]
+  // xAI 1.5: preset voices (TTS roster) for lip-synced speech, <AUDIO_0>… in the prompt.
+  reference_audios?: string[]
+  // xAI 1.5: pinned in-between frames — parallel lists (data-URI + second, 1/3 s grid).
+  keyframe_images?: string[]
+  keyframe_times?: number[]
   last_image?: string
   generate_audio?: boolean
   seed?: number
@@ -775,6 +787,26 @@ export const validateProvider = (c: Conn, provider: string): Promise<Record<stri
  *  Used to clear accumulated media from Recent / Gallery. Irreversible. */
 export const deleteArtifact = (c: Conn, id: string): Promise<{ ok: boolean; deleted_file: boolean }> =>
   api(c, `/artifacts/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+// xAI Files API public links (docs.x.ai "Public URLs"): the sidecar uploads the file once
+// and asks xAI for a CDN link anyone can open. `confirm` is the user's explicit consent.
+export interface ArtifactPublicUrl {
+  public_url: string | null
+  expires_at: number | null
+  file_id: string | null
+}
+
+export const createArtifactPublicUrl = (
+  c: Conn, id: string, expiresAfter: number | null
+): Promise<ArtifactPublicUrl> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}/public-url`, {
+    method: 'POST', body: JSON.stringify({ confirm: true, expires_after: expiresAfter })
+  })
+
+export const revokeArtifactPublicUrl = (
+  c: Conn, id: string
+): Promise<ArtifactPublicUrl & { revoked: boolean }> =>
+  api(c, `/artifacts/${encodeURIComponent(id)}/public-url`, { method: 'DELETE' })
 
 export const getArtifactInputBlock = (c: Conn, id: string): Promise<InputBlock> =>
   api(c, `/artifacts/${encodeURIComponent(id)}/input-block`)

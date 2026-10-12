@@ -198,7 +198,7 @@ def test_catalog_routes_keep_machine_readable_shape() -> None:
     one = list_capabilities(
         provider="xai", model="grok-imagine-video-1.5", media_type="video"
     )
-    assert one["capability"]["capabilities"]["max_reference_images"] == 3
+    assert one["capability"]["capabilities"]["max_reference_images"] == 14
 
     backend = SimpleNamespace(
         read_settings=lambda: {},

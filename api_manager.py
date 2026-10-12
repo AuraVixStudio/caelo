@@ -5,8 +5,10 @@ import json
 import time
 from PIL import Image
 from config import (API_BASE, DEFAULT_VIDEO_MODEL, DEFAULT_IMAGE_MODEL,
-                    IMAGE_QUALITY_LEVELS, MAX_VIDEO_REFERENCE_IMAGES,
-                    image_model_supports_quality)
+                    IMAGE_QUALITY_LEVELS, MAX_VIDEO_KEYFRAMES, MAX_VIDEO_REFERENCE_AUDIOS,
+                    image_model_supports_quality, normalize_image_model,
+                    video_max_reference_images, video_model_supports_pinned_frames,
+                    video_model_supports_voices)
 
 # Timeouty HTTP do xAI (P1-4) — sekundy. Bez nich zawieszone połączenie blokuje
 # wątek z puli serwera (dużo takich = zamrożony sidecar). Wartości dobrane do typu
@@ -25,10 +27,17 @@ def _apply_quality(payload, quality):
         payload["quality"] = q
 
 
-def _reference_images_payload(reference_images):
-    """Lista URI/URL → format `reference_images` xAI ([{"url": …}], maks. 3)."""
+def _reference_images_payload(reference_images, model=None):
+    """Lista URI/URL → format `reference_images` xAI ([{"url": …}]), przycięta do limitu
+    modelu (1.5: 14, bazowy: 7, lite: 0 — wtedy pole w ogóle nie idzie)."""
     refs = [r for r in (reference_images or []) if r]
-    return [{"url": r} for r in refs[:MAX_VIDEO_REFERENCE_IMAGES]]
+    return [{"url": r} for r in refs[:video_max_reference_images(model or DEFAULT_VIDEO_MODEL)]]
+
+
+def _resolve_image_model(model, quality):
+    """Wycofany slug (`grok-imagine-image-quality`/`-pro`) → 2.0 + jakość `low`, jawnie
+    zamiast polegać na cichym przekierowaniu xAI (to samo, co zrobi serwer po 2026-11-02)."""
+    return normalize_image_model(model or DEFAULT_IMAGE_MODEL, quality)
 
 
 def get_headers(api_key):
@@ -43,8 +52,9 @@ class APIManager:
 
     def generate_image(self, prompt, n, ratio, resolution, model=None, quality=None):
         api_key = self.get_api_key()
+        model, quality = _resolve_image_model(model, quality)
         payload = {
-            "model": model or DEFAULT_IMAGE_MODEL,
+            "model": model,
             "prompt": prompt,
             "n": n,
             "resolution": resolution
@@ -75,8 +85,9 @@ class APIManager:
                 "type": "image_url"
             })
 
+        model, _ = _resolve_image_model(model, None)
         payload = {
-            "model": model or DEFAULT_IMAGE_MODEL,
+            "model": model,
             "prompt": prompt,
             "images": images_list,
             "n": n,
@@ -92,15 +103,21 @@ class APIManager:
         return [item["url"] for item in r.json().get("data", [])]
 
     def create_video_job(self, prompt, duration, resolution, ratio, image_path=None,
-                          model=None, image_data_uri=None, reference_images=None):
+                          model=None, image_data_uri=None, reference_images=None,
+                          last_frame=None, keyframes=None, reference_audios=None,
+                          generate_audio=None):
         """Zadanie wideo (/videos/generations). `image_data_uri`/`image_path` = kadr
-        STARTOWY (image→video). `reference_images` (do 3, docs 2026-08, model 1.5) to
-        co innego: przenoszą postać/ubranie/przedmiot do klipu NIE blokując pierwszej
-        klatki — w promptcie odwołujesz się do nich tagami <IMAGE_1>…<IMAGE_3>.
-        Oba mogą wystąpić razem."""
+        STARTOWY (image→video). `reference_images` (1.5: ≤14, bazowy: ≤7) to co innego:
+        przenoszą postać/produkt/miejsce do klipu NIE blokując pierwszej klatki — w
+        promptcie tagi od <IMAGE_0> (gdy jest kadr startowy, to on jest <IMAGE_0>).
+        Tylko 1.5: `last_frame` (kadr końcowy), `keyframes` [{image, timestamp_s}] (≤4) i
+        `reference_audios` (id głosów presetowych, ≤3, w promptcie <AUDIO_0>…).
+        `generate_audio=False` = klip bez dźwięku (domyślnie API generuje audio).
+        Pola nieznane danemu modelowi są pomijane — xAI odrzuca całe żądanie (4xx)."""
         api_key = self.get_api_key()
+        model = model or DEFAULT_VIDEO_MODEL
         payload = {
-            "model": model or DEFAULT_VIDEO_MODEL,
+            "model": model,
             "prompt": prompt,
             "duration": duration,
             "resolution": resolution
@@ -122,9 +139,25 @@ class APIManager:
             b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
             payload["image"] = {"url": f"data:image/jpeg;base64,{b64}"}
 
-        refs = _reference_images_payload(reference_images)
+        refs = _reference_images_payload(reference_images, model)
         if refs:
             payload["reference_images"] = refs
+        if video_model_supports_pinned_frames(model):
+            if last_frame:
+                payload["last_frame"] = {"url": last_frame}
+            frames = [
+                {"image": {"url": kf["image"]}, "timestamp_s": float(kf["timestamp_s"])}
+                for kf in (keyframes or [])
+                if isinstance(kf, dict) and kf.get("image") and kf.get("timestamp_s") is not None
+            ][:MAX_VIDEO_KEYFRAMES]
+            if frames:
+                payload["keyframes"] = frames
+        if video_model_supports_voices(model):
+            voices = [{"voice_id": v} for v in (reference_audios or []) if v]
+            if voices:
+                payload["reference_audios"] = voices[:MAX_VIDEO_REFERENCE_AUDIOS]
+        if generate_audio is False:
+            payload["generate_audio"] = False
 
         r = requests.post(f"{API_BASE}/videos/generations", headers=get_headers(api_key), json=payload, timeout=TIMEOUT_VIDEO_JOB)
         # Pokaz tresc bledu 4xx (jak edit_image) — generyczne "400 Bad Request" nie
@@ -278,8 +311,9 @@ class APIManager:
         """Edycja obrazu z gotowych data-URI (np. z załączników czatu), bez ścieżek plików."""
         api_key = self.get_api_key()
         images_list = [{"url": uri, "type": "image_url"} for uri in data_uris]
+        model, quality = _resolve_image_model(model, quality)
         payload = {
-            "model": model or DEFAULT_IMAGE_MODEL,
+            "model": model,
             "prompt": prompt,
             "images": images_list,
             "n": n,

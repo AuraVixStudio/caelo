@@ -43,6 +43,11 @@ export interface PendingSend {
 /** Zdjęcie wystawione (drop/upload/„Send to") w panelu Image/Video. Trzymane w
  *  Hub (a nie w stanie panelu), bo panele są leniwe i ODMONTOWUJĄ się przy zmianie
  *  zakładki — bez tego dodane zdjęcie znikałoby po przełączeniu trybu. */
+/** Klatka kluczowa wideo: obraz + moment klipu (siatka 1/3 s, ściśle wewnątrz). */
+export interface StagedKeyframe extends StagedImage {
+  timestamp: number
+}
+
 export interface StagedImage {
   name: string
   uri: string // data-URI (upload/drop) lub https URL (z magistrali Send-to)
@@ -81,6 +86,12 @@ interface HubState {
    *  `videoFrame`: nie są pierwszą klatką, tylko niosą postać/przedmiot do klipu. */
   videoRefs: StagedImage[]
   setVideoRefs: Dispatch<SetStateAction<StagedImage[]>>
+  /** Kadr końcowy (first/last frame) w panelu Video. */
+  videoLastFrame: StagedImage | null
+  setVideoLastFrame: Dispatch<SetStateAction<StagedImage | null>>
+  /** Przypięte klatki pośrednie (xAI grok-imagine-video-1.5, do 4) z sekundą klipu. */
+  videoKeyframes: StagedKeyframe[]
+  setVideoKeyframes: Dispatch<SetStateAction<StagedKeyframe[]>>
   /** Źródłowe wideo w panelu Video (edit/extend). `uri` = data:video/* lub https URL. */
   videoSource: StagedImage | null
   setVideoSource: Dispatch<SetStateAction<StagedImage | null>>
@@ -138,6 +149,8 @@ export function HubProvider({
   const [imageRefs, setImageRefs] = useState<StagedImage[]>([])
   const [videoFrame, setVideoFrame] = useState<StagedImage | null>(null)
   const [videoRefs, setVideoRefs] = useState<StagedImage[]>([])
+  const [videoLastFrame, setVideoLastFrame] = useState<StagedImage | null>(null)
+  const [videoKeyframes, setVideoKeyframes] = useState<StagedKeyframe[]>([])
   const [videoSource, setVideoSource] = useState<StagedImage | null>(null)
   const [videoCommandMode, setVideoCommandMode] = useState<'edit' | 'extend' | null>(null)
   const [projects, setProjects] = useState<HubProject[]>([])
@@ -243,6 +256,10 @@ export function HubProvider({
       setVideoFrame,
       videoRefs,
       setVideoRefs,
+      videoLastFrame,
+      setVideoLastFrame,
+      videoKeyframes,
+      setVideoKeyframes,
       videoSource,
       setVideoSource,
       videoCommandMode,
@@ -281,6 +298,8 @@ export function HubProvider({
       imageRefs,
       videoFrame,
       videoRefs,
+      videoLastFrame,
+      videoKeyframes,
       videoSource,
       videoCommandMode,
       codeSessionId,

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
-import { Film, ImagePlus, Images, Maximize2 } from 'lucide-react'
+import { Film, ImagePlus, Images, Maximize2, X } from 'lucide-react'
 import { type Conn, type HubArtifact } from '../lib/api'
 import { cn } from '../lib/cn'
 import { fileToDataUri } from '../lib/files'
 import { compressImageIfNeeded } from '../lib/imageCompress'
 import { useGenJobs } from '../lib/useGenJobs'
 import { useHub, type StagedImage } from '../lib/hub'
+import { formatKeyframeTime, keyframeTimes, keyframesValid, nextKeyframeTime } from '../lib/videoKeyframes'
 import { useMediaCapabilities } from '../lib/useMediaCapabilities'
 import { usePersistentState } from '../lib/usePersistentState'
 import { forgetRecentArtifact, listRecentArtifacts } from '../lib/recentArtifacts'
@@ -71,45 +72,72 @@ export function Video({ conn }: { conn: Conn }) {
     (value): value is string => typeof value === 'string')
   const [ratio, setRatio] = usePersistentState('caelo.media.video.aspect.v1', '16:9',
     (value): value is string => typeof value === 'string')
-  const [lastImage, setLastImage] = useState<StagedImage | null>(null)
   const [audio, setAudio] = usePersistentState('caelo.media.video.audio.v1', true,
     (value): value is boolean => typeof value === 'boolean')
   const [seed, setSeed] = usePersistentState('caelo.media.video.seed.v1', '',
     (value): value is string => typeof value === 'string')
   const [negativePrompt, setNegativePrompt] = usePersistentState('caelo.media.video.negative-prompt.v1', '',
     (value): value is string => typeof value === 'string')
+  // Głosy presetowe (xAI 1.5, `reference_audios`) — kolejność wyboru = <AUDIO_0>, <AUDIO_1>…
+  const [voices, setVoices] = usePersistentState<string[]>('caelo.media.video.voices.v1', [],
+    (value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string'))
   const [results, setResults] = useState<HubArtifact[]>([])
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [framePreview, setFramePreview] = useState<StagedImage | null>(null)
   const { jobs, submitVideo, cancel, retry, clearFinished, dismiss, error: jobsError } = useGenJobs(conn)
   const { currentProjectId, pendingSend, setPendingSend, videoFrame: image, setVideoFrame: setImage,
     videoRefs: refs, setVideoRefs: setRefs, videoSource: source, setVideoSource: setSource,
+    videoLastFrame: lastImage, setVideoLastFrame: setLastImage, videoKeyframes: keyframes,
+    setVideoKeyframes: setKeyframes,
     videoCommandMode, setVideoCommandMode, promptReuse, setPromptReuse } = useHub()
   const operation = mode === 'edit' ? 'edit' : mode === 'extend' ? 'extend' :
-    refs.length ? 'reference_to_video' : image && lastImage ? 'first_last_frame' : image ? 'img2video' : 'text2video'
+    refs.length || voices.length ? 'reference_to_video' : image && lastImage ? 'first_last_frame' :
+      image ? 'img2video' : 'text2video'
   const caps = useMediaCapabilities(conn, 'video', operation)
   const capability = caps.descriptor?.capabilities
   const maxRefs = capability?.max_reference_images ?? 3
+  const maxVoices = capability?.max_reference_audios ?? 0
+  const voiceRoster = capability?.voices ?? []
+  const maxKeyframes = capability?.max_keyframes ?? 0
+  const usesRefs = mode === 'generate' && refs.length > 0
+  // Referencje ograniczają klip (xAI: ≤720p, bazowy ≤10 s) — pokaż tylko dozwolone wartości.
+  const durationMax = usesRefs && capability?.reference_duration_max != null
+    ? Math.min(capability.reference_duration_max, capability.duration_max ?? Infinity) : capability?.duration_max
+  // Bazowy grok-imagine-video nie łączy kadru startowego z referencjami — trzeba wybrać jedno.
+  const frameRefConflict = usesRefs && !!image && capability?.reference_with_first_frame === false
+  // xAI numeruje tagi od <IMAGE_0>; wysłany kadr startowy zajmuje <IMAGE_0>.
+  const refTagStart = image && !frameRefConflict ? 1 : 0
   const needsSource = mode !== 'generate'
   const videoJobs = jobs.filter((job) => job.kind === 'video')
   const doneCount = videoJobs.filter((job) => job.status === 'done').length
 
   useEffect(() => {
-    const resolutions = mode === 'extend' && capability?.extension_resolutions.length
+    const base = mode === 'extend' && capability?.extension_resolutions.length
       ? capability.extension_resolutions : capability?.resolutions ?? []
+    const resolutions = usesRefs && capability?.reference_resolutions?.length
+      ? base.filter((value) => capability.reference_resolutions.includes(value)) : base
     if (resolutions.length && !resolutions.includes(resolution)) setResolution(resolutions[0])
     if (capability?.aspect_ratios.length && !capability.aspect_ratios.includes(ratio)) setRatio(capability.aspect_ratios[0])
     if (capability?.durations.length && !capability.durations.includes(duration)) setDuration(capability.durations[0])
     if (!capability?.durations.length && capability?.duration_min != null && duration < capability.duration_min) {
       setDuration(capability.duration_min)
     }
-    if (!capability?.durations.length && capability?.duration_max != null && duration > capability.duration_max) {
-      setDuration(capability.duration_max)
+    if (!capability?.durations.length && durationMax != null && duration > durationMax) {
+      setDuration(durationMax)
     }
     if (mode === 'extend' && capability?.extension_seconds) setDuration(capability.extension_seconds)
     if (refs.length > maxRefs) setRefs((items) => items.slice(0, maxRefs))
-  }, [capability, duration, maxRefs, mode, ratio, refs.length, resolution, setDuration, setRatio, setRefs,
-    setResolution])
+    if (voices.length > maxVoices) setVoices((items) => items.slice(0, maxVoices))
+    // Skrócony klip wypycha klatki poza wnętrze — przenieś je na najbliższy wolny punkt.
+    if (keyframes.length && !keyframesValid(keyframes.map((item) => item.timestamp), duration)) {
+      setKeyframes((items) => items.reduce<typeof items>((acc, item) => {
+        const fits = keyframesValid([...acc.map((x) => x.timestamp), item.timestamp], duration)
+        const timestamp = fits ? item.timestamp : nextKeyframeTime(acc.map((x) => x.timestamp), duration)
+        return timestamp == null ? acc : [...acc, { ...item, timestamp }]
+      }, []))
+    }
+  }, [capability, duration, durationMax, keyframes, maxRefs, maxVoices, mode, ratio, refs.length, resolution,
+    setDuration, setKeyframes, setRatio, setRefs, setResolution, setVoices, usesRefs, voices.length])
 
   const refreshResults = useCallback((force = false) => {
     listRecentArtifacts(conn, 'video', currentProjectId ?? undefined, force)
@@ -158,14 +186,30 @@ export function Video({ conn }: { conn: Conn }) {
     const file = Array.from(files ?? []).find((item) => item.type.startsWith('image/'))
     if (file) setLastImage({ name: file.name, uri: (await compressImageIfNeeded(file)).uri })
   }
+  async function addKeyframes(files: FileList | null): Promise<void> {
+    const loaded = await Promise.all(Array.from(files ?? []).filter((file) => file.type.startsWith('image/'))
+      .map(async (file) => ({ name: file.name, uri: (await compressImageIfNeeded(file)).uri })))
+    setKeyframes((items) => loaded.reduce((acc, item) => {
+      if (acc.length >= maxKeyframes) return acc
+      const timestamp = nextKeyframeTime(acc.map((x) => x.timestamp), duration)
+      return timestamp == null ? acc : [...acc, { ...item, timestamp }]
+    }, items))
+  }
+  function toggleVoice(voice: string): void {
+    setVoices((items) => items.includes(voice) ? items.filter((item) => item !== voice)
+      : items.length < maxVoices ? [...items, voice] : items)
+  }
   function pick(handler: (files: FileList | null) => Promise<void>) {
     return (event: ChangeEvent<HTMLInputElement>) => { void handler(event.target.files); event.target.value = '' }
   }
   const mainZone = useDropZone((files) => void addMain(files))
   const refsZone = useDropZone((files) => void addRefs(files))
+  const keyframesZone = useDropZone((files) => void addKeyframes(files))
 
+  const sendKeyframes = mode === 'generate' && maxKeyframes > 0 && keyframes.length > 0
+  const sendVoices = mode === 'generate' && maxVoices > 0 && voices.length > 0
   async function run(): Promise<void> {
-    if (!prompt.trim() || !caps.model || (needsSource && !source)) return
+    if (!prompt.trim() || !caps.model || (needsSource && !source) || frameRefConflict) return
     const sources = [
       { id: source?.artifactId, role: 'source_video' }, { id: image?.artifactId, role: 'first_frame' },
       { id: lastImage?.artifactId, role: 'last_frame' },
@@ -178,6 +222,9 @@ export function Video({ conn }: { conn: Conn }) {
       video: needsSource ? source?.uri : undefined,
       reference_images: operation === 'reference_to_video' ? refs.map((item) => item.uri) : undefined,
       reference_roles: operation === 'reference_to_video' ? refs.map((item) => item.role ?? 'character') : undefined,
+      reference_audios: sendVoices ? voices : undefined,
+      keyframe_images: sendKeyframes ? keyframes.map((item) => item.uri) : undefined,
+      keyframe_times: sendKeyframes ? keyframes.map((item) => item.timestamp) : undefined,
       generate_audio: capability?.native_audio ? audio : undefined,
       seed: capability?.supports_seed && seed ? Number(seed) : undefined,
       negative_prompt: capability?.supports_negative_prompt && negativePrompt.trim() ? negativePrompt.trim() : undefined,
@@ -187,8 +234,11 @@ export function Video({ conn }: { conn: Conn }) {
 
   const staged = needsSource ? source : image
   const durations = capability?.durations ?? []
-  const resolutions = mode === 'extend' && capability?.extension_resolutions.length
+  const baseResolutions = mode === 'extend' && capability?.extension_resolutions.length
     ? capability.extension_resolutions : capability?.resolutions ?? []
+  const resolutions = usesRefs && capability?.reference_resolutions?.length
+    ? baseResolutions.filter((value) => capability.reference_resolutions.includes(value)) : baseResolutions
+  const keyframeGrid = keyframeTimes(duration)
   return (
     <Page title="Video" subtitle="One adaptive workspace for xAI and Google video models.">
       <div className="mb-4 inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
@@ -225,8 +275,56 @@ export function Video({ conn }: { conn: Conn }) {
             <label className="cursor-pointer text-xs text-accent"><ImagePlus size={14} className="mr-1 inline" />From disk
               <input hidden multiple type="file" accept="image/*" onChange={pick(addRefs)} /></label>
           </div></div>
-        {refs.length ? <ReferenceLibrary items={refs} max={maxRefs} onChange={setRefs} /> :
+        {refs.length ? <>
+          <ReferenceLibrary items={refs} max={maxRefs} onChange={setRefs} tagStart={refTagStart} />
+          <p className="mt-2 text-xs text-muted">Refer to them in the prompt by their tags. Clips with references are limited to {capability?.reference_resolutions?.at(-1) ?? '720p'}{capability?.reference_duration_max ? ` and ${capability.reference_duration_max}s` : ''}.</p>
+          {frameRefConflict ? <p className="mt-2 text-xs text-error">This model can't combine a first frame with reference images. Remove one of them, or switch to grok-imagine-video-1.5.</p> : null}
+        </> :
           <p className="text-xs text-muted">Drop images here, or use Library / From disk. Assign each reference as a character, object, or style.</p>}
+      </Card> : null}
+      {mode === 'generate' && maxVoices > 0 && voiceRoster.length ? <Card className="mb-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-sm font-medium">Voices · {voices.length}/{maxVoices}</p>
+          {voices.length ? <Button type="button" variant="ghost" size="sm" onClick={() => setVoices([])}>Clear</Button> : null}
+        </div>
+        <div className="flex flex-wrap gap-2">{voiceRoster.map((voice) => {
+          const index = voices.indexOf(voice)
+          const selected = index >= 0
+          return <button key={voice} type="button" aria-pressed={selected} onClick={() => toggleVoice(voice)}
+            disabled={!selected && voices.length >= maxVoices}
+            className={cn('rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors disabled:opacity-40',
+              selected ? 'border-accent bg-accent/10 text-fg' : 'border-border text-muted')}>
+            {voice}{selected ? <span className="ml-1.5 font-mono normal-case text-accent">&lt;AUDIO_{index}&gt;</span> : null}
+          </button>
+        })}</div>
+        <p className="mt-2 text-xs text-muted">Give up to {maxVoices} speaking characters a preset voice with lip-synced speech. Refer to each by its tag in the prompt.</p>
+      </Card> : null}
+      {mode === 'generate' && maxKeyframes > 0 ? <Card {...keyframesZone.zoneProps}
+        className={cn('mb-4 transition-colors', keyframesZone.dragging && 'border-accent bg-accent/5')}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-sm font-medium">Keyframes · {keyframes.length}/{maxKeyframes}</p>
+          {keyframes.length < maxKeyframes ? <label className="cursor-pointer text-xs text-accent"><ImagePlus size={14} className="mr-1 inline" />From disk
+            <input hidden multiple type="file" accept="image/*" onChange={pick(addKeyframes)} /></label> : null}
+        </div>
+        {keyframes.length ? <div className="flex flex-wrap gap-3">{keyframes.map((item, index) =>
+          <div key={`${item.name}-${index}`} className="w-28 rounded-lg border border-border bg-surface p-1.5">
+            <div className="relative h-20">
+              <img src={item.uri} alt={item.name} className="h-full w-full rounded-md object-cover" />
+              <button type="button" aria-label={`Remove ${item.name}`} onClick={() => setKeyframes((items) => items.filter((_, i) => i !== index))}
+                className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-error text-white">
+                <X size={12} />
+              </button>
+            </div>
+            <Select size="sm" aria-label={`Time of ${item.name}`} className="mt-1 w-full" value={String(Math.round(item.timestamp * 3))}
+              onChange={(e) => setKeyframes((items) => items.map((x, i) => i === index ? { ...x, timestamp: Number(e.target.value) / 3 } : x))}>
+              {keyframeGrid.map((t) => {
+                const q = Math.round(t * 3)
+                const taken = keyframes.some((x, i) => i !== index && Math.round(x.timestamp * 3) === q)
+                return <option key={q} value={q} disabled={taken}>{formatKeyframeTime(t)}</option>
+              })}
+            </Select>
+          </div>)}</div> :
+          <p className="text-xs text-muted">Drop up to {maxKeyframes} stills to pin them at chosen moments of the clip; the model fills in the motion between them.</p>}
       </Card> : null}
       {framePreview ? <ImagePreview src={framePreview.uri} name={framePreview.name} onClose={() => setFramePreview(null)} /> : null}
       <Card>
@@ -243,14 +341,14 @@ export function Video({ conn }: { conn: Conn }) {
             models={caps.models} model={caps.model} onModel={caps.setModel} />
           {durations.length ? <Field label="Duration" className="w-24"><Select size="sm" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
             {durations.map((value) => <option key={value} value={value}>{value}s</option>)}</Select></Field> :
-            capability?.duration_min != null && capability.duration_max != null ? <Field label={`Duration · ${duration}s`} className="w-40"><Slider min={capability.duration_min} max={capability.duration_max} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></Field> : null}
+            capability?.duration_min != null && durationMax != null ? <Field label={`Duration · ${duration}s`} className="w-40"><Slider min={capability.duration_min} max={durationMax} value={duration} onChange={(e) => setDuration(Number(e.target.value))} /></Field> : null}
           {resolutions.length ? <Field label="Resolution" className="w-24"><Select size="sm" value={resolution} onChange={(e) => setResolution(e.target.value)}>
             {resolutions.map((value) => <option key={value}>{value}</option>)}</Select></Field> : null}
           {capability?.aspect_ratios.length ? <Field label="Aspect" className="w-24"><Select size="sm" value={ratio} onChange={(e) => setRatio(e.target.value)}>
             {capability.aspect_ratios.map((value) => <option key={value}>{value}</option>)}</Select></Field> : null}
           {capability?.supports_seed ? <Field label="Seed" className="w-28"><Input className="h-8" type="number" min="0" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="Random" /></Field> : null}
           {capability?.native_audio ? <label className="flex h-8 items-center gap-2 text-xs"><input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} /> Native audio</label> : null}
-          <Button className="ml-auto" icon={<Film size={16} />} onClick={run} disabled={!prompt.trim() || !caps.model || (needsSource && !source)}>{mode === 'edit' ? 'Edit video' : mode === 'extend' ? 'Extend video' : 'Generate'}</Button>
+          <Button className="ml-auto" icon={<Film size={16} />} onClick={run} disabled={!prompt.trim() || !caps.model || (needsSource && !source) || frameRefConflict}>{mode === 'edit' ? 'Edit video' : mode === 'extend' ? 'Extend video' : 'Generate'}</Button>
         </div>
       </Card>
       {caps.error || jobsError ? <p className="mt-3 text-sm text-error">{caps.error || jobsError}</p> : null}

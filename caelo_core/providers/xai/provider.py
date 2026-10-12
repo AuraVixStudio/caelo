@@ -68,11 +68,24 @@ class XAIProvider:
                     request.prompt, request.video, duration=request.duration or None,
                     model=request.model,
                 )
-            elif request.operation in ("text2video", "img2video", "reference_to_video"):
+            elif request.operation in ("text2video", "img2video", "reference_to_video",
+                                       "first_last_frame"):
+                # Pola grok-imagine-video-1.5 idą tylko, gdy są ustawione — wywołanie
+                # bez nich zostaje identyczne z dotychczasowym kontraktem APIManager.
+                extra: dict[str, Any] = {}
+                if request.last_image:
+                    extra["last_frame"] = request.last_image
+                if request.keyframes:
+                    extra["keyframes"] = [dict(k) for k in request.keyframes]
+                if request.reference_audios:
+                    extra["reference_audios"] = list(request.reference_audios)
+                if request.generate_audio is False:
+                    extra["generate_audio"] = False
                 remote_id = self.api.create_video_job(
                     request.prompt, int(request.duration or 6), request.resolution, request.aspect_ratio,
                     None, model=request.model, image_data_uri=request.image,
                     reference_images=list(request.reference_images) or None,
+                    **extra,
                 )
             else:
                 raise ValueError(f"Unsupported video operation: {request.operation}")

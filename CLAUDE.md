@@ -224,14 +224,20 @@ and unmount on tab switch, so per-panel `useState` would lose them.
 
 **Model-scoped media parameters (2026-08 docs wave) — send them ONLY where they're documented.**
 xAI rejects the whole request (4xx) when a parameter reaches a model that doesn't know it, so both
-sides gate: `config.image_model_supports_quality` / `video_model_supports_references` (+ the mirrors
-`imageModelSupportsQuality` / `videoModelSupportsReferences` in `lib/constants.ts`, which also hide
-the controls). (a) **`reference_images`** (≤3, `grok-imagine-video-1.5` only) is NOT the same thing as
-the `image` first frame — it carries a character/outfit/object into the clip without locking the
-opening shot, is referenced in the prompt as `<IMAGE_1>`…, and the two may be sent together; it's
-rejected on `edit`/`extend` (those endpoints don't take it) and it IS a data-URI carrier, so it's in
-`genjobs._BLOB_PARAM_KEYS` (P1-D) — a new blob-bearing param must be added there or `GET /genjobs`
-balloons again. (b) **`quality`** (low|medium) belongs to `grok-imagine-image-2.0` alone; the final
+sides gate: `config.image_model_supports_quality` / `video_max_reference_images` /
+`video_model_supports_voices` / `video_model_supports_pinned_frames` (the Video panel reads the
+same limits from the registry capabilities, so it hides the controls). (a) **`reference_images`**
+(≤14 on `grok-imagine-video-1.5`, ≤7 on `grok-imagine-video`, none on `-1.5-lite`; docs 2026-10) is
+NOT the same thing as the `image` first frame — it carries a character/product/place into the clip
+without locking the opening shot. **Prompt tags start at `<IMAGE_0>`**; a sent `image` takes
+`<IMAGE_0>` and references shift to `<IMAGE_1>` (`ReferenceLibrary tagStart`). With references the
+clip is ≤720p, and the base model caps it at 10 s and refuses `image` alongside them
+(`reference_*` capability fields). Rejected on `edit`/`extend`. It IS a data-URI carrier, so it's in
+`storage/payloads.BLOB_PARAM_KEYS` (P1-D) — as is `keyframe_images`; a new blob-bearing param must be
+added there or `GET /genjobs` balloons again (that's why keyframes travel as two flat lists,
+`keyframe_images` + `keyframe_times`, not as a list of dicts). `last_frame`, `keyframes` and
+`reference_audios` (preset voices, `<AUDIO_n>`) exist only on 1.5; `api_manager.create_video_job`
+drops them for other models. (b) **`quality`** (low|medium) belongs to `grok-imagine-image-2.0` alone; the final
 filter is `api_manager._apply_quality`, which drops it rather than break the call. **`xhigh`**
 reasoning effort follows the same rule but with the opposite default in the UI: `modelSupportsEffort`
 returns true for unknown models, while `modelSupportsXhighEffort` returns true only for known-4.6 —
@@ -511,8 +517,9 @@ wiring; extend `AgentRunner`). **[`__main__.py`](caelo_core/__main__.py) dispatc
   with a list fetched before the job finished and then stamped it fresh for 15 s. Responses are
   sequenced so a late one can't overwrite a newer one.
 - **The model catalog is a verified snapshot, not a guess.** `caelo_core/tests/test_model_catalog.py`
-  pins the per-provider id lists checked on 2026-09-22 against the provider docs and the live Vertex
-  publisher listing. Retired xAI slugs (`grok-4`/`grok-4-0709`, `grok-3`, `grok-code-fast-1`, the
+  pins the per-provider id lists checked on 2026-09-22 (xAI re-checked 2026-10-12) against the
+  provider docs and the live Vertex publisher listing. `grok-imagine-image-quality` is retired on
+  2026-11-02 (→ 2.0 at `quality: "low"`); `config.normalize_image_model` rewrites it explicitly. Retired xAI slugs (`grok-4`/`grok-4-0709`, `grok-3`, `grok-code-fast-1`, the
   `*-fast-*` families, `grok-imagine-image-pro`) still resolve but **silently redirect to `grok-4.3`
   and bill at its rates**, so they must not return to the menu. Approval-gated OpenAI models
   (`gpt-5.6-cyber`, `gpt-daybreak-*`) are deliberately absent.

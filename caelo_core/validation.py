@@ -31,7 +31,9 @@ def normalize_effort(value) -> Optional[str]:
 # Limity (sekundy/sztuki/znaki).
 MAX_PROMPT = 8000           # długość promptu (obraz/wideo)
 MAX_IMAGES = 8              # liczba obrazów referencyjnych w jednej edycji
-MAX_VIDEO_REFS = 3          # obrazy referencyjne wideo (reference-to-video, limit API)
+MAX_VIDEO_REFS = 14         # obrazy referencyjne wideo (xAI 1.5: 14, bazowy: 7; per model w rejestrze)
+MAX_VIDEO_VOICES = 3        # głosy presetowe `reference_audios` (xAI 1.5)
+MAX_VIDEO_KEYFRAMES = 4     # przypięte klatki pośrednie (xAI 1.5)
 MAX_N = 10                  # liczba generowanych obrazów na żądanie
 MAX_VIDEO_DURATION = 30     # sekundy zadania wideo
 MAX_EXTEND_DURATION = 10    # dodane sekundy przy przedłużeniu

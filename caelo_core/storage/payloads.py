@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Any
 
 
-BLOB_PARAM_KEYS = ("images", "image", "last_image", "video", "reference_images")
+# `keyframe_images` (xAI 1.5) idzie równolegle do `keyframe_times` — płaska lista data-URI,
+# żeby magazyn blobów mógł ją wynieść z SQLite jak pozostałe wejścia.
+BLOB_PARAM_KEYS = ("images", "image", "last_image", "video", "reference_images", "keyframe_images")
 FILE_MARKER_KEY = "_caelo_input_file"
 
 

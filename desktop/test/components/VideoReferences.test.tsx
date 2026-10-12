@@ -4,7 +4,7 @@
 // się 400 na całym żądaniu, więc ukrycie kontrolki jest zabezpieczeniem, nie kosmetyką.
 import '@testing-library/jest-dom/vitest'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { fireEvent } from '@testing-library/dom'
 import type { ReactNode } from 'react'
 
@@ -37,7 +37,13 @@ vi.mock('../../src/renderer/src/lib/api', async (orig) => ({
       supports_tools: false, thinking: false, thinking_levels: [], search_grounding: false,
       multi_turn: false, native_audio: false, supports_seed: false, first_last_frame: false,
       video_extension: !id.includes('1.5'), extension_seconds: null, extension_resolutions: [],
-      edit_uploaded_video: false, supports_negative_prompt: false, notes: []
+      edit_uploaded_video: false, supports_negative_prompt: false, notes: [],
+      // docs.x.ai 2026-10: głosy i klatki kluczowe tylko na 1.5; referencje ≤720p.
+      reference_resolutions: ['480p', '720p'], reference_duration_max: id.includes('1.5') ? 15 : 10,
+      reference_with_first_frame: id.includes('1.5'),
+      max_reference_audios: id.includes('1.5') ? 3 : 0,
+      voices: id.includes('1.5') ? ['eve', 'ara', 'rex', 'sal', 'leo'] : [],
+      max_keyframes: id.includes('1.5') ? 4 : 0
     }
   })) }))
 }))
@@ -51,6 +57,10 @@ const hub = {
   setVideoFrame: vi.fn(),
   videoRefs: [] as { name: string; uri: string }[],
   setVideoRefs: vi.fn(),
+  videoLastFrame: null,
+  setVideoLastFrame: vi.fn(),
+  videoKeyframes: [] as { name: string; uri: string; timestamp: number }[],
+  setVideoKeyframes: vi.fn(),
   videoSource: null,
   setVideoSource: vi.fn(),
   videoCommandMode: null,
@@ -77,6 +87,7 @@ describe('Video — obrazy referencyjne (reference-to-video)', () => {
     conn = { baseUrl: '', token: '' }
     hub.videoRefs = []
     hub.videoFrame = null
+    hub.videoKeyframes = []
     hub.setVideoRefs.mockClear()
     models.value = { video: ['grok-imagine-video-1.5', 'grok-imagine-video'],
                      default_video: 'grok-imagine-video-1.5' }
@@ -84,9 +95,9 @@ describe('Video — obrazy referencyjne (reference-to-video)', () => {
 
   it('model 1.5 → taca referencji jest widoczna (0/3)', async () => {
     render(<Video conn={conn} />)
-    expect(await screen.findByText(/Reference images · 0\/3/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Library' })).toBeInTheDocument()
-    expect(screen.getByText('From disk')).toBeInTheDocument()
+    const card = (await screen.findByText(/Reference images · 0\/3/)).closest('div.rounded-2xl') as HTMLElement
+    expect(within(card).getByRole('button', { name: 'Library' })).toBeInTheDocument()
+    expect(within(card).getByText('From disk')).toBeInTheDocument()
   })
 
   it('model bazowy bez wgranych referencji → taca ukryta', async () => {
@@ -129,14 +140,40 @@ describe('Video — obrazy referencyjne (reference-to-video)', () => {
     ])
   })
 
-  it('dodane referencje są otagowane <IMAGE_n> zgodnie z promptem', async () => {
+  // docs.x.ai „Reference-to-video": tagi liczone od <IMAGE_0>; wysłany kadr startowy
+  // zajmuje <IMAGE_0>, a referencje przesuwają się o jeden.
+  it('dodane referencje są otagowane <IMAGE_n> od zera', async () => {
     hub.videoRefs = [
       { name: 'hero.png', uri: 'data:image/png;base64,AA' },
       { name: 'coat.png', uri: 'data:image/png;base64,BB' }
     ]
     render(<Video conn={conn} />)
     expect(await screen.findByText(/Reference images · 2\/3/)).toBeInTheDocument()
+    expect(screen.getByText('<IMAGE_0>')).toBeInTheDocument()
     expect(screen.getByText('<IMAGE_1>')).toBeInTheDocument()
-    expect(screen.getByText('<IMAGE_2>')).toBeInTheDocument()
+  })
+
+  it('z kadrem startowym referencje zaczynają się od <IMAGE_1>', async () => {
+    hub.videoFrame = { name: 'opening.png', uri: 'data:image/png;base64,FRAME' }
+    hub.videoRefs = [{ name: 'hero.png', uri: 'data:image/png;base64,AA' }]
+    render(<Video conn={conn} />)
+    expect(await screen.findByText(/Reference images · 1\/3/)).toBeInTheDocument()
+    expect(screen.getByText('<IMAGE_1>')).toBeInTheDocument()
+    expect(screen.queryByText('<IMAGE_0>')).toBeNull()
+  })
+
+  it('model 1.5 pokazuje głosy i klatki kluczowe, bazowy nie', async () => {
+    render(<Video conn={conn} />)
+    expect(await screen.findByText(/Voices · 0\/3/)).toBeInTheDocument()
+    expect(screen.getByText(/Keyframes · 0\/4/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'eve' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('bez głosów i klatek na modelu bazowym', async () => {
+    models.value = { video: ['grok-imagine-video'], default_video: 'grok-imagine-video' }
+    render(<Video conn={conn} />)
+    await screen.findByLabelText('Provider')
+    expect(screen.queryByText(/Voices ·/)).toBeNull()
+    expect(screen.queryByText(/Keyframes ·/)).toBeNull()
   })
 })

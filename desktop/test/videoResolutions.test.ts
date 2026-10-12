@@ -2,9 +2,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   IMAGE_MODELS,
-  VIDEO_MAX_REFERENCE_IMAGES,
   VIDEO_RESOLUTIONS,
   imageModelSupportsQuality,
+  videoMaxReferenceImages,
   videoModelSupportsReferences,
   videoResolutionsFor
 } from '../src/renderer/src/lib/constants'
@@ -12,6 +12,10 @@ import {
 describe('videoResolutionsFor', () => {
   it('1.5 model exposes 1080p', () => {
     expect(videoResolutionsFor('grok-imagine-video-1.5')).toEqual(['480p', '720p', '1080p'])
+  })
+
+  it('1.5-lite also offers 1080p (upscaled from 720p)', () => {
+    expect(videoResolutionsFor('grok-imagine-video-1.5-lite')).toContain('1080p')
   })
 
   it('base model tops out at 720p (no 1080p)', () => {
@@ -27,20 +31,22 @@ describe('videoResolutionsFor', () => {
   })
 })
 
-// Reference-to-video (docs x.ai 2026-08): do 3 obrazów, tylko model 1.5. Wysłanie ich
-// do bazowego modelu = 400 na całym żądaniu, więc UI musi je chować.
+// Reference-to-video (docs x.ai 2026-10): 1.5 do 14, bazowy do 7, lite wcale. Wysłanie
+// ich do modelu, który ich nie zna = 400 na całym żądaniu, więc UI musi je chować.
 describe('videoModelSupportsReferences', () => {
-  it('1.5 przyjmuje obrazy referencyjne', () => {
+  it('1.5 i bazowy przyjmują obrazy referencyjne', () => {
     expect(videoModelSupportsReferences('grok-imagine-video-1.5')).toBe(true)
+    expect(videoModelSupportsReferences('grok-imagine-video')).toBe(true)
   })
 
-  it('model bazowy i pusty ich nie przyjmują', () => {
-    expect(videoModelSupportsReferences('grok-imagine-video')).toBe(false)
+  it('lite i pusty ich nie przyjmują', () => {
+    expect(videoModelSupportsReferences('grok-imagine-video-1.5-lite')).toBe(false)
     expect(videoModelSupportsReferences('')).toBe(false)
   })
 
-  it('limit to 3 (limit API)', () => {
-    expect(VIDEO_MAX_REFERENCE_IMAGES).toBe(3)
+  it('limity per model (limit API)', () => {
+    expect(videoMaxReferenceImages('grok-imagine-video-1.5')).toBe(14)
+    expect(videoMaxReferenceImages('grok-imagine-video')).toBe(7)
   })
 })
 
@@ -53,7 +59,8 @@ describe('imageModelSupportsQuality', () => {
     expect(imageModelSupportsQuality('')).toBe(false)
   })
 
-  it('2.0 jest na liście zapasowej modeli obrazu', () => {
+  it('2.0 jest na liście zapasowej modeli obrazu, wycofany -quality już nie', () => {
     expect(IMAGE_MODELS).toContain('grok-imagine-image-2.0')
+    expect(IMAGE_MODELS).not.toContain('grok-imagine-image-quality')
   })
 })

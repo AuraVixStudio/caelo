@@ -63,19 +63,20 @@ class ModelRegistry:
 
 _IMAGE_RATIOS = tuple(config.ASPECT_RATIOS)
 _IMAGE_RESOLUTIONS = tuple(config.RESOLUTIONS)
-_VIDEO_RATIOS = ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3")
+_VIDEO_RATIOS = tuple(config.VIDEO_ASPECT_RATIOS)
 
 
 def _image_model(model_id: str) -> ModelDescriptor:
     quality = model_id in config.IMAGE_QUALITY_MODELS
-    max_references = 5 if model_id == "grok-imagine-image-2.0" else 3
+    max_references = config.IMAGE_EDIT_MAX_SOURCES.get(
+        model_id, config.IMAGE_EDIT_MAX_SOURCES_DEFAULT)
     return ModelDescriptor(
         id=model_id,
         provider="xai",
         label=model_id,
         media_type="image",
         is_default=model_id == config.DEFAULT_IMAGE_MODEL,
-        tier="pro" if model_id.endswith("quality") else "standard",
+        tier="standard",
         capabilities=ModelCapabilities(
             operations=("text2img", "edit", "variation"),
             input_modalities=("text", "image"),
@@ -93,7 +94,28 @@ def _image_model(model_id: str) -> ModelDescriptor:
 
 
 def _video_model(model_id: str) -> ModelDescriptor:
-    is_v15 = model_id == "grok-imagine-video-1.5"
+    """Możliwości z docs.x.ai „Video overview" (2026-10) — patrz `config.VIDEO_MODELS`."""
+    is_base = model_id == "grok-imagine-video"
+    refs = config.video_max_reference_images(model_id)
+    pinned = config.video_model_supports_pinned_frames(model_id)
+    voices = config.video_model_supports_voices(model_id)
+    operations: tuple[str, ...] = ("text2video", "img2video")
+    if refs:
+        operations += ("reference_to_video",)
+    if pinned:
+        operations += ("first_last_frame",)
+    if is_base:
+        operations += ("edit", "extend")
+    notes = {
+        "grok-imagine-video-1.5": (
+            "Native 1080p; references, preset voices, first/last frame and keyframes. "
+            "Edit and extend use the base model.",),
+        "grok-imagine-video-1.5-lite": (
+            "Lowest price per second; 1080p is upscaled from 720p. "
+            "No references, voices or pinned frames.",),
+        "grok-imagine-video": (
+            "The only xAI model with video editing and extension; up to 720p.",),
+    }.get(model_id, ())
     return ModelDescriptor(
         id=model_id,
         provider="xai",
@@ -101,20 +123,30 @@ def _video_model(model_id: str) -> ModelDescriptor:
         media_type="video",
         is_default=model_id == config.DEFAULT_VIDEO_MODEL,
         capabilities=ModelCapabilities(
-            operations=(("text2video", "img2video", "reference_to_video") if is_v15 else
-                        ("text2video", "img2video", "edit", "extend")),
+            operations=operations,
             input_modalities=("text", "image", "video"),
             output_modalities=("video",),
             aspect_ratios=_VIDEO_RATIOS,
             resolutions=tuple(config.VIDEO_RESOLUTIONS_BY_MODEL[model_id]),
             duration_min=1,
             duration_max=15,
-            max_reference_images=config.MAX_VIDEO_REFERENCE_IMAGES if is_v15 else 0,
-            max_character_reference_images=config.MAX_VIDEO_REFERENCE_IMAGES if is_v15 else 0,
-            max_object_reference_images=config.MAX_VIDEO_REFERENCE_IMAGES if is_v15 else 0,
-            max_style_reference_images=config.MAX_VIDEO_REFERENCE_IMAGES if is_v15 else 0,
-            notes=(("Reference images are supported; edit and extend use the base model.",)
-                   if is_v15 else ()),
+            max_reference_images=refs,
+            max_character_reference_images=refs,
+            max_object_reference_images=refs,
+            max_style_reference_images=refs,
+            reference_resolutions=(("480p", "720p") if refs else ()),
+            reference_duration_max=config.VIDEO_REFERENCE_MAX_DURATION.get(model_id),
+            reference_with_first_frame=not is_base,
+            max_reference_audios=config.MAX_VIDEO_REFERENCE_AUDIOS if voices else 0,
+            voices=tuple(config.VOICE_VOICES) if voices else (),
+            max_keyframes=config.MAX_VIDEO_KEYFRAMES if pinned else 0,
+            # Wszystkie trzy generują dźwięk; `generate_audio: false` = klip bez audio.
+            native_audio=True,
+            first_last_frame=pinned,
+            video_extension=is_base,
+            extension_seconds=None,
+            edit_uploaded_video=is_base,
+            notes=notes,
         ),
     )
 

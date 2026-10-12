@@ -195,16 +195,34 @@ A **cost estimate** is shown before you run. Finished images are saved and regis
 Generate and edit video via the same job engine (M11). Long renders are polled **server-side**, so
 you can keep working.
 
+**Models (xAI)**
+- `grok-imagine-video-1.5` — the default: native 1080p, references, voices, first/last frame and
+  keyframes.
+- `grok-imagine-video-1.5-lite` — the cheapest per second; text → video and image → video only
+  (1080p is upscaled from 720p).
+- `grok-imagine-video` — the only model that can **Edit** and **Extend** a video; up to 720p.
+
 **Modes**
 - **Text → video** and **Image → video** (stage a source image / first frame).
+- **First/last frame** — with a first frame staged, add an **End frame** and the model fills the
+  motion in between (the same image twice makes a loop).
 - **Edit** an existing video, or **Extend** it (add duration).
-- Set duration, resolution, and aspect ratio where applicable.
+- Set duration, resolution, and aspect ratio (including 21:9 and 5:2) where applicable.
 
-**Reference images** (on `grok-imagine-video-1.5`). Attach up to **3** images to carry a
-character, an outfit, or an object into the clip, and point at them in the prompt as
-`<IMAGE_1>`, `<IMAGE_2>`, `<IMAGE_3>`. This is *not* the same as a first frame: references do not
-fix the opening shot, and you can use both together. On models that don't accept them the tray is
-disabled and says so, rather than dropping them silently.
+**Reference images** (up to **14** on `grok-imagine-video-1.5`, **7** on `grok-imagine-video`).
+They carry a character, a product, or a place into the clip; point at them in the prompt by the tag
+shown on each thumbnail — `<IMAGE_0>`, `<IMAGE_1>`, …. When a first frame is staged too, it takes
+`<IMAGE_0>` and the references start at `<IMAGE_1>`. References do not fix the opening shot. Clips
+with references are limited to 720p (and to 10 s on `grok-imagine-video`, which also can't combine
+them with a first frame). On models that don't accept them the tray is hidden.
+
+**Voices** (`grok-imagine-video-1.5`). Pick up to **3** preset voices for speaking characters with
+lip-synced speech; each selected voice shows its prompt tag (`<AUDIO_0>`, …).
+
+**Keyframes** (`grok-imagine-video-1.5`). Drop up to **4** stills and choose the moment of the clip
+each one is pinned to (on a ⅓-second grid, strictly inside the clip).
+
+**Native audio.** Every xAI video model generates sound; untick it for a silent clip.
 
 **How it works.** Like Image: a queued job with a cost estimate, cancel/retry, and the result
 saved as a project artifact. Because video can take minutes, the job stays "running" until the

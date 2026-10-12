@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Dostosowanie do zmian xAI z 2026-09/10 (docs.x.ai: Video overview, Reference-to-video,
+migracja `imagine-image-quality-nov-2`, Public URLs).
+
+### Added
+- **`grok-imagine-video-1.5-lite`** — najtańszy model wideo xAI ($0.02/s), text/image → video,
+  1080p (upscale z 720p), bez referencji, głosów i przypiętych klatek.
+- Panel **Video** na `grok-imagine-video-1.5`: **głosy** (do 3 presetowych, z lip-synciem,
+  tagi `<AUDIO_n>`), **klatki kluczowe** (do 4, moment na siatce ⅓ s) oraz **End frame**
+  (first/last frame, wcześniej tylko Google Veo).
+- Proporcje wideo **21:9** i **5:2**; przełącznik **Native audio** dla modeli xAI
+  (`generate_audio: false` = klip bez dźwięku).
+- **Publiczne linki** do obrazów i wideo z galerii (xAI Files API): przycisk z linkiem na karcie
+  artefaktu, karta zgody przed wysłaniem pliku, wybór wygaśnięcia (1 h – 30 dni / do odwołania),
+  kopiowanie i odwołanie.
+
+### Changed
+- Referencje wideo: do **14** na `grok-imagine-video-1.5` i do **7** na `grok-imagine-video`
+  (wcześniej 3, tylko 1.5). Klip z referencjami jest ograniczony do 720p (na bazowym też do 10 s,
+  a kadru startowego nie da się z nimi łączyć — panel to sygnalizuje).
+- `grok-imagine-image-quality` zniknął z menu: xAI wyłącza go 2026-11-02 i przekierowuje na
+  `grok-imagine-image-2.0` z `quality: "low"` (taniej o $0.01/obraz). Stare ustawienia, zadania
+  i retry z tym id są przepisywane na 2.0 + `low` jawnie, przed wysłaniem.
+
+### Fixed
+- Tagi referencji wideo liczone od **`<IMAGE_0>`** (docs xAI), a gdy wysłano kadr startowy —
+  od `<IMAGE_1>`. Panel pokazywał `<IMAGE_1>` dla pierwszej referencji, więc prompt wskazywał
+  niewłaściwy obraz.
+- **Extend** na xAI był odrzucany przez walidację możliwości (bazowy model nie miał flagi
+  `video_extension`).
+
 ## [2.0.10] — 2026-09-22
 
 ### Fixed

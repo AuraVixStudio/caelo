@@ -65,10 +65,22 @@ class VideoGenerationRequest:
     video: Optional[str] = None
     reference_images: tuple[str, ...] = ()
     reference_roles: tuple[str, ...] = ()
+    # xAI grok-imagine-video-1.5: przypięte klatki ({"image": data-URI, "timestamp_s": s})
+    # i głosy presetowe (id z rosteru TTS) dla mówiących postaci.
+    keyframes: tuple[dict[str, Any], ...] = ()
+    reference_audios: tuple[str, ...] = ()
     generate_audio: bool = True
     seed: Optional[int] = None
     negative_prompt: Optional[str] = None
     previous_interaction_id: Optional[str] = None
+
+
+def keyframes_from_params(params: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Parametry zadania (`keyframe_images` + `keyframe_times`) → wpisy `keyframes`."""
+    images = params.get("keyframe_images") or ()
+    times = params.get("keyframe_times") or ()
+    return tuple({"image": image, "timestamp_s": float(ts)}
+                 for image, ts in zip(images, times) if image and ts is not None)
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,8 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+import config  # type: ignore
+
 from caelo_core import validation as V
 from caelo_core.genjobs import CostLimitExceeded, GenJobQueueFull
 from caelo_core.models.capabilities import CapabilityError
@@ -64,6 +66,9 @@ class ImageJobReq(BaseModel):
     @model_validator(mode="after")
     def _check_op(self) -> "ImageJobReq":
         if self.provider == "xai":
+            # `grok-imagine-image-quality` (wycofany 2026-11-02) → 2.0 + low, także dla
+            # starych ustawień renderera i retry; jawna jakość użytkownika zostaje.
+            self.model, self.quality = config.normalize_image_model(self.model, self.quality)
             descriptor = get_model_registry().resolve(
                 "xai", "image", self.model or None
             )
@@ -95,11 +100,16 @@ class VideoJobReq(BaseModel):
     image: Optional[str] = None  # data-URI: kadr startowy dla img2video
     last_image: Optional[str] = None  # drugi kadr dla interpolacji Veo
     video: Optional[str] = None  # https URL lub data:video — źródło dla edit/extend
-    # Reference-to-video (docs 2026-08, grok-imagine-video-1.5): do 3 obrazów, które
-    # przenoszą postać/ubranie/przedmiot do klipu BEZ blokowania pierwszej klatki.
-    # Ortogonalne do `image` (kadr startowy) — mogą wystąpić razem.
+    # Reference-to-video (xAI: 1.5 do 14, bazowy do 7 — limit per model w rejestrze): obrazy
+    # przenoszą postać/produkt/miejsce do klipu BEZ blokowania pierwszej klatki. Na 1.5
+    # ortogonalne do `image` (kadr startowy) — mogą wystąpić razem; bazowy tego nie łączy.
     reference_images: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS)
     reference_roles: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_REFS)
+    # xAI 1.5: głosy presetowe (id z rosteru TTS) z lip-synciem, w promptcie <AUDIO_0>…
+    reference_audios: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_VOICES)
+    # xAI 1.5: przypięte klatki pośrednie — dwie równoległe listy (data-URI + sekunda).
+    keyframe_images: List[str] = Field(default_factory=list, max_length=V.MAX_VIDEO_KEYFRAMES)
+    keyframe_times: List[float] = Field(default_factory=list, max_length=V.MAX_VIDEO_KEYFRAMES)
     generate_audio: bool = True
     seed: Optional[int] = Field(None, ge=0, le=4_294_967_295)
     negative_prompt: Optional[str] = Field(None, max_length=V.MAX_PROMPT)
@@ -126,10 +136,15 @@ class VideoJobReq(BaseModel):
     def _check_video(cls, v: Optional[str]) -> Optional[str]:
         return V.validate_video_ref(v) if v else v
 
-    @field_validator("reference_images")
+    @field_validator("reference_images", "keyframe_images")
     @classmethod
     def _check_reference_images(cls, v: List[str]) -> List[str]:
         return [V.validate_image_uri(u) for u in v]
+
+    @field_validator("reference_audios")
+    @classmethod
+    def _check_voices(cls, v: List[str]) -> List[str]:
+        return [str(x).strip().lower() for x in v if str(x).strip()]
 
     @model_validator(mode="after")
     def _check_op(self) -> "VideoJobReq":
@@ -152,8 +167,20 @@ class VideoJobReq(BaseModel):
             raise ValueError("first_last_frame requires a starting and ending image")
         if self.op != "first_last_frame" and self.last_image:
             raise ValueError(f"{self.op} takes no ending image")
-        if self.op == "reference_to_video" and not self.reference_images:
-            raise ValueError("reference_to_video requires reference images")
+        if self.op == "reference_to_video" and not (self.reference_images or self.reference_audios):
+            raise ValueError("reference_to_video requires reference images or voices")
+        if len(self.keyframe_images) != len(self.keyframe_times):
+            raise ValueError("each keyframe needs exactly one timestamp")
+        if self.keyframe_times:
+            # docs.x.ai: siatka 1/3 s, ściśle wewnątrz klipu, odstęp ≥ 1/3 s.
+            thirds = [round(t * 3) for t in self.keyframe_times]
+            if any(abs(t * 3 - q) > 1e-6 for t, q in zip(self.keyframe_times, thirds)):
+                raise ValueError("keyframe timestamps must sit on a 1/3-second grid")
+            if any(q <= 0 or q >= self.duration * 3 for q in thirds):
+                raise ValueError("keyframe timestamps must fall strictly inside the clip")
+            ordered = sorted(thirds)
+            if any(b - a < 1 for a, b in zip(ordered, ordered[1:])):
+                raise ValueError("keyframes must be at least 1/3 s apart")
         if self.op in ("edit", "extend"):
             if not self.video:
                 raise ValueError(f"{self.op} requires a source video")
@@ -161,8 +188,8 @@ class VideoJobReq(BaseModel):
                 raise ValueError(f"{self.op} takes no source image")
             # /videos/edits i /videos/extensions nie znają `reference_images` — nie
             # przepuszczaj ich cicho, bo user straciłby je bez śladu.
-            if self.reference_images:
-                raise ValueError(f"{self.op} takes no reference images")
+            if self.reference_images or self.reference_audios or self.keyframe_images:
+                raise ValueError(f"{self.op} takes no reference images, voices or keyframes")
             if self.op == "extend" and self.duration > V.MAX_EXTEND_DURATION:
                 raise ValueError(f"extend duration must be <= {V.MAX_EXTEND_DURATION}s")
         elif self.video:

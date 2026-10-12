@@ -186,7 +186,7 @@ export function Image({ conn }: { conn: Conn }) {
       actions={<Badge tone={editing ? 'accent' : 'neutral'}>{editing ? `Edit · ${images.length}/${maxRefs}` : 'Generate'}</Badge>}>
       <div onDrop={onDrop} onDragOver={(e) => e.preventDefault()}
         className="mb-4 min-h-28 rounded-xl border border-dashed border-border-strong bg-surface/40 p-4">
-        {images.length ? <ReferenceLibrary items={images} max={maxRefs} onChange={setImages}
+        {images.length ? <ReferenceLibrary items={images} max={maxRefs} onChange={setImages} tagStart={1}
           options={referenceRoleOptions} /> :
           <p className="py-8 text-center text-sm text-muted">Drop reference images here. This model accepts up to {maxRefs}.</p>}
       </div>
